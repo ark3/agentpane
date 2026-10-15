@@ -535,6 +535,17 @@ timed.  60s is what `agentpane-new-session''s synchronous attach already
 allowed, where waiting blocks Emacs; here it blocks nothing, and a hung
 helper costs only a minute before a refused second send is accepted again.")
 
+(defvar agentpane--absorbed (make-hash-table :test #'eq :weakness 'key)
+  "Each transcript buffer a merge has killed, mapped to the buffer that
+absorbed it (`agentpane--absorb'), for the replies that follow it there;
+see `agentpane--request'.")
+
+(defun agentpane--absorber (buffer)
+  "BUFFER, or, where a merge has killed it, the buffer that absorbed it,
+or the one that absorbed that in turn."
+  (let ((into (gethash buffer agentpane--absorbed)))
+    (if into (agentpane--absorber into) buffer)))
+
 (defun agentpane--request (method params callback &optional always failed timeout unsent erred replied)
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
 Return at once; CALLBACK runs later with the result, in this buffer, unless
@@ -650,6 +661,14 @@ since: for a command -- attach, prompt, abort -- whose reply is not a view
 that the later request's replaces.  Such a request still supersedes every
 earlier one, so a preview refetch still in flight when the buffer attaches
 is not drawn over the live transcript.
+With ALWAYS `follow', a buffer killed by a merge since passes the answer
+on, CALLBACK, FAILED and ERRED running in the buffer that absorbed it
+\(`agentpane--absorber'): for a request whose state that buffer takes
+over, as it takes a fork in flight and what a stop gives back
+\(`agentpane--absorb', OW-larele).  Every other request's answer is
+dropped with its buffer, whatever killed it: following, one would act on
+state the survivor holds for itself, a prompt's answer clearing the
+survivor's own `agentpane--sending'.
 
 Asynchronous because a synchronous `jsonrpc-request' stalled when another
 one nested inside it, as the picker refetch that `sessions/changed' runs
@@ -658,6 +677,8 @@ jsonrpc.el 1.0.29 both replies were in by 0.3s and the outer call still
 returned only at its own timeout's deadline, 10s later (OW-bonode; the
 ert tests `agentpane-test-nested-refetch-*' provoke it)."
   (let* ((buffer (current-buffer))
+         (here (lambda ()
+                 (if (eq always 'follow) (agentpane--absorber buffer) buffer)))
          (answered nil)
          entry
          id
@@ -672,11 +693,12 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                    ;; Only the server's refusal says it reached no backend.
                    (when (and unsent (plist-get (plist-get error :data) :status))
                      (funcall unsent))
-                   (agentpane--failed buffer failed)
-                   (when (and erred (buffer-live-p buffer))
-                     (with-current-buffer buffer
-                       (when (or always (eql id agentpane--latest-request))
-                         (funcall erred (plist-get error :data))))))))
+                   (let ((buffer (funcall here)))
+                     (agentpane--failed buffer failed)
+                     (when (and erred (buffer-live-p buffer))
+                       (with-current-buffer buffer
+                         (when (or always (eql id agentpane--latest-request))
+                           (funcall erred (plist-get error :data)))))))))
          connection)
     (setq id (car (agentpane--failing
                    (lambda ()
@@ -689,7 +711,7 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                                        (lambda ()
                                          (when (funcall answer)
                                            (message "agentpane: %s failed: the helper exited" method)
-                                           (agentpane--failed buffer failed)))))
+                                           (agentpane--failed (funcall here) failed)))))
                      (push entry agentpane--requests-out)
                      ;; Through a helper that has exited, nothing: it
                      ;; reached no backend, and the teardown answers.
@@ -704,10 +726,11 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                         (lambda (result)
                           (when (funcall answer)
                             (when replied (funcall replied result))
-                            (when (buffer-live-p buffer)
-                              (with-current-buffer buffer
-                                (when (or always (eql id agentpane--latest-request))
-                                  (agentpane--failing failed (lambda () (funcall callback result))))))))
+                            (let ((buffer (funcall here)))
+                              (when (buffer-live-p buffer)
+                                (with-current-buffer buffer
+                                  (when (or always (eql id agentpane--latest-request))
+                                    (agentpane--failing failed (lambda () (funcall callback result)))))))))
                         :error-fn
                         (lambda (error)
                           ;; jsonrpc.el's "Server died" is no reply: the
@@ -718,7 +741,7 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                         (lambda ()
                           (when (funcall answer)
                             (message "agentpane: %s timed out" method)
-                            (agentpane--failed buffer failed)))))))))
+                            (agentpane--failed (funcall here) failed)))))))))
     (when id
       (setq agentpane--latest-request id))))
 
@@ -2593,6 +2616,7 @@ back to the session id keeps the old one."
 (defvar agentpane--turns-done)
 (defvar agentpane--editing)
 (defvar agentpane--held-queued)
+(defvar agentpane--forking)
 
 (defun agentpane--absorb (other)
   "Take the transcript buffer OTHER's draft, composer and windows into this
@@ -2637,10 +2661,25 @@ sent, for the next send to prompt this buffer's session with.
 Cancelling the edit puts both back; a fork drops both, where the
 browser's edit gives the draft it displaced back on every exit
 \(OW-kijuju), which OW-hakeno brings here.
-Requests of OTHER's still in flight are dropped with it, as any killed
-buffer's are; a prompt of its own that went out leaves its text in this
-buffer's draft, and the text of an edit's send goes on the kill ring
-with the dropped edit, OTHER's region holding it until the send answers.
+A fork OTHER has in flight is this buffer's from then on, and so is any
+stop it has in flight (`agentpane-abort'): their requests answer here,
+following OTHER (`agentpane--request'), and this buffer counts as forking
+until the fork answers, refusing every attach and a second fork as OTHER
+did (`agentpane--refuse-forking').  Dropped with OTHER, as until
+OW-larele, the fork's reply left a fork the server had made with no
+buffer on it, and an edit's text never reached the fork; the stop's
+lost what it took out of Pi's queue.  On Pi this buffer, holding
+OTHER's handle, is in the parent's position when the fork answers, and
+is the one its reply detaches.
+Every other request of OTHER's still in flight is dropped with it, as
+any killed buffer's is: a prompt of its own that went out leaves its
+text in this buffer's draft.  The text of an edit's send goes on the
+kill ring with the dropped edit, OTHER's region holding it until the
+send answers; once that send has asked for its fork points, its fork
+follows here and is prompted with the text too, and before then, its
+attach still out, it goes no further.  Nor is a close OTHER has in
+flight taken: its answer is dropped, and this buffer holds the handle
+until the `session/detached' the close usually brings (D26).
 A window that showed OTHER shows this one, and OTHER's kill sends no
 `sessions/detach', which would silence the session this one now holds.
 This one takes OTHER's attach tokens instead (`agentpane--attach-earlier'),
@@ -2704,8 +2743,11 @@ its text is on the kill ring" (buffer-name other)))
     (setq agentpane--attach-earlier
           (append agentpane--attach-earlier
                   (with-current-buffer other (agentpane--tokens-sent))))
+    (when (buffer-local-value 'agentpane--forking other)
+      (setq agentpane--forking t))
     (with-current-buffer other
       (remove-hook 'kill-buffer-hook #'agentpane--detach t))
+    (puthash other buffer agentpane--absorbed)
     (kill-buffer other)))
 
 (defun agentpane--set-status (params)
@@ -3299,7 +3341,8 @@ any draft, and a fork drops that draft (OW-kijuju).
 - A plain prompt's answer clears its text, and they take its place; one
   that fails leaves its text, and they land ahead of it.
 - A merge that kills this buffer hands them to the survivor, where they
-  wait on its edit or prompt in flight as its own do (`agentpane--absorb').
+  wait on its edit or prompt in flight as its own do, and a stop still
+  in flight answers there (`agentpane--absorb').
 
 They belong to this buffer, the one whose session was stopped.  The
 browser has one composer for every session, so its words follow the
@@ -3323,7 +3366,7 @@ buffer."
                           (setq agentpane--held-queued
                                 (append agentpane--held-queued (plist-get answer :queued) nil))
                           (agentpane--release-queued))
-                        t)))
+                        'follow)))
 
 (defun agentpane-compact ()
   "Compact this buffer's session through `sessions/compact'.
@@ -3652,7 +3695,8 @@ status has named one yet, it prompts for nothing and says so."
                              #'ignore t))))))
 
 (defvar-local agentpane--forking nil
-  "Non-nil while a fork this buffer began is in flight.")
+  "Non-nil while a fork this buffer began, or a buffer it absorbed did
+\(`agentpane--absorb'), is in flight.")
 
 (defun agentpane-fork ()
   "Fork this buffer's session at the user message at point, and open the fork
@@ -3758,12 +3802,14 @@ is in flight a second press says so and sends nothing."
          (message "agentpane: the transcript now shows the live session; \
 press f again at the message to fork"))))))
 
-(defun agentpane--fork-point (index then &optional failed what)
+(defun agentpane--fork-point (index then &optional failed what follow)
   "Fetch this attached buffer's fork points, and call THEN with the one
 naming INDEX; when none does, call FAILED, if given, and say the message,
 which WHAT names, \"the message at point\" when nil, is not forkable.
 While a close is in flight, call FAILED and signal a user error instead,
 sparing the user a refused request; see `agentpane--closing'.
+With FOLLOW, the answer follows this buffer into one that absorbs it
+meanwhile (`agentpane--request'), as a fork's chain does.
 See `agentpane-fork'."
   (agentpane--refuse-closing failed)
   (agentpane--request
@@ -3774,13 +3820,16 @@ See `agentpane-fork'."
            (funcall then point)
          (when failed (funcall failed))
          (message "agentpane: %s is not forkable" (or what "the message at point")))))
-   t failed agentpane--spawn-timeout))
+   (if follow 'follow t) failed agentpane--spawn-timeout))
 
 (defun agentpane--fork-points (index &optional then failed)
   "Fork this attached buffer's session at the fork point naming INDEX, and
 call THEN, if given, in the fork's buffer once its attach has gone out,
 or FAILED, if given, here should the points, the abort or the fork fail,
-or no point name INDEX.  See `agentpane-fork'."
+or no point name INDEX.  \"Here\" is the buffer that absorbs this one,
+should a merge kill it meanwhile, which takes the fork over with
+`agentpane--forking', so every request along the way follows it there
+\(`agentpane--absorb').  See `agentpane-fork'."
   (let* ((parent (agentpane--ref agentpane--session))
          (pi-backend (equal (plist-get parent :backend) "pi"))
          (window (get-buffer-window))
@@ -3807,9 +3856,9 @@ or no point name INDEX.  See `agentpane-fork'."
              ;; (`agentpane-abort', OW-seleri).
              (agentpane--request 'sessions/abort (list :session parent)
                                  (lambda (_) (agentpane--fork-at parent point window failed then))
-                                 t failed))
+                                 'follow failed))
          (agentpane--fork-at parent point window failed then)))
-     failed)))
+     failed nil t)))
 
 (defun agentpane--fork-at (parent point window failed &optional then)
   "Fork the session PARENT at the fork POINT, and open the fork attached in a
@@ -3832,7 +3881,7 @@ gone out.  See `agentpane-fork'."
        (if (window-live-p window)
            (set-window-buffer window buffer)
          (pop-to-buffer buffer '(display-buffer-same-window)))))
-   t failed agentpane--spawn-timeout))
+   'follow failed agentpane--spawn-timeout))
 
 (defun agentpane-edit ()
   "Take the user message at point back into the prompt region to edit, as the

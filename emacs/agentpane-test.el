@@ -1595,6 +1595,114 @@ attach, the snapshot that merged being drawn there."
       (with-current-buffer previewing
         (should (equal (agentpane-test--indices) '(3)))))))
 
+(defun agentpane-test--fork-across-a-merge (backend method)
+  "Fork a BACKEND session from a buffer holding it under the handle \"h1\",
+at its first message, holding METHOD, a request of the fork's chain, merge
+that buffer into a previewing one, and answer METHOD.  A Pi session is
+streaming, so its chain stops the turn before it forks.
+The fork's buffer is made, attached; the survivor counts as forking
+until then, refusing an attach, and on Pi is detached by the reply, in
+the parent's position, holding the parent's handle."
+  (agentpane-test--with-helper
+    (agentpane-test--merging
+      (let ((parent (list :backend backend :id "real-2"))
+            (fork (list :backend backend :id "fork-1"))
+            (pi-backend (equal backend "pi")))
+        (setq points [(:id "turn-0" :text "Fix the bug" :index 0)]
+              forked fork
+              hold (list method)
+              attached (list :ref parent :handle "h1"))
+        (with-current-buffer holder
+          (agentpane--hold-ref parent)
+          (setq agentpane--attached agentpane--connection
+                agentpane--streaming pi-backend)
+          (agentpane--draw agentpane-test--nodes)
+          (agentpane-test--goto-index 0)
+          (agentpane-fork))
+        (should (assq method sent))
+        (with-current-buffer previewing (agentpane--attach))
+        (should-not (buffer-live-p holder))
+        (with-current-buffer previewing
+          (should agentpane--forking)
+          (should-error (agentpane--attach) :type 'user-error))
+        (setq attached (list :ref fork :handle "h2")
+              sent nil)
+        (funcall (cdr (pop held)) t)
+        (let ((buffer (agentpane--buffer-for fork)))
+          (should buffer)
+          (with-current-buffer buffer
+            (should (agentpane--attached-p))
+            (should (equal agentpane--handle "h2"))))
+        (with-current-buffer previewing
+          (should-not agentpane--forking)
+          (should (eq (not (agentpane--attached-p)) pi-backend)))
+        (should (equal (cdr (assq 'sessions/detach sent))
+                       (and pi-backend `(:session ,parent :handle "h1" :tokens [1]))))))))
+
+(ert-deftest agentpane-test-fork-in-flight-follows-a-merge ()
+  "A fork sent from a buffer that a merge then kills is answered in the
+buffer that absorbed it, which opens the fork attached in a buffer of its
+own: a fork the server made has a buffer on it (OW-larele).  So is a
+fork whose points were still out, the survivor sending the fork."
+  (agentpane-test--fork-across-a-merge "claude" 'sessions/fork)
+  (agentpane-test--fork-across-a-merge "claude" 'sessions/forkPoints))
+
+(ert-deftest agentpane-test-pi-fork-in-flight-follows-a-merge-onto-the-parent ()
+  "A Pi fork sent, or the stop before it still out, from a buffer that a
+merge then kills, is answered in the buffer that absorbed it, which holds
+the parent's handle and so is the parent its reply detaches (OW-larele)."
+  (agentpane-test--fork-across-a-merge "pi" 'sessions/fork)
+  (agentpane-test--fork-across-a-merge "pi" 'sessions/abort))
+
+(ert-deftest agentpane-test-stop-in-flight-follows-a-merge ()
+  "What a stop takes out of Pi's queue, answering after a merge has killed
+the buffer that sent it, lands in the prompt region of the buffer that
+absorbed it, ahead of its draft, rather than going with the killed one
+\(OW-larele).  Through `agentpane--request' over a stub jsonrpc, which
+runs no CALLBACK in a killed buffer but passes a following one's on."
+  (let ((request (symbol-function 'agentpane--request))
+        (calls nil))
+    (agentpane-test--with-helper
+      (agentpane-test--merging
+        (cl-letf (((symbol-function 'agentpane--request) request)
+                  ((symbol-function 'jsonrpc-async-request)
+                   (lambda (_conn method _params &rest args)
+                     (push (cons method args) calls)
+                     (list 1 nil))))
+          (with-current-buffer holder
+            (setq agentpane--attached agentpane--connection)
+            (agentpane-abort))
+          (with-current-buffer previewing
+            (goto-char (point-max))
+            (insert "mine")
+            (agentpane--attach))
+          (agentpane--on-notification
+           agentpane--connection 'session/snapshot
+           (list :session canonical :handle "h1" :token 1 :nodes []))
+          (should-not (buffer-live-p holder))
+          (funcall (plist-get (cdr (assq 'sessions/abort calls)) :success-fn)
+                   '(:queued ["steered"]))
+          (with-current-buffer previewing
+            (should (equal (agentpane-test--draft) "steered\n\nmine"))))))))
+
+(ert-deftest agentpane-test-fork-failing-after-a-merge-frees-the-survivor ()
+  "A fork that fails after a merge has killed the buffer that sent it
+frees the buffer that absorbed it, which counted as forking, so it can
+attach and fork again (OW-larele)."
+  (agentpane-test--with-helper
+    (agentpane-test--merging
+      (setq points [(:id "turn-0" :text "Fix the bug" :index 0)]
+            hold '(sessions/fork))
+      (with-current-buffer holder
+        (setq agentpane--attached agentpane--connection)
+        (agentpane--draw agentpane-test--nodes)
+        (agentpane-test--goto-index 0)
+        (agentpane-fork))
+      (with-current-buffer previewing (agentpane--attach))
+      (should (buffer-local-value 'agentpane--forking previewing))
+      (funcall (cdr (pop held)) nil)
+      (should-not (buffer-local-value 'agentpane--forking previewing)))))
+
 (ert-deftest agentpane-test-attach-now-onto-a-held-handle-leaves-one-buffer ()
   "A synchronous attach whose snapshot, handled while it waits, comes under
 the handle another buffer holds, carrying the token this one's attach carried,
@@ -2565,8 +2673,10 @@ error's `data', to fail it so and then run its ERRED with that plist, as
 as the server's refusal does (OW-hiliti).  ERRED runs with nil for a
 failure by nil.  A reply runs the request's REPLIED with it before its
 CALLBACK (OW-kejire).  Either way the answer runs in the buffer that sent the
-request, and to a buffer since killed it runs only UNSENT and REPLIED, as
-`agentpane--request' does.  Every buffer BODY made is killed afterwards."
+request, or, for a request sent with ALWAYS `follow', the buffer that has
+absorbed it since (`agentpane--absorber'), and to a buffer since killed it
+runs only UNSENT and REPLIED, as `agentpane--request' does.  Every buffer
+BODY made is killed afterwards."
   (declare (indent 2))
   `(let ((sent nil)
          (said nil)
@@ -2584,7 +2694,7 @@ request, and to a buffer since killed it runs only UNSENT and REPLIED, as
                   (cl-pushnew (current-buffer) snapshotted)
                   (apply attach-by args)))
                ((symbol-function 'agentpane--request)
-                (lambda (method params callback &optional _always failed _timeout unsent erred replied)
+                (lambda (method params callback &optional always failed _timeout unsent erred replied)
                   (push (cons method params) sent)
                   (when (eq method 'sessions/attach)
                     (setq snapshotted (delq (current-buffer) snapshotted)))
@@ -2605,17 +2715,18 @@ request, and to a buffer since killed it runs only UNSENT and REPLIED, as
                                             :handle (plist-get reply :handle)
                                             :token (plist-get params :token)
                                             :nodes agentpane-test--nodes)))
-                                   (if (and ok (atom ok))
-                                       (progn (when replied (funcall replied reply))
-                                              (when (buffer-live-p from)
-                                                (with-current-buffer from
-                                                  (funcall callback reply))))
-                                     (when (and unsent (plist-get ok :status))
-                                       (funcall unsent))
-                                     (when (buffer-live-p from)
-                                       (with-current-buffer from
-                                         (when failed (funcall failed))
-                                         (when erred (funcall erred ok))))))))
+                                   (let ((to (if (eq always 'follow) (agentpane--absorber from) from)))
+                                     (if (and ok (atom ok))
+                                         (progn (when replied (funcall replied reply))
+                                                (when (buffer-live-p to)
+                                                  (with-current-buffer to
+                                                    (funcall callback reply))))
+                                       (when (and unsent (plist-get ok :status))
+                                         (funcall unsent))
+                                       (when (buffer-live-p to)
+                                         (with-current-buffer to
+                                           (when failed (funcall failed))
+                                           (when erred (funcall erred ok)))))))))
                     (if (memq method hold)
                         (setq held (append held (list (cons method answer))))
                       (funcall answer t)))))
