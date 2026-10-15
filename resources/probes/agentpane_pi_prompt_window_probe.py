@@ -171,10 +171,12 @@ def summarise(event: dict[str, Any]) -> dict[str, Any]:
 class PiRpc:
     """Pi on raw pipes, every stdout chunk stamped on the probe's clock."""
 
-    def __init__(self, pi: str, model: str, home: Path, workspace: Path) -> None:
+    def __init__(
+        self, pi: str, model: str, home: Path, workspace: Path, session_args: tuple[str, ...] = ("--no-session",)
+    ) -> None:
         self.t0 = time.monotonic()
         self.proc = subprocess.Popen(
-            [pi, "--mode", "rpc", "--no-session", "--model", model],
+            [pi, "--mode", "rpc", *session_args, "--model", model],
             cwd=workspace,
             env=dict(os.environ, PI_CODING_AGENT_DIR=str(home)),
             stdin=subprocess.PIPE,

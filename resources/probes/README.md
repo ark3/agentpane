@@ -154,6 +154,25 @@ Costs tokens: about ten one-word model calls for part `rpc` and six for part `ag
 
 Verified with: `pi` 1.2.0 on the home server, 2026-10-14, five runs, in `docs/MANUAL_TESTING.md`, "A second Pi prompt sent before the first's `agent_start` is refused, and an extension command's is answered with nothing (OW-kokotu)".
 
+## `agentpane_pi_fork_first_turn_probe.py`
+
+Proves: **when a new Pi session's file and a fork's file first reach disk, and what Pi, and agentpane's fork route, answer a fork sent before the first assistant reply** (OW-tigaye).
+
+```bash
+python3 agentpane_pi_fork_first_turn_probe.py                   # both parts
+python3 agentpane_pi_fork_first_turn_probe.py --part rpc        # Pi alone, no server
+python3 agentpane_pi_fork_first_turn_probe.py --part agentpane --skip-build
+```
+
+Part `rpc` speaks to `pi --mode rpc --session-dir <scratch> --model <ref>` directly, not through `sbox`, through `PiRpc` from `agentpane_pi_prompt_window_probe.py`, and stats the session file from the reader thread as each stdout line is parsed.
+Before any prompt it sends `fork` at an id no entry has and at each setup entry `get_entries` names, and `clone`; then it forks the first turn at its first user message from the reader thread at the thirtieth `text_delta`, listing the session directory at the `fork` response; then it runs two short turns on that fork and forks at the second user message and, on the branch that leaves, at the first.
+Part `agentpane` drives the built server on the production spawn chain, with the prompt-window probe's teeing `pi` shim: a `fork` at an id no entry has before any prompt, then a `fork` at the first user message once the first turn has streamed 300 characters, the returned ref's file stat'ed as the response is read, then an attach of the fork and a short turn on it.
+The Emacs helper's `sessions/fork` passes the route's status through (`toRpcError` in `src/emacs/helper.ts`), so it is not driven.
+
+The configuration is the prompt-window probe's, so the server's session index, which walks `~/.pi/agent/sessions` whatever `PI_CODING_AGENT_DIR` says, cannot see the run's files, and nothing here asks it.
+It records rather than asserts, and exits non-zero only when a part could not run or cleanup failed.
+Costs tokens: two long turns cut a few hundred characters in, and three one-word turns.
+
 ## `agentpane_live_support.py`
 
 Not a probe. The machinery both smoke checks share: the HTTP/SSE client, the
