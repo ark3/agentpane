@@ -1,5 +1,6 @@
 ---
 labels: [question]
+closed: done
 ---
 
 # Should a Pi prompt an extension command handled clear the session's held turn error, given that some such commands start a turn and some start none
@@ -29,3 +30,12 @@ That moves the clear from `SessionManager.submit` to wherever a turn's start is 
 
 The owner decides between keeping today's rule (clear on admission, handled or not), clearing on a turn's start, or another, and the decision is recorded in `docs/DESIGN.md` beside the decision that already governs the held error.
 Whatever the answer, if it changes behaviour a `defect` or `change` card carrying it is filed, with a test in `src/server/http/app.test.ts` "what a client that connects late is told (OW-bipume)" that goes red first.
+
+## Close note
+
+The owner chose on 2026-10-15: a prompt the backend handled without starting a turn keeps the held error, full stop.
+Recorded in `docs/DESIGN.md` D3, the paragraph after the bullet list opening "A prompt the backend consumed without starting a turn for it", with why the alternatives were declined.
+The behaviour change, with its red-first test in `src/server/http/app.test.ts` "what a client that connects late is told (OW-bipume)", is OW-fakazi.
+Options weighed, from a dispatched reader's survey spot-checked at the source: (A) today's clear at every admission, which irrecoverably wipes the error a `/mcp` typed to investigate it was meant to explain; (B) clear at a turn's start, which must arm before `adapter.submit` because `ClaudeAdapter.submit` starts its turn itself and Codex's `turn/started` can beat `turn/start`'s reply, never fires for a D16 steer, and cannot tie a Pi `agent_start` to the command that caused it since, as of `pi 1.2.0`, the event carries nothing; (C, chosen) a handled prompt keeps the error, at the cost of a dismissal after an `/ask`-style command that starts its own turn; (D) a hybrid deferring a handled prompt's clear to the next turn start, about 40 lines in `session-manager.ts`, still wrong for a mid-turn `/followup` and for an unrelated extension's run.
+The deciding asymmetry: wrongly keeping costs one click, wrongly clearing loses the error for good, and on 2026-10-15 no extension installed on the home server (`~/.pi/agent/extensions`: `auto-read-agents-refs.ts`, `background-jobs.ts`) started a turn from a command; the work laptop's set was not checked.
+The survey also found held errors are raised mid-turn on all three backends, not only at a turn's end, so "how the last turn ended" is a loose description of what is held.
