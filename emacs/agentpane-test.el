@@ -2565,7 +2565,8 @@ error's `data', to fail it so and then run its ERRED with that plist, as
 as the server's refusal does (OW-hiliti).  ERRED runs with nil for a
 failure by nil.  A reply runs the request's REPLIED with it before its
 CALLBACK (OW-kejire).  Either way the answer runs in the buffer that sent the
-request.  Every buffer BODY made is killed afterwards."
+request, and to a buffer since killed it runs only UNSENT and REPLIED, as
+`agentpane--request' does.  Every buffer BODY made is killed afterwards."
   (declare (indent 2))
   `(let ((sent nil)
          (said nil)
@@ -2604,14 +2605,17 @@ request.  Every buffer BODY made is killed afterwards."
                                             :handle (plist-get reply :handle)
                                             :token (plist-get params :token)
                                             :nodes agentpane-test--nodes)))
-                                   (with-current-buffer from
-                                     (if (and ok (atom ok))
-                                         (progn (when replied (funcall replied reply))
-                                                (funcall callback reply))
-                                       (when (and unsent (plist-get ok :status))
-                                         (funcall unsent))
-                                       (when failed (funcall failed))
-                                       (when erred (funcall erred ok)))))))
+                                   (if (and ok (atom ok))
+                                       (progn (when replied (funcall replied reply))
+                                              (when (buffer-live-p from)
+                                                (with-current-buffer from
+                                                  (funcall callback reply))))
+                                     (when (and unsent (plist-get ok :status))
+                                       (funcall unsent))
+                                     (when (buffer-live-p from)
+                                       (with-current-buffer from
+                                         (when failed (funcall failed))
+                                         (when erred (funcall erred ok))))))))
                     (if (memq method hold)
                         (setq held (append held (list (cons method answer))))
                       (funcall answer t)))))
