@@ -1948,7 +1948,7 @@ the two edits displaced, which come back with them (OW-seleri, OW-hakeno)."
           (should-not agentpane--editing)
           (should (equal (agentpane-test--draft) "steered here\n\nsteered\n\ntheirs")))))))
 
-(ert-deftest agentpane-test-edit-send-that-merges-leaves-no-draft-to-prompt ()
+(ert-deftest agentpane-test-edit-send-that-merges-gives-the-others-draft-back ()
   "An edit sent from a buffer only previewed attaches first, and when that
 attach's reply merges the buffer holding its handle into this one, the
 other's draft goes with the edit, never into the text the fork is prompted
@@ -3467,6 +3467,31 @@ prompt -- frees the buffer, so the next send goes out."
       (setq hold nil sent nil)
       (agentpane-send)
       (should (assq 'sessions/forkPoints sent)))))
+
+(ert-deftest agentpane-test-edit-send-failed-keeps-the-displaced-draft ()
+  "An edit's send that fails -- its fork points, the fork, or the fork's
+prompt -- leaves the edit open, the edited text in the prompt region and
+the draft it displaced still the edit's, so Cancel puts back exactly that
+draft, once (OW-hakeno)."
+  (dolist (how '(sessions/forkPoints sessions/fork sessions/prompt))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0)]
+          '(:backend "codex" :id "t2")
+        (agentpane-test--with-session '(:backend "codex" :id "t1")
+          (agentpane--draw agentpane-test--image-nodes)
+          (setq agentpane--attached 'connection)
+          (goto-char (point-max))
+          (insert "a draft")
+          (agentpane-test--goto-index 0)
+          (agentpane-edit)
+          (setq hold (list how))
+          (agentpane-send)
+          (funcall (cdr (pop held)) nil)
+          (should agentpane--editing)
+          (should (equal (agentpane-test--draft) "Fix the bug"))
+          (agentpane-cancel-edit)
+          (should (equal (agentpane-test--draft) "a draft")))))))
 
 (ert-deftest agentpane-test-edit-send-freed-when-the-fork-buffer-is-killed ()
   "Killing the fork's buffer while its attach is in flight, the fork having

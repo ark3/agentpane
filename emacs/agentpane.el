@@ -3108,10 +3108,10 @@ order the stops answered, waiting for the prompt region to hold no edit
 and no prompt in flight; see `agentpane-abort'.")
 
 (defvar-local agentpane--displaced nil
-  "The draft an edit that ended other than by `agentpane-cancel-edit'
-displaced, waiting, as `agentpane--held-queued' waits, for the prompt
-region to hold no edit and no prompt in flight; nil when there is none.
-See `agentpane--send-edit' (OW-hakeno).")
+  "The draft displaced by an edit whose send ended it, the fork's prompt
+having answered, waiting, as `agentpane--held-queued' waits, for the
+prompt region to hold no edit and no prompt in flight; nil when there is
+none.  See `agentpane--send-edit' (OW-hakeno).")
 
 (defun agentpane--with-queued (queued draft)
   "DRAFT once QUEUED, prompts a stop took out of Pi's queue (D16), come back
@@ -3943,11 +3943,13 @@ Pressed on another message while an edit is open, the edit moves there,
 and the draft put back on abandoning it is still the one the first press
 displaced, as in the browser (OW-bigotu).
 
-No edit opens while a send from this buffer is in flight, its own edit's
-included, and the echo area says so: the region holds the text that send
-is taking, which an edit would displace for Cancel or the fork to put
-back already sent, as the browser's `startEdit' refuses (OW-kijuju,
-OW-hakeno).  Refused where the edit opens, once the points answer, rather
+No edit opens while a send from this buffer or its composer is in
+flight, its own edit's included, and the echo area says so, as the
+browser's `startEdit' refuses (OW-kijuju, OW-hakeno): the edit would
+displace whatever the region holds then, for Cancel or the fork to put
+back, and that text may be the very prompt on its way, or an edit whose
+send is still out, which that send ends only while it is the edit it
+sent.  Refused where the edit opens, once the points answer, rather
 than at the press, since a send can go out while they are fetched."
   (interactive)
   (when agentpane--forking
