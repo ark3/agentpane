@@ -407,6 +407,13 @@ export function createController(
 	let disposed = false;
 	let started = false;
 	let selectionIntent = 0;
+	/**
+	 * The selection intent the `"attaching"` on the view was published under:
+	 * `attachAndSelect` and `create`, its only writers, set it as they write it,
+	 * and `publish` returns `busy` to idle once a newer intent ends that claim
+	 * (OW-nizemu).
+	 */
+	let attachingIntent = 0;
 	let modelLoadStartedForSelection: number | null = null;
 	/**
 	 * This and every per-session set and map below are keyed by the session's
@@ -437,10 +444,23 @@ export function createController(
 	 * preview the mode no longer shows is dropped before anyone sees it, and so
 	 * is a preview failure no longer on its loading pane (OW-bilogo), and a
 	 * detached-loading pane gets its preview fetched.
+	 *
+	 * An `"attaching"` whose intent a newer selection ended goes back to idle
+	 * here too (OW-nizemu): the attach or create that wrote it clears `busy` in
+	 * its `finally` only while its intent stands, so once superseded nothing
+	 * else would, and "Opening session…" stayed up with `editDraft` refusing
+	 * until some later action reset `busy`. Settled here rather than at each
+	 * bump, so no bump can forget it, and riding the superseding gesture's own
+	 * publish rather than adding one: a publish of its own between `preview`'s
+	 * bump and its read becoming the click's asked a read of the row being
+	 * left, under the click's intent, whose `gone` cleared the selection. Every
+	 * bump publishes at once but the fork's, whose `busy` is its own
+	 * `"submitting"` by then.
 	 */
 	function publish(next: Partial<ControllerView>): void {
 		if (disposed) return;
 		view = { ...view, ...next };
+		if (view.busy === "attaching" && attachingIntent !== selectionIntent) view = { ...view, busy: "idle" };
 		const mode = paneMode(view);
 		if (view.preview !== null && mode !== "preview") view = { ...view, preview: null };
 		const failure = view.previewFailure;
@@ -619,22 +639,6 @@ export function createController(
 
 	function busyIs(value: ControllerView["busy"]): boolean {
 		return view.busy === value;
-	}
-
-	/**
-	 * The one way to start a new selection: bump the intent, and end the
-	 * `"attaching"` of the attach or create it supersedes (OW-nizemu). Only
-	 * those two write `"attaching"`, each under the intent current at the time,
-	 * so whatever reads `"attaching"` here belongs to an intent this bump ends --
-	 * and that operation's own `finally` clears `busy` only while its intent
-	 * stands, so nothing else would. A `preview` that superseded an attach left
-	 * "Opening session…" up and `editDraft` refusing until some later action
-	 * reset `busy`. Any other `busy` is some other operation's, and stays.
-	 */
-	function takeSelection(): number {
-		const intent = ++selectionIntent;
-		if (busyIs("attaching")) publish({ busy: "idle" });
-		return intent;
 	}
 
 	/**
@@ -1033,6 +1037,7 @@ export function createController(
 	}
 
 	async function attachAndSelect(ref: SessionRef, intent: number): Promise<void> {
+		attachingIntent = intent;
 		publish({ busy: "attaching", error: null, models: [], forkIndices: null, modelSetting: modelSettingForSession(ref), effortSetting: effortSettingForSession(ref) });
 		try {
 			const attached = await api.attach(ref);
@@ -1227,7 +1232,7 @@ export function createController(
 			publish({ draft: text });
 		},
 		async preview(ref) {
-			const intent = takeSelection();
+			const intent = ++selectionIntent;
 			// A session already attached in this client keeps its live transcript --
 			// there is nothing to preview, so just reselect it (no fetch, no re-attach).
 			if (viewOf(view.state, ref)) {
@@ -1246,7 +1251,8 @@ export function createController(
 		},
 		async create(cwd, backend) {
 			if (!validWorkspace(cwd)) return;
-			const intent = takeSelection();
+			const intent = ++selectionIntent;
+			attachingIntent = intent;
 			publish({ busy: "attaching", error: null });
 			try {
 				const created = await api.createSession({ cwd, backend });
@@ -1260,7 +1266,7 @@ export function createController(
 			}
 		},
 		async select(ref) {
-			await attachAndSelect(ref, takeSelection());
+			await attachAndSelect(ref, ++selectionIntent);
 		},
 		async setName(name) {
 			const selected = view.state.selected;
@@ -1517,7 +1523,7 @@ export function createController(
 				// `attachAndSelect` in its `else` branch with the selection never set
 				// (D17, OW-miyemo).
 				const takesSelection = intent === selectionIntent;
-				const forkIntent = takesSelection ? takeSelection() : intent;
+				const forkIntent = takesSelection ? ++selectionIntent : intent;
 				const attached = await api.attach(forked);
 				// Abandons the fork as well; see the note at `api.fork` for why that
 				// is deliberate.

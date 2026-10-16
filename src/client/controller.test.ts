@@ -553,6 +553,76 @@ describe("client controller", () => {
 		expect(api.editDraft).toHaveBeenCalledWith({ text: "current draft" });
 	});
 
+	/**
+	 * The clear rides the superseding gesture's own publish rather than one of
+	 * its own ahead of it: a publish while the pane is loading asks
+	 * `loadPreview`'s read, and one between the bump and `preview` making its
+	 * read the click's asked one for the row being left, under the click's
+	 * intent, whose `gone` cleared the selection (OW-nizemu).
+	 */
+	it("asks no read of the loading row a preview leaves when it supersedes an attach (OW-nizemu)", async () => {
+		const api = new FakeApi();
+		const previewedRef: SessionRef = { backend: "codex", id: "thread-previewed" };
+		const leftRead = deferred<SessionPreviewResponse>();
+		const previewing = deferred<SessionPreviewResponse>();
+		let leftReads = 0;
+		api.preview.mockImplementation(async (session) => {
+			if (session.id === previewedRef.id) return previewing.promise;
+			leftReads += 1;
+			if (leftReads === 1) return leftRead.promise;
+			throw gone();
+		});
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		await settle();
+		// A gap leaves the row detached-loading, with its read out.
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		const attaching = deferred<LiveSessionSummary>();
+		api.attach.mockReturnValueOnce(attaching.promise);
+		const selecting = controller.select(attachedRef);
+		// The read fails once the attach owns the intent, so it lands nowhere.
+		leftRead.reject(new Error("offline"));
+		await settle();
+
+		const previewingClick = controller.preview(previewedRef);
+		await settle();
+
+		expect(api.preview.mock.calls.map(([session]) => session.id)).toEqual([ref.id, previewedRef.id]);
+		expect(controller.getView().state.selected).toEqual(ref);
+		previewing.resolve({ ref: previewedRef, turns: [] });
+		await previewingClick;
+		expect(controller.getView().state.selected).toEqual(previewedRef);
+		expect(controller.getView().busy).toBe("idle");
+		attaching.resolve(summary(attachedRef));
+		await selecting;
+		expect(controller.getView().busy).toBe("idle");
+		controller.dispose();
+	});
+
+	/** The newer attach's own `"attaching"` survives the clear its bump makes (OW-nizemu). */
+	it("keeps busy on the newer attach's \"attaching\" until it replies when one select supersedes another (OW-nizemu)", async () => {
+		const api = new FakeApi();
+		const firstRef: SessionRef = { backend: "pi", id: "/sessions/first.jsonl" };
+		const secondRef: SessionRef = { backend: "codex", id: "thread-second" };
+		const first = deferred<LiveSessionSummary>();
+		const second = deferred<LiveSessionSummary>();
+		api.attach.mockImplementation((session) => (session.id === firstRef.id ? first.promise : second.promise));
+		const controller = createController(api);
+
+		const selectingFirst = controller.select(firstRef);
+		const selectingSecond = controller.select(secondRef);
+		expect(controller.getView().busy).toBe("attaching");
+		first.resolve(summary(firstRef));
+		await selectingFirst;
+		expect(controller.getView().busy).toBe("attaching");
+		second.resolve(summary(secondRef));
+		await selectingSecond;
+		expect(controller.getView().busy).toBe("idle");
+	});
+
 	it("keeps the draft when prompt submission fails", async () => {
 		const api = new FakeApi();
 		api.prompt.mockRejectedValue(new Error("offline"));
