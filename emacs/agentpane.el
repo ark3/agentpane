@@ -3941,7 +3941,14 @@ preview's index can name another message than the live one (OW-gekiki).
 
 Pressed on another message while an edit is open, the edit moves there,
 and the draft put back on abandoning it is still the one the first press
-displaced, as in the browser (OW-bigotu)."
+displaced, as in the browser (OW-bigotu).
+
+No edit opens while a send from this buffer is in flight, its own edit's
+included, and the echo area says so: the region holds the text that send
+is taking, which an edit would displace for Cancel or the fork to put
+back already sent, as the browser's `startEdit' refuses (OW-kijuju,
+OW-hakeno).  Refused where the edit opens, once the points answer, rather
+than at the press, since a send can go out while they are fetched."
   (interactive)
   (when agentpane--forking
     (user-error "A fork of this session is already in flight"))
@@ -3981,7 +3988,10 @@ send it into the fork: it waits in this buffer until the edit ends, then
 lands ahead of the draft the edit displaced, whether
 `agentpane-cancel-edit' puts that back or, once the fork's prompt has
 answered, the send gives it back -- in this buffer's region, not the
-fork's; see `agentpane-abort'."
+fork's; see `agentpane-abort'.
+An edit that does not open, its message not forkable or a send from this
+buffer in flight (`agentpane-edit'), stops nothing: the stop is the
+edit's."
   (interactive)
   (let ((composer (and (derived-mode-p 'agentpane-composer-mode) (current-buffer))))
     (with-current-buffer (agentpane--transcript)
@@ -4011,8 +4021,12 @@ KEY is the command's key and WHAT names the message, for the echo area."
    ((agentpane--attached-p)
     (agentpane--fork-point (plist-get node :index)
                            (lambda (_)
-                             (agentpane--start-edit node)
-                             (when then (funcall then)))
+                             ;; Here, not at the press; see `agentpane-edit'.
+                             (if agentpane--sending
+                                 (message "agentpane: a prompt from this buffer is still \
+being sent; press %s once it has answered to edit %s" key what)
+                               (agentpane--start-edit node)
+                               (when then (funcall then))))
                            nil what))
    (agentpane--attaching
     (user-error "This session is still attaching; press %s once it has" key))

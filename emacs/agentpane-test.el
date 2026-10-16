@@ -3391,25 +3391,62 @@ nothing, so one edit forks once (OW-kelede)."
     (should (= (agentpane-test--count 'sessions/prompt sent) 1))
     (should-not agentpane--sending)))
 
-(ert-deftest agentpane-test-edit-send-while-a-prompt-is-in-flight-forks-nothing ()
-  "An edit's send while a plain prompt from the buffer is still in flight
-says so and forks nothing, as a second plain send is refused."
-  (agentpane-test--with-helper
-    (agentpane-test--forking
-        [(:id "turn-0" :text "Fix the bug" :index 0)]
-        '(:backend "codex" :id "t2")
-      (agentpane-test--with-session '(:backend "codex" :id "t1")
-        (agentpane--draw agentpane-test--image-nodes)
-        (setq agentpane--attached 'connection)
-        (setq hold '(sessions/prompt))
-        (goto-char (point-max))
-        (insert "hello")
-        (agentpane-send)
-        (agentpane-test--goto-index 0)
-        (agentpane-edit)
-        (should agentpane--editing)
-        (should-error (agentpane-send) :type 'user-error)
-        (should-not (assq 'sessions/fork sent))))))
+(ert-deftest agentpane-test-edit-opens-nothing-while-a-send-is-in-flight ()
+  "No edit opens while a send from the buffer is in flight, whether pressed
+then or pressed before and its fork points answering then: the region
+holds the text that send is taking, which an edit would displace for
+Cancel or a fork to put back already sent (OW-kijuju, OW-hakeno).  Nor
+does `agentpane-edit-last' stop a streaming Pi turn when its edit does not
+open, the stop being the edit's.  Pressed during an edit's own send it
+moves that edit nowhere, and the send ends it."
+  (dolist (how '(pressed-before pressed-during edit-sending))
+    ;; Codex for an edit's send, whose fork leaves the parent attached.
+    (let* ((backend (if (eq how 'edit-sending) "codex" "pi"))
+           (ref (list :backend backend :id "parent"))
+           (forked (list :backend backend :id "fork")))
+      (agentpane-test--with-helper
+        (agentpane-test--forking
+            agentpane-test--two-asks-points
+            forked
+          (agentpane-test--with-session ref
+            (agentpane--draw agentpane-test--two-asks)
+            (setq agentpane--attached agentpane--connection
+                  agentpane--attach-sent 7)
+            (goto-char (point-max))
+            (insert "hello")
+            (pcase how
+              ('pressed-before
+               (agentpane--on-notification
+                nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+               (setq hold '(sessions/forkPoints sessions/prompt))
+               (agentpane-edit-last)
+               (agentpane-send)
+               (funcall (cdr (pop held)) t))
+              ('pressed-during
+               (agentpane--on-notification
+                nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+               (setq hold '(sessions/prompt))
+               (agentpane-send)
+               (agentpane-edit-last)
+               (agentpane-test--goto-index 0)
+               (agentpane-edit))
+              ('edit-sending
+               (agentpane-test--goto-index 0)
+               (agentpane-edit)
+               (setq hold '(sessions/prompt))
+               (agentpane-send)
+               (agentpane-test--goto-index 2)
+               (agentpane-edit)
+               (should (eql (plist-get agentpane--editing :index) 0))))
+            (unless (eq how 'edit-sending)
+              (should-not agentpane--editing)
+              (should (equal (agentpane-test--draft) "hello"))
+              (should-not (assq 'sessions/abort sent)))
+            (should (seq-some (lambda (text) (string-search "being sent" text)) said))
+            (funcall (cdr (pop held)) t)
+            (should-not held)
+            (should-not agentpane--editing)
+            (should (equal (agentpane-test--draft) (if (eq how 'edit-sending) "hello" "")))))))))
 
 (ert-deftest agentpane-test-edit-send-failed-frees-the-next-send ()
   "An edit's send that fails anywhere -- its fork points, a message no
