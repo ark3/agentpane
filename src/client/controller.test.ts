@@ -505,6 +505,54 @@ describe("client controller", () => {
 		expect(controller.getView().busy).toBe("idle");
 	});
 
+	/**
+	 * A preview is a new selection, so it ends the claim of the attach it
+	 * supersedes and the `"attaching"` that claim published with it: left
+	 * standing, the status line read "Opening session…" and the external editor
+	 * refused until some later action reset `busy` (OW-nizemu).
+	 */
+	it("returns busy to idle when a preview supersedes an attach still in flight (OW-nizemu)", async () => {
+		const api = new FakeApi();
+		const storedRef: SessionRef = { backend: "codex", id: "thread-stored" };
+		const attaching = deferred<LiveSessionSummary>();
+		api.attach.mockReturnValueOnce(attaching.promise);
+		const controller = createController(api);
+		await controller.start();
+
+		const selecting = controller.select(attachedRef);
+		await controller.preview(storedRef);
+		attaching.resolve(summary(attachedRef));
+		await selecting;
+
+		expect(controller.getView().state.selected).toEqual(storedRef);
+		expect(controller.getView().busy).toBe("idle");
+		controller.setDraft("current draft");
+		await controller.editDraft();
+		expect(api.editDraft).toHaveBeenCalledWith({ text: "current draft" });
+	});
+
+	/** The same through `preview`'s other path, the reselect of a session live here (OW-nizemu). */
+	it("returns busy to idle when reselecting a live session supersedes an attach still in flight (OW-nizemu)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		const attaching = deferred<LiveSessionSummary>();
+		api.attach.mockReturnValueOnce(attaching.promise);
+
+		const selecting = controller.select(attachedRef);
+		await controller.preview(ref);
+		attaching.resolve(summary(attachedRef));
+		await selecting;
+
+		expect(controller.getView().state.selected).toEqual(ref);
+		expect(controller.getView().busy).toBe("idle");
+		controller.setDraft("current draft");
+		await controller.editDraft();
+		expect(api.editDraft).toHaveBeenCalledWith({ text: "current draft" });
+	});
+
 	it("keeps the draft when prompt submission fails", async () => {
 		const api = new FakeApi();
 		api.prompt.mockRejectedValue(new Error("offline"));

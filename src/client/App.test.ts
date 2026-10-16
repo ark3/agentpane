@@ -4561,25 +4561,13 @@ describe("App", () => {
 	});
 
 	/**
-	 * `streamingPi`'s own select is superseded by the mount's auto-preview of
-	 * the same session, whose reselect leaves `busy` on "attaching", where the
-	 * External Editor will not open; a second select ends idle.
-	 */
-	async function settledSelection(controller: AgentpaneController) {
-		await controller.select(piSession);
-		await tick();
-		expect(controller.getView().busy).toBe("idle");
-	}
-
-	/**
 	 * A Stop while the external editor is open puts the prompts it took out of
 	 * Pi's queue in the composer at once, and they may be the only copy of
 	 * them, so the editor's answer lands beside them, in place of the draft it
 	 * was given, instead of over them (OW-momejo).
 	 */
 	it("keeps what a Stop took out of Pi's queue when the external editor answers after it (OW-momejo)", async () => {
-		const { controller, edits, answer, edit } = await streamingPi(["steered mid-turn"]);
-		await settledSelection(controller);
+		const { edits, answer, edit } = await streamingPi(["steered mid-turn"]);
 		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
 		expect(edits).toEqual(["half-written note"]);
 		await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
@@ -4595,8 +4583,7 @@ describe("App", () => {
 	 * still reads as open until the editor answers (OW-momejo).
 	 */
 	it("keeps the External Editor disabled through a Stop while it is open (OW-momejo)", async () => {
-		const { controller, edits, answer, edit } = await streamingPi([]);
-		await settledSelection(controller);
+		const { edits, answer, edit } = await streamingPi([]);
 		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
 		await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
 		await answer();
@@ -4641,8 +4628,7 @@ describe("App", () => {
 	 * was typed meanwhile is kept beside the editor's text (OW-momejo).
 	 */
 	it("sends nothing while the external editor is open, and keeps what was typed beside its answer (OW-momejo)", async () => {
-		const { controller, prompts, edit } = await streamingPi([], false);
-		await settledSelection(controller);
+		const { prompts, edit } = await streamingPi([], false);
 		const textarea = screen.getByLabelText("Prompt");
 		await fireEvent.keyDown(textarea, { key: "g", ctrlKey: true });
 		await fireEvent.input(textarea, { target: { value: "half-written note, and more" } });
@@ -4663,8 +4649,7 @@ describe("App", () => {
 	 * Cancel would drop it (OW-momejo).
 	 */
 	it("opens no edit while the external editor is open (OW-momejo)", async () => {
-		const { controller, edit } = await streamingPi([], false);
-		await settledSelection(controller);
+		const { edit } = await streamingPi([], false);
 		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
 
 		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
@@ -4696,7 +4681,6 @@ describe("App", () => {
 	 */
 	it("keeps the draft an edit gave back while the external editor was open (OW-momejo)", async () => {
 		const { controller, edits, edit } = await streamingPi([], false);
-		await settledSelection(controller);
 		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
 		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
 		expect(edits).toEqual(["first draft"]);

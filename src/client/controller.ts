@@ -622,6 +622,22 @@ export function createController(
 	}
 
 	/**
+	 * The one way to start a new selection: bump the intent, and end the
+	 * `"attaching"` of the attach or create it supersedes (OW-nizemu). Only
+	 * those two write `"attaching"`, each under the intent current at the time,
+	 * so whatever reads `"attaching"` here belongs to an intent this bump ends --
+	 * and that operation's own `finally` clears `busy` only while its intent
+	 * stands, so nothing else would. A `preview` that superseded an attach left
+	 * "Opening session…" up and `editDraft` refusing until some later action
+	 * reset `busy`. Any other `busy` is some other operation's, and stays.
+	 */
+	function takeSelection(): number {
+		const intent = ++selectionIntent;
+		if (busyIs("attaching")) publish({ busy: "idle" });
+		return intent;
+	}
+
+	/**
 	 * Put an attach reply's summary in the sidebar, in place of the row it
 	 * attached, keeping that row's `status` (OW-wazija). The listing owns
 	 * `status`, as it does for every other row: a reply that lands after the
@@ -1211,7 +1227,7 @@ export function createController(
 			publish({ draft: text });
 		},
 		async preview(ref) {
-			const intent = ++selectionIntent;
+			const intent = takeSelection();
 			// A session already attached in this client keeps its live transcript --
 			// there is nothing to preview, so just reselect it (no fetch, no re-attach).
 			if (viewOf(view.state, ref)) {
@@ -1230,7 +1246,7 @@ export function createController(
 		},
 		async create(cwd, backend) {
 			if (!validWorkspace(cwd)) return;
-			const intent = ++selectionIntent;
+			const intent = takeSelection();
 			publish({ busy: "attaching", error: null });
 			try {
 				const created = await api.createSession({ cwd, backend });
@@ -1244,7 +1260,7 @@ export function createController(
 			}
 		},
 		async select(ref) {
-			await attachAndSelect(ref, ++selectionIntent);
+			await attachAndSelect(ref, takeSelection());
 		},
 		async setName(name) {
 			const selected = view.state.selected;
@@ -1499,9 +1515,9 @@ export function createController(
 				// the user has clicked away from must leave the counter alone:
 				// bumping past their own click strands it, leaving their
 				// `attachAndSelect` in its `else` branch with the selection never set
-				// and `busy` stuck on "attaching" forever (D17, OW-miyemo).
+				// (D17, OW-miyemo).
 				const takesSelection = intent === selectionIntent;
-				const forkIntent = takesSelection ? ++selectionIntent : intent;
+				const forkIntent = takesSelection ? takeSelection() : intent;
 				const attached = await api.attach(forked);
 				// Abandons the fork as well; see the note at `api.fork` for why that
 				// is deliberate.
