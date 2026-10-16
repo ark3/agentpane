@@ -1,6 +1,7 @@
 ---
 labels: [defect, emacs]
 blocked-by: [OW-kijuju]
+closed: done
 ---
 
 # An Emacs edit that forks drops the draft it displaced, and with it any words a Stop took out of the queue
@@ -56,3 +57,35 @@ Run them from the repository root as that file's header says: `emacs --batch -L 
 - An ERT test asserts no edit opens while a send from that buffer is in flight, and that `agentpane-edit-last` sends no `sessions/abort` then.
 - The docstrings listed above no longer say a fork drops the draft.
 - `bun run check` passes if anything under `src/` changed.
+
+## Close note
+
+Landed in `emacs/agentpane.el` on main as three commits citing OW-hakeno.
+
+An Emacs edit's displaced draft now comes back on a fork, as the browser's does since OW-kijuju.
+`agentpane--send-edit`'s success callback hands the edit's `:draft` to a new buffer-local, `agentpane--displaced`, just before `agentpane--end-edit`.
+`agentpane--release-queued` stays the single release point, under the same "no edit, nothing in flight" condition.
+It now joins the stopped prompts (`agentpane--held-queued`), then the displaced draft, then the region's text, so a fork leaves the region as Cancel would.
+A fork or prompt that fails still leaves the edit open with its draft.
+Merges needed no new code, because `agentpane--absorb` already folds the other buffer's draft into this edit's `:draft`.
+No edit opens while a send from the buffer (or its composer) is in flight; the check sits in `agentpane--edit`'s fork-points callback, where the edit actually opens, and it skips THEN, so `agentpane-edit-last` sends no `sessions/abort` then.
+It also stops an edit's own send from retargeting the edit, which would otherwise have left that edit open after the fork.
+The docstrings that said a fork drops the draft are retired: `agentpane-abort`, `agentpane--absorb`, `agentpane--send-edit` and `agentpane-edit-last`.
+
+Verified with ERT, run from the repository root as the test file's header says: 280 tests, 0 unexpected, 3 skipped, both on the branch and on main after the cherry-pick.
+The four new tests failed red against the pre-change `agentpane.el`, or against a mutation:
+- `agentpane-test-edit-fork-gives-the-displaced-draft-back`
+- `agentpane-test-stop-then-edit-keeps-pis-queue-through-the-fork`, which is OW-seleri's sequence
+- `agentpane-test-edit-opens-nothing-while-a-send-is-in-flight`
+- `agentpane-test-edit-send-failed-keeps-the-displaced-draft`, red against a mutation that also released the draft on failure
+Four existing tests that asserted the old drop now assert the new order.
+`agentpane-test-edit-send-that-merges-leaves-no-draft-to-prompt` was renamed `...-gives-the-others-draft-back`; the closed OW-bifevo still cites the old name.
+`agentpane-test-edit-send-while-a-prompt-is-in-flight-forks-nothing` was removed: its state, an edit open while a plain prompt is out, can no longer be reached.
+
+The adversarial read found no sequence that loses or misplaces words.
+
+Remaining differences from the browser, left as they are:
+- The browser also gives the draft back when the fork's prompt fails after the fork's attach; Emacs leaves the edit open on any failure.
+- The refusal arrives after a fork-points round trip rather than at the press.
+- Unlike the browser, which holds the draft apart from the edit for the edit's whole life, Emacs keeps it in `:draft` and moves it out at this one exit, so a future caller of `agentpane--end-edit` must hand the draft over too.
+Nothing under `src/` changed.
