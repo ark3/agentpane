@@ -1913,10 +1913,10 @@ OTHER's draft included (OW-seleri)."
   "When an attach reply merges a buffer holding what a stop took out of
 Pi's queue into one holding an edit of its own, those prompts wait on the
 survivor's edit like any it held itself, rather than joining the draft
-that edit displaced, which a fork drops: the region keeps only the edited
-text, and once the edit's send has forked and its prompt answered they
-land in the region the send leaves, after those the survivor held itself
-\(OW-seleri)."
+that edit displaced: the region keeps only the edited text, and once the
+edit's send has forked and its prompt answered they land in the region the
+send leaves, after those the survivor held itself and ahead of the drafts
+the two edits displaced, which come back with them (OW-seleri, OW-hakeno)."
   (let ((kill-ring nil)
         (kill-ring-yank-pointer nil)
         (interprogram-cut-function nil)
@@ -1946,13 +1946,14 @@ land in the region the send leaves, after those the survivor held itself
           (setq attached nil)
           (agentpane-send)
           (should-not agentpane--editing)
-          (should (equal (agentpane-test--draft) "steered here\n\nsteered")))))))
+          (should (equal (agentpane-test--draft) "steered here\n\nsteered\n\ntheirs")))))))
 
 (ert-deftest agentpane-test-edit-send-that-merges-leaves-no-draft-to-prompt ()
   "An edit sent from a buffer only previewed attaches first, and when that
 attach's reply merges the buffer holding its handle into this one, the
-other's draft goes with the edit: once the fork's prompt has answered the
-prompt region is empty, and nothing is left to prompt the parent with."
+other's draft goes with the edit, never into the text the fork is prompted
+with, and once the fork's prompt has answered it is all the prompt region
+holds, as the draft the edit displaced (OW-hakeno)."
   (agentpane-test--with-helper
     (agentpane-test--merging
       (setq points [(:id "turn-0" :text "Fix the bug" :index 0)]
@@ -1972,8 +1973,7 @@ prompt region is empty, and nothing is left to prompt the parent with."
         (setq attached nil)
         (funcall (cdr (pop held)) t)
         (should-not agentpane--editing)
-        (should (equal (agentpane-test--draft) ""))
-        (should-error (agentpane-send) :type 'user-error))
+        (should (equal (agentpane-test--draft) "theirs")))
       (let ((prompts (seq-filter (lambda (entry) (eq (car entry) 'sessions/prompt)) sent)))
         (should (= (length prompts) 1))
         (should (equal (plist-get (cdar prompts) :session) forked))
@@ -3296,6 +3296,39 @@ displaced and forks nothing: the next send prompts the session itself."
             (should (equal (plist-get (cdr prompt) :text) "a draft"))
             (should-not (plist-get (cdr prompt) :images))))))))
 
+(ert-deftest agentpane-test-edit-fork-gives-the-displaced-draft-back ()
+  "An edit sent with `C-RET' forks, and once the fork's prompt has answered
+the prompt region holds the draft the edit displaced, as Cancel would have
+left it, never sent into the fork: the edit's whole lifetime owns that
+draft, not Cancel alone, as in the browser (OW-kijuju, OW-hakeno).  Until
+the prompt answers the region holds the text being sent."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (forked '(:backend "codex" :id "t2")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0)]
+          forked
+        (agentpane-test--with-session ref
+          (agentpane--draw agentpane-test--image-nodes)
+          (setq agentpane--attached 'connection
+                hold '(sessions/prompt))
+          (goto-char (point-max))
+          (insert "a draft")
+          (agentpane-test--goto-index 0)
+          (agentpane-edit)
+          (goto-char (point-max))
+          (insert " properly")
+          (call-interactively (key-binding (kbd "C-<return>") t nil (point)))
+          (should (equal (agentpane-test--draft) "Fix the bug properly"))
+          (funcall (cdr (pop held)) t)
+          (should (equal (plist-get (cdr (assq 'sessions/prompt sent)) :session) forked))
+          (should (equal (plist-get (cdr (assq 'sessions/prompt sent)) :text)
+                         "Fix the bug properly"))
+          (should-not agentpane--editing)
+          (should (equal (agentpane-test--draft) "a draft"))
+          (with-current-buffer (agentpane--buffer-for forked)
+            (should (equal (agentpane-test--draft) ""))))))))
+
 (ert-deftest agentpane-test-edit-refused-at-the-press ()
   "`agentpane-edit' on a message no fork point names fills nothing and says
 it is not forkable; on a previewed buffer it attaches, fills nothing, and
@@ -3650,8 +3683,9 @@ the region as it was (OW-seleri)."
 a prompt it took out of Pi's queue leaves the prompt region holding only
 the edited message, the prompt waiting in this buffer until the edit ends
 \(OW-seleri).  Cancelled, it lands ahead of the draft the edit displaced;
-sent, the fork drops what its own abort takes out, and the prompt fills
-the region the fork's prompt leaves here, the fork's own region left empty."
+sent, the fork drops what its own abort takes out, and the prompt lands
+in the region the fork's prompt leaves here, ahead of the displaced draft
+as Cancel leaves them (OW-hakeno), the fork's own region left empty."
   (dolist (how '(cancel send))
     (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
           (forked '(:backend "pi" :id "/s/fork.jsonl")))
@@ -3681,16 +3715,58 @@ the region the fork's prompt leaves here, the fork's own region left empty."
                (should (= (agentpane-test--count 'sessions/abort sent) 2))
                (should (equal (plist-get (cdr (assq 'sessions/prompt sent)) :text) "first draft"))
                (should-not agentpane--editing)
-               (should (equal (agentpane-test--draft) "steered"))
+               (should (equal (agentpane-test--draft) "steered\n\na draft"))
                (with-current-buffer (agentpane--buffer-for forked)
                  (should (equal (agentpane-test--draft) "")))))))))))
+
+(ert-deftest agentpane-test-stop-then-edit-keeps-pis-queue-through-the-fork ()
+  "A stop, then `agentpane-edit-last' pressed before the stop answers, the
+stop answering before the edit's fork points: what it took out of Pi's
+queue lands in the prompt region ahead of the draft, the edit then
+displaces both, and once the edit's send has forked and the fork's prompt
+answered both come back, the stopped prompt ahead of the draft, as Cancel
+would leave them (OW-kijuju, OW-hakeno)."
+  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
+        (forked '(:backend "pi" :id "/s/fork.jsonl")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-0" :text "first draft" :index 0)]
+          forked
+        (agentpane-test--with-session ref
+          (agentpane--draw (seq-take agentpane-test--two-asks 2))
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent 7
+                hold '(sessions/abort sessions/forkPoints)
+                aborted '(:queued ["steered"]))
+          (agentpane--on-notification
+           nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+          (goto-char (point-max))
+          (insert "a draft")
+          (agentpane-abort)
+          (agentpane-edit-last)
+          (should (equal (mapcar #'car held) '(sessions/abort sessions/forkPoints)))
+          (funcall (cdr (pop held)) t)
+          (should (equal (agentpane-test--draft) "steered\n\na draft"))
+          (setq aborted nil)
+          (funcall (cdr (pop held)) t)
+          (should agentpane--editing)
+          (should (equal (agentpane-test--draft) "first draft"))
+          ;; The press's own abort, which finds the queue emptied.
+          (setq hold nil)
+          (while held (funcall (cdr (pop held)) t))
+          (goto-char (point-max))
+          (call-interactively (key-binding (kbd "C-<return>") t nil (point)))
+          (should (equal (plist-get (cdr (assq 'sessions/prompt sent)) :text) "first draft"))
+          (should-not agentpane--editing)
+          (should (equal (agentpane-test--draft) "steered\n\na draft")))))))
 
 (ert-deftest agentpane-test-abort-during-an-edit-holds-pis-queue-out-of-it ()
   "`agentpane-abort' while the prompt region holds an edit, its answer
 carrying a prompt it took out of Pi's queue, leaves the region holding
 only the edited message, so the fork never sends that prompt as part of
 the edit and Cancel never overwrites it; the prompt lands once the edit
-ends, as after `agentpane-edit-last' (OW-seleri).  Two stops answering
+ends, ahead of the draft the edit displaced, however the edit ends, as
+after `agentpane-edit-last' (OW-seleri, OW-hakeno).  Two stops answering
 while the edit is open land in the order they answered."
   (dolist (how '(cancel send))
     (agentpane-test--with-helper
@@ -3717,7 +3793,7 @@ while the edit is open land in the order they answered."
              (agentpane-send)
              (should (equal (plist-get (cdr (assq 'sessions/prompt sent)) :text) "Fix the bug"))
              (should-not agentpane--editing)
-             (should (equal (agentpane-test--draft) "steered\n\nsteered again")))))))))
+             (should (equal (agentpane-test--draft) "steered\n\nsteered again\n\na draft")))))))))
 
 (ert-deftest agentpane-test-edit-cancelled-mid-send-releases-pis-queue ()
   "What a stop took out of Pi's queue while an edit's send is in flight,

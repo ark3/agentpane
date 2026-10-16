@@ -2657,15 +2657,17 @@ edit or a prompt in flight (`agentpane-abort'), is held here after this
 buffer's own, once OTHER's draft has moved, and waits on this buffer's
 edit or prompt in flight like any it held itself, so it does not go with
 the kill.  Joined into OTHER's draft instead, it followed that draft into
-the one this buffer's edit displaced, which a fork drops (OW-seleri).
+the one this buffer's edit displaced, and came back behind this buffer's
+own draft, where every stopped prompt goes ahead of the drafts
+\(OW-seleri, OW-hakeno).
 While this buffer holds an edit of its own, OTHER's draft follows instead
 the draft that edit displaced, and the prompt region, holding the edit's
 text, is left as it was: an edit sent here meanwhile, whose attach made
 the merge, would otherwise end leaving the draft behind the text it
 sent, for the next send to prompt this buffer's session with.
-Cancelling the edit puts both back; a fork drops both, where the
-browser's edit gives the draft it displaced back on every exit
-\(OW-kijuju), which OW-hakeno brings here.
+Cancelling the edit puts both back, and so does its send once the fork's
+prompt has answered, as the browser's edit gives the draft it displaced
+back on every exit (OW-kijuju, OW-hakeno).
 A fork OTHER has in flight is this buffer's from then on, and so is any
 stop it has in flight (`agentpane-abort'): their requests answer here,
 following OTHER (`agentpane--request'), and this buffer counts as forking
@@ -3105,6 +3107,12 @@ the edit over the prompt separator.  Nil otherwise.")
 order the stops answered, waiting for the prompt region to hold no edit
 and no prompt in flight; see `agentpane-abort'.")
 
+(defvar-local agentpane--displaced nil
+  "The draft an edit that ended other than by `agentpane-cancel-edit'
+displaced, waiting, as `agentpane--held-queued' waits, for the prompt
+region to hold no edit and no prompt in flight; nil when there is none.
+See `agentpane--send-edit' (OW-hakeno).")
+
 (defun agentpane--with-queued (queued draft)
   "DRAFT once QUEUED, prompts a stop took out of Pi's queue (D16), come back
 to it: those prompts in order, then DRAFT, blank lines between, and a blank
@@ -3116,16 +3124,26 @@ that both clients give the words back in the shape Pi's TUI does
                "\n\n"))
 
 (defun agentpane--release-queued ()
-  "Join the prompts `agentpane--held-queued' holds ahead of the prompt
-region's text, once the region holds no edit and no prompt is in flight;
-the one place they are released, run wherever either ends.  See
+  "Join the prompts `agentpane--held-queued' holds, then the draft
+`agentpane--displaced' holds, ahead of the prompt region's text, once the
+region holds no edit and no prompt is in flight; the one place either is
+released, run wherever an edit or a prompt ends.  The stopped prompts go
+first, so every way an edit ends leaves the region as
+`agentpane-cancel-edit' does; a blank displaced draft adds nothing, and a
+region it would only rewrite is left alone, as in the browser's release
+below `stop' in src/client/App.svelte (OW-kijuju, OW-hakeno).  See
 `agentpane-abort'."
-  (when (and agentpane--held-queued (not agentpane--editing) (not agentpane--sending))
-    (let ((queued agentpane--held-queued))
-      (setq agentpane--held-queued nil)
-      (agentpane--set-draft
-       (agentpane--with-queued
-        queued (buffer-substring-no-properties agentpane--prompt-start (point-max)))))))
+  (when (and (or agentpane--held-queued agentpane--displaced)
+             (not agentpane--editing) (not agentpane--sending))
+    (let ((queued (if (and agentpane--displaced (not (string-blank-p agentpane--displaced)))
+                      (append agentpane--held-queued (list agentpane--displaced))
+                    agentpane--held-queued)))
+      (setq agentpane--held-queued nil
+            agentpane--displaced nil)
+      (when queued
+        (agentpane--set-draft
+         (agentpane--with-queued
+          queued (buffer-substring-no-properties agentpane--prompt-start (point-max))))))))
 
 (defun agentpane--send-prompt (text sent &optional images failed)
   "Send TEXT as a prompt to the session of the current buffer's transcript,
@@ -3346,13 +3364,15 @@ case, that is at once.  That covers an edit open when the answer lands,
 however it was opened.  An edit pressed before the answer opens only
 once its fork points answer (`agentpane--edit'), so a stop answered
 before then lands in the region, is displaced into the edit's draft like
-any draft, and a fork drops that draft (OW-kijuju).
+any draft, and comes back with it however the edit ends (OW-hakeno).
 `agentpane--release-queued' runs wherever either ends:
 - Cancel puts the displaced draft back first, so they land ahead of it.
-- An edit's send drops the displaced draft, which they are not, and once
-  the fork's prompt has answered clears the sent text from the region;
-  they fill what it leaves.  A send that fails leaves the edit open, and
-  they keep waiting with it (`agentpane--send-edit').
+- An edit's send, once the fork's prompt has answered, ends the edit,
+  clears the sent text from the region, and hands the displaced draft to
+  the same release, which joins them ahead of it, so the region reads as
+  Cancel would have left it (OW-kijuju, OW-hakeno).  A send that fails
+  leaves the edit open, and they keep waiting with it
+  (`agentpane--send-edit').
 - A plain prompt's answer clears its text, and they take its place; one
   that fails leaves its text, and they land ahead of it.
 - A merge that kills this buffer hands them to the survivor, where they
@@ -3958,9 +3978,10 @@ aborts it again before it forks.  Codex and Claude Code keep a parent
 turn running through a fork, and are not aborted.
 What that abort takes out of Pi's queue never joins the edit, which would
 send it into the fork: it waits in this buffer until the edit ends, then
-lands ahead of the draft `agentpane-cancel-edit' puts back, or, once the
-fork's prompt has answered, in the region the send leaves empty -- this
-buffer's, not the fork's; see `agentpane-abort'."
+lands ahead of the draft the edit displaced, whether
+`agentpane-cancel-edit' puts that back or, once the fork's prompt has
+answered, the send gives it back -- in this buffer's region, not the
+fork's; see `agentpane-abort'."
   (interactive)
   (let ((composer (and (derived-mode-p 'agentpane-composer-mode) (current-buffer))))
     (with-current-buffer (agentpane--transcript)
@@ -4081,11 +4102,15 @@ buffer's, and `agentpane--request' runs nothing for a buffer killed before
 its answer, so until the fork's prompt answers, killing the fork's buffer
 frees this one too; otherwise a fork buffer killed as it appeared, during
 a slow spawn, left this buffer refusing every send.
-What a stop took out of Pi's queue waits in this buffer across the send,
-and is released once the edit has ended and SENT has cleared the sent
-text, so after SENT, and never into the text the fork is prompted with
-\(`agentpane-abort'); freeing the buffer releases it too, for a send
-whose edit was cancelled while it was in flight."
+The edit's lifetime owns the draft it displaced, not Cancel alone
+\(OW-kijuju, OW-hakeno): ending the edit here hands that draft to
+`agentpane--displaced', and what a stop took out of Pi's queue waits in
+this buffer across the send.  Both are released once the edit has ended
+and SENT has cleared the sent text, so after SENT, the stopped prompts
+ahead of the draft as `agentpane-cancel-edit' leaves them, and never into
+the text the fork is prompted with (`agentpane-abort'); freeing the
+buffer releases the stopped prompts too, for a send whose edit was
+cancelled while it was in flight."
   (when agentpane--forking
     (user-error "A fork of this session is already in flight"))
   (let* ((edit agentpane--editing)
@@ -4110,6 +4135,7 @@ whose edit was cancelled while it was in flight."
              (when (buffer-live-p parent)
                (with-current-buffer parent
                  (when (eq agentpane--editing edit)
+                   (setq agentpane--displaced (plist-get edit :draft))
                    (agentpane--end-edit))))
              (funcall sent)
              (when (buffer-live-p parent)
