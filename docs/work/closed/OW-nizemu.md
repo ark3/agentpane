@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # An attach a preview supersedes leaves busy on "attaching" until some other action resets it, so Ctrl-G and the External Editor silently refuse
@@ -23,3 +24,12 @@ Whoever owns the selection intent should own the busy it implies, so that a prev
 - A test in `src/client/controller.test.ts`, red first: `select` a stored session with the attach held open, `preview` another before it replies, let the attach reply, and assert `busy` is `"idle"` and `editDraft` reaches `api.editDraft`.
 - `settledSelection` in `src/client/App.test.ts` is gone, and OW-momejo's tests that used it pass without it.
 - `bun run check` passes.
+
+## Close note
+
+Landed on main in 1490859f and f7760f53.
+"attaching" now records the selection intent it was written under (`attachingIntent`, set by `attachAndSelect` and `create`, its only writers), and `publish` returns an "attaching" to idle once a newer selection intent supersedes that claim, so no superseding site — preview, its reselect of a live session, select, create, the fork — has a line to forget.
+The first cut cleared it with a publish of its own at the bump; the adversarial read found that this publish ran `loadPreview` before `preview` marked its read as the click's, asking a read of the row being left whose `gone` cleared the selection, and the second commit moved the clear into `publish` with a red-first test for that sequence.
+New tests in `src/client/controller.test.ts`: preview supersedes an attach, reselect-live supersedes an attach (both: busy idle, `editDraft` reaches `api.editDraft`), no stray read of the left row, and a select superseding a select keeps its own "attaching".
+`settledSelection` is gone from `src/client/App.test.ts`; the five OW-momejo tests that used it fail without the fix and pass with it.
+`bun run check` passes on main (1741 tests).
