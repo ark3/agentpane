@@ -373,6 +373,35 @@ describe("reducePiNotification: error signals not covered by any fixture", () =>
 		expect(result.state).toBe(state);
 	});
 
+	it("raises no adapter error for a Stop during an auto-retry (OW-podise)", () => {
+		// Hand-built from reading `AgentSession` in the installed `pi 1.2.0`, not
+		// captured: a live retry needs a retryable provider failure. The reply
+		// fails, `_prepareRetry` announces the retry and sleeps, and an `abort`
+		// in the backoff ends the sleep, so `_finishCancelledRetry` ends the retry
+		// as cancelled before the run settles.
+		const prompt = user("Say hello.");
+		const failed = assistant([], "error", { errorMessage: "529 overloaded_error: Overloaded" });
+		const { results } = runThroughReducer([
+			{ type: "agent_start" },
+			{ type: "message_start", message: prompt },
+			{ type: "message_end", message: prompt },
+			{ type: "message_start", message: failed },
+			{ type: "message_end", message: failed },
+			{ type: "agent_end", messages: [prompt, failed], willRetry: true },
+			{
+				type: "auto_retry_start",
+				attempt: 1,
+				maxAttempts: 3,
+				delayMs: 2000,
+				errorMessage: "529 overloaded_error: Overloaded",
+			},
+			{ type: "auto_retry_end", success: false, attempt: 1, finalError: "Retry cancelled" },
+			{ type: "agent_settled" },
+		]);
+
+		expect(results.filter((r) => r.error !== undefined)).toEqual([]);
+	});
+
 	it("raises no adapter error for a Stop during a tool call, and passes its errored turn on as a stop (OW-kibabi)", () => {
 		// The event order `pi 1.2.0` sent for an `abort` while a `bash` call ran
 		// (docs/MANUAL_TESTING.md, OW-yewiku): the call ends `Command aborted`,

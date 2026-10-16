@@ -140,7 +140,16 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			return { state, error: `Extension error (${event.extensionPath}, ${event.event}): ${event.error}` };
 
 		case "auto_retry_end":
-			if (!event.success) {
+			// A retry something cancelled is not a failure (OW-podise). As of
+			// `pi 1.2.0` (read in `AgentSession`, not measured) only
+			// `_finishCancelledRetry` sends this text, and only once an `abort` or
+			// `abort_retry` has cut the retry short -- a Stop, and also Pi's own
+			// `compact`, a fork or other session switch, or an extension's
+			// `abort`, none of them a provider failure -- while a retry that gives
+			// up sends the provider's last error. Keyed on the text rather than on
+			// the adapter's own Stop because it covers all of those, and needs no
+			// state carried across the retry's backoff.
+			if (!event.success && event.finalError !== "Retry cancelled") {
 				return { state, error: event.finalError ?? "Pi retry failed after transient errors" };
 			}
 			return { state };
