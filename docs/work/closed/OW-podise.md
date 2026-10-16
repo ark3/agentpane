@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Pi Stop during an auto-retry shows in both clients as an adapter error reading Retry cancelled
@@ -30,3 +31,14 @@ This case is not a transcript message, so `asPiStop` does not reach it.
 
 A reducer or adapter test feeding `auto_retry_end` with `success: false, finalError: "Retry cancelled"` after a Stop shows no adapter error is raised, seen red before the fix and green after.
 A test shows an `auto_retry_end` with `success: false` and a provider error, with no Stop, still raises the error.
+
+## Close note
+
+Built: `reducePiNotification`'s `case "auto_retry_end"` in `src/server/adapters/pi/reducer.ts` no longer raises an adapter error when `finalError` is `"Retry cancelled"`; any other unsuccessful end still raises `finalError` (commit "server: raise no adapter error for a Pi Stop during an auto-retry (OW-podise)").
+Keyed on the event's text, not on the adapter's own Stop: read in the installed `pi 1.2.0`, not measured, only `AgentSession._finishCancelledRetry` sends that text, and only after `abort()` or the `abort_retry` RPC — a Stop, Pi's `compact`, a fork or session switch (`teardownCurrent`), or an extension's `abort` — while a retry that gives up sends the provider's last `errorMessage`. That needs no adapter state carried across the backoff.
+`dispose` also cancels a retry but empties `_eventListeners` before the event could go out, so it never reaches agentpane.
+A Stop while the retried request is in flight usually ends the retry with `success: true` instead, because the aborted reply's `stopReason` is `"aborted"`; that case never raised an error.
+
+Verified: new test "raises no adapter error for a Stop during an auto-retry (OW-podise)" in `src/server/adapters/pi/reducer.test.ts`, with a fixture hand-built from the source reading because a live retry needs a retryable provider failure. It went red with the condition removed (1 failed, 37 passed) and green with it (38/38). The existing "auto_retry_end with success:false surfaces finalError" still covers a give-up with no Stop. `bun run check` passed: svelte-check 0 errors, 1742/1742 tests.
+
+The adversarial review found that after a Stop in the backoff, the failed attempt's `stopReason: "error"` turn stays in the live transcript as a provider error, with no stop marker, while `get_messages` drops it. That is filed as OW-nevezo.
