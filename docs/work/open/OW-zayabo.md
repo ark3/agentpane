@@ -1,5 +1,5 @@
 ---
-labels: [question]
+labels: [question, now]
 ---
 
 # GitHub Issues should become agentpane's tracker of record, with card kept for decomposing and implementing one issue at a time
