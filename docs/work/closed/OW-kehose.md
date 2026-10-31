@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: declined
 ---
 
 # A generated image renders as `[image: image/png]` -- its mime type and nothing else -- because an assistant message cannot hold an image block, though the same data URL renders as a picture when a user sends it.
@@ -59,3 +60,8 @@ OW-zadupu added an `image-gen` scenario to `resources/probes/capture_fixtures.py
 Why the tool was not offered was not established, and no fixture was committed; `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)", records the attempts.
 A capture needs a model or account that offers the tool; the scenario is in place for that run.
 Read from the code, not run: `extractStoreTurn` in `src/server/sessions/codex.ts` has no branch for an image-generation record, so the preview of a stored generated image probably shows nothing at all, where the live transcript shows `[image: image/png]`.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: no capture of a generated image exists, since Codex on gpt-5.6-luna on the home server did not offer its image_gen tool (codex-cli 0.157.1, OW-zadupu), and nothing else here produces one.
+Reopen if image generation becomes available to a model agentpane drives; the image-gen scenario in resources/probes/capture_fixtures.py is in place for that capture, and the fix is a protocol shape, since pi-ai's AssistantMessage admits no image.

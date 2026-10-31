@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # The Pi session list's one-line preview takes the first user message in the file, which may sit on a branch Pi abandoned
@@ -17,3 +18,7 @@ OW-vezipo and OW-yilene also change what `parsePiSession` reads for the row; eit
 ## Done when
 
 A test in `src/server/sessions/pi.test.ts` over a synthetic file whose first user message is abandoned for a second root asserts that `parsePiSession` returns the second root's text as `preview`, and fails against today's first-in-file read; or this card closes `--declined` with the cost reason recorded in its close note.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: no file on either machine has been shown to hit it, and finding the first user message on the leaf's branch means reading the whole file at enumeration, where today's read stops at the first hit under the enumeration caps.

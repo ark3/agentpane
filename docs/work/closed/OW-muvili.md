@@ -1,6 +1,7 @@
 ---
 labels: [deferral, d27]
 blocked-by: [OW-jamaha]
+closed: declined
 ---
 
 # A session-less Codex app-server, started after the list is already served, collects thread names and models the rollout walk cannot see
@@ -49,3 +50,9 @@ The owner deferred this card in OW-fifaji, recorded in `docs/DESIGN.md` D27.
 Pi and Claude Code names come cheaply from the store files (OW-yilene), and an attached Codex session carries its name through its adapter (OW-jamaha), so until this lands a Codex name shows in the list only while its session is attached.
 D25 says "Only an attach starts an agent", and this card starts a `codex app-server` no attach asked for; D25 was written about session routes, but a collector is a second kind of Codex child, which is the kind of surprise D25 removed.
 Revisit when OW-jamaha and OW-yilene have landed and names have been in use, and answer D25 then: amend it to say what it covers, or find the names another way.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage, confirming the deferral recorded in D27 on 2026-10-01 (OW-fifaji).
+Until something collects them, a Codex name shows in the list only while its session is attached, since Codex keeps names outside the rollout.
+Reopen once names have been in use, and answer D25's "Only an attach starts an agent" then: amend it to say what it covers, or find the names another way.

@@ -1,5 +1,6 @@
 ---
 labels: [deferral, d27]
+closed: declined
 ---
 
 # A Pi rename the adapter did not send reaches the listing through session_info_changed
@@ -14,3 +15,8 @@ Deferred because nothing agentpane drives renames a Pi session except `setName`,
 ## Done when
 
 A test in `src/server/adapters/pi/process.test.ts` has the fake emit `session_info_changed` carrying a name and asserts `getState().name` follows it and an update is emitted, watched red first; the event's typed arm in `src/server/adapters/pi/protocol.ts` is transcribed from the installed CLI with its version; and the `name` field's docblock no longer says the event goes unread.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: nothing renames a Pi session except agentpane's own setName, which already updates the state.
+Reopen if an extension that renames sessions comes into use; session_info_changed (pi 1.0.0, read at the source) is then the event to read.

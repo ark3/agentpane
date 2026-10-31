@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # Codex drops the first line of a long-running command output from the wire, so the live transcript starts at line two while the rollout keeps line one
@@ -15,3 +16,8 @@ It was not investigated whether it happens only when the command outlasts its `e
 
 Deferred because agentpane cannot restore a line the wire never sent, and one line of a long command's output is cheap to lose.
 Revisit if a user reports missing first lines, or if a later Codex version changes it; the done condition then is a decision recorded here, with the version it was measured on, whether to read the line back from the rollout or report upstream.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: the first line is lost upstream, in the item Codex builds (codex-cli 0.157.1), and agentpane shows exactly what the wire carried.
+Reopen if a user reports missing first lines or a later Codex changes it.

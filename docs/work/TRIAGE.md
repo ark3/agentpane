@@ -27,6 +27,8 @@ Where a decision departs from it, or does not belong to one card, it goes in the
   OW-luzipe's wording fix was done with it: "O(1) per token" is gone from D3 and the three code comments that repeated it.
 - 2026-10-31, round 3 (declines, server edge cases): OW-pazuwi, OW-vefofo, OW-henazu, OW-hivahe, OW-kahuni and OW-manulu declined as proposed.
 - 2026-10-31, round 4 (declines, client edge cases and test strength): OW-didose, OW-vipiso, OW-dulime, OW-weboto, OW-yorita, OW-bagofa and OW-wayovu declined as proposed.
+- 2026-10-31, round 5 (the last declines): OW-muvili, OW-husuju, OW-tegoje, OW-kehose and OW-miwofi declined as proposed, and OW-12 closed `--moot`.
+  OW-ruyewe moved into A1 instead of being declined, to close `--promoted` with that issue.
 
 ## The starting proposal
 
@@ -37,9 +39,10 @@ Where a decision departs from it, or does not belong to one card, it goes in the
 - OW-66  Sessions can be neither starred nor hidden, so the list is stuck with recency and never sheds anything.
 - OW-zewiru  The browser can neither star nor hide a session, nor show the server's session-less notice (D13, D27)
 - OW-hahuna  agentpane-mode's picker can neither star nor hide a session, nor show the server's session-less notice (D13, D27)
+- OW-ruyewe  Forks pile up in the list as sessions nobody wants back, and nothing hides the kinds of fork that are known dead
 
 The server store and route come first, then one card per client.
-OW-ruyewe (auto-hiding dead forks) is declined below and mentioned in the issue as a later step.
+OW-ruyewe joins as the issue's follow-up section: which forks to hide automatically, decided from use once marks exist (moved here from the declines by the owner in round 5).
 
 ### A2. Mark forks in the session list (D27)
 
@@ -255,8 +258,6 @@ Recommend `--done`: the question is answered (the trigger is a measured slow `GE
 Each is a deferral or unverified worry that nothing has observed.
 The close note keeps its reason and what would reopen it.
 
-- OW-ruyewe  Forks pile up in the list as sessions nobody wants back, and nothing hides the kinds of fork that are known dead
-Auto-hiding dead forks needs marks first and then real use; the star/hide issue will say so.
 
 - OW-muvili  A session-less Codex app-server, started after the list is already served, collects thread names and models the rollout walk cannot see
 You deferred the Codex name collector under D27, and it conflicts with D25's "only an attach starts an agent".
