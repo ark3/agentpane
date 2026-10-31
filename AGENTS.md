@@ -122,6 +122,7 @@ Read those rather than a retelling; what follows is only what card cannot know a
 Card reads this deck through per-clone config that is deliberately not synced: `.git/card/card-config.toml` must carry `prefix = "OW"`, `deck = "../../docs/work"` (resolved relative to `.git/card/`), and `public = true`, which stands card's commit-lint gate down and is what keeps citing `OW-` ids in commit subjects legal here.
 It may also carry local card-runner settings, such as this work laptop's `[run]` block; those do not change the deck contract.
 Writing that file, like installing card or Bun, is the owner's provisioning of a machine, not any session's work.
+A claude.ai cloud container is the exception, since it starts with neither and is thrown away: on 2026-10-30 the owner had a session clone `ark3/card` at tag `card-1.0`, link its `src/card.ts` (run by Bun, no dependencies to install) onto PATH, and write that config file, all of which lasts only as long as the container.
 
 Do not take formatting from the cards already in the deck.
 `card author` sets the body's shape — one sentence per line — and the existing cards are hard-wrapped instead, so a card read for prior art teaches the wrong house style while looking authoritative.
