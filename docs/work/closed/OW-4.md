@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: promoted
 ---
 
 # A multi-file edit flattens its hunks under the first path.
@@ -40,3 +41,8 @@ The browser half is the paragraph above: each file's path and `kind` on the Edit
 - A client test renders the Edit card for a two-file update and sees each file's hunks under its own path with its `kind`, red before the change and green after; `multi-patch.jsonl` alone cannot show the grouping, since its second file contributes no hunk, and both its paths already appear in the result text.
 - A test in `src/emacs/` projects `multi-patch.jsonl` and sees two `files` entries, the second an `add` with `notes` as an added line, and no `diff` on the part.
 - An ERT test in `emacs/agentpane-test.el` draws a tool node carrying two `files` and empty `args` and `result`, and sees both paths in the folded body.
+
+## Close note
+
+Promoted to ark3/agentpane#14 during the card triage, 2026-10-31.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

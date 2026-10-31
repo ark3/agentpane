@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: declined
 ---
 
 # A Codex adapter disposed while its own failed start is killing the child resolves before the child has closed
@@ -24,3 +25,8 @@ Pi and Claude do not have this gap: neither kills inside `start()`.
 
 A test in `src/server/adapters/codex/` drives a start that fails after spawn with a child that ignores both signals, calls `dispose()` while the failing start's release is still in its grace period, and asserts that `dispose()` has not resolved until the escalation finishes (fake timers, as the existing "escalates a stuck termination and remains bounded" test in `codex/process.test.ts` does).
 It must go red on `main` before the change and green after.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: what the early resolve loses is the stderr report of a child outliving SIGKILL and the ordering guarantee, not a known leak, since sbox's --die-with-parent kills the sandbox when the server exits.
+Reopen if a Codex process is found surviving a shutdown.

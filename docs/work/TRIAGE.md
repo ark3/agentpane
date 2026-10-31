@@ -40,6 +40,7 @@ Where a decision departs from it, or does not belong to one card, it goes in the
 - 2026-10-31, round 7 (the D27 session-list features): A1 became ark3/agentpane#7 (star and hide, with OW-ruyewe), A2 ark3/agentpane#8 (fork markers), A3 ark3/agentpane#9 (Pi and Claude Code names).
 - 2026-10-31, round 8 (turns drawn wrong): A7 became ark3/agentpane#10 and A8 ark3/agentpane#11; the owner asked that both open by measuring again on current versions.
 - 2026-10-31, round 9 (Pi's Stop and fork): A9 became ark3/agentpane#12 and A10 ark3/agentpane#13, both opening with a re-measurement.
+- 2026-10-31, round 10 (Codex): A6 became ark3/agentpane#14, A11 ark3/agentpane#15, A12 ark3/agentpane#16; A14's OW-sujizi and OW-hejoza were declined instead of filed.
 
 ## The starting proposal
 

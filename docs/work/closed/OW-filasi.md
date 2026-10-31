@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: promoted
 ---
 
 # Attaching a stored Codex subagent from the picker fails on codex-cli 0.157.1, which refuses thread/resume for a sub-agent whose parent is not loaded
@@ -30,3 +31,8 @@ Measure the open questions above first, on the home server with `codex -m gpt-5.
 
 - The decision is recorded in `docs/DESIGN.md` with the measurement behind it.
 - A test in `src/server/adapters/codex/adapter.test.ts`, whose fake app-server answers a subagent's `thread/resume` with that -32600 error as 0.157.1 does, asserts the chosen behaviour, and was watched red first.
+
+## Close note
+
+Promoted to ark3/agentpane#16 during the card triage, 2026-10-31.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

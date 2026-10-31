@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: promoted
 ---
 
 # A Codex assistant message's model comes from one reducer-wide identity at remap time, so a restart restamps every past turn with the last turn's model
@@ -41,3 +42,8 @@ Tests in `src/server/adapters/codex/` show each of these red first and green aft
 
 The reducer-wide `identity.model` is no longer what `remap` stamps on a message: the model comes from the slot's turn, and OW-9's re-sync line in `submit` is gone (effort may keep a reducer-wide default where no turn names one, but say so at the site).
 `bun run check` passes.
+
+## Close note
+
+Promoted to ark3/agentpane#15 during the card triage, 2026-10-31.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

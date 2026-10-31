@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: declined
 ---
 
 # Codex session preview drops a functionCallOutput record, which carries no call_id
@@ -24,3 +25,8 @@ Done when a test beside the existing Codex session-preview tests, fed such a rec
 
 OW-zadupu's captures produced no row for this card: none of its scenarios starts a turn with `toolOutput`, so no committed rollout holds a `function_call_output` without a `call_id`.
 The card stands as filed, on its 0.156.0 measurement.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: the record appears only when a client other than agentpane starts a turn with toolOutput, which nobody has been seen doing, and no committed rollout holds one.
+Read at the code on 2026-10-31: the preview reader in src/server/sessions/codex.ts still returns null for a function_call_output without a call_id; OW-luvema's item_completed path may draw it for a rollout that carries one, which was not checked.
