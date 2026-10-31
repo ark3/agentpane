@@ -1,5 +1,6 @@
 ---
 labels: [question, browser-testing]
+closed: done
 ---
 
 # Find-in-page no longer reaches a tool card's output, because OW-lisaye stopped building a collapsed body the browser used to auto-expand into
@@ -34,3 +35,10 @@ If the probe shows Chromium never auto-expanded these cards in the first place, 
 ## Done when
 
 The decision is written in the `built` docblock in `ToolCard.svelte` -- accepted, or recovered by a named mechanism -- and the probe that settled it is in `docs/MANUAL_TESTING.md` naming the browser version it ran on.
+
+## Close note
+
+Decided 2026-10-31 in the triage: the owner confirmed from use that the browser's find-in-page does not reach a collapsed tool card's output, and called that good.
+The decision is in the `built` docblock in src/client/render/tools/ToolCard.svelte.
+Search that reaches tool output is wanted, but as agentpane's own, served by the server: ark3/agentpane#5, which scopes the kinds of search with the owner before any design.
+No probe was run and nothing went into docs/MANUAL_TESTING.md; the owner's observation stands in for it, with no browser version recorded.

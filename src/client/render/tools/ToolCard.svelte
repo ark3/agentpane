@@ -50,6 +50,12 @@
 	 * through the one-way `open` prop, so the `ontoggle` handler is how Svelte
 	 * learns the card was opened at all, and `open` is kept in the test so a
 	 * caller that starts a card expanded still gets a body.
+	 *
+	 * The browser's find-in-page therefore cannot reach a collapsed card's
+	 * output, where Chromium used to auto-expand a closed `<details>` on a
+	 * match. The owner confirmed that from use on 2026-10-31 and wants it so:
+	 * search that reaches tool output is agentpane's own, served by the server
+	 * (ark3/agentpane#5, from OW-vaviza), not the browser's.
 	 */
 	let opened = $state(false);
 	const built = $derived(open || opened);

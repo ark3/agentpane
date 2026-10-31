@@ -1,5 +1,6 @@
 ---
 labels: [question, browser-testing]
+closed: promoted
 ---
 
 # Nothing has watched a browser actually repaint the tab icon when the favicon href is swapped.
@@ -29,3 +30,8 @@ without hunting for it? The colour (`#57c98a`) and the dot's size (r=2.7 on the
 
 Worth checking in Safari too if a Mac is to hand; it is the engine most likely
 to differ, and neither `OW-diyuwu` nor `OW-ropuwo` has ever run there.
+
+## Close note
+
+Promoted to ark3/agentpane#4 during the 2026-10-30 triage.
+The owner, asked on 2026-10-31, does not remember whether the badge visibly repaints, so the issue opens with that observation at a real browser, recorded with the browser version, before any change.

@@ -1,5 +1,6 @@
 ---
 labels: [question]
+closed: promoted
 ---
 
 # After a compaction, the transcript shows the context handed to the fresh session as a user message, so it misattributes who said what from then on
@@ -27,3 +28,9 @@ Nothing is investigated until the owner has described what they see, because the
 ## Done when
 
 The owner's answers are recorded in this card, and defect cards are filed from them naming the backends and paths to reproduce, each with a fixture or live capture as its evidence; this card then closes `--done` with their ids.
+
+## Close note
+
+Promoted to ark3/agentpane#3 during the 2026-10-30 triage.
+The owner, asked on 2026-10-31, no longer remembers which backends, views or clients showed the compaction context as a user message, and compacts rarely.
+So the issue starts with a test matrix rather than a reproduction: every backend, across the live, hydrated and stored-preview paths, in both clients, each test fed a real compaction capture; where the text should go is a decision for docs/DESIGN.md.

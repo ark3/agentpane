@@ -17,7 +17,12 @@ Where a decision departs from it, or does not belong to one card, it goes in the
 
 ## Decisions log
 
-None yet.
+- 2026-10-31, how issues are written: each issue stands alone for a cold reader, links every card it absorbs at its `docs/work/closed/` path on `main`, and ends with the Claude Code attribution footer.
+  Issues are filed unlabelled until the label set is decided at the end, and then labelled in one pass.
+- 2026-10-31, round 1 (the three questions from use):
+  OW-taweso became ark3/agentpane#3, a test matrix across backend, path and client, since the owner does not remember the details.
+  OW-yiduso became ark3/agentpane#4, with the observation at a real browser as its first step.
+  OW-vaviza closed `--done`: Ctrl-F not reaching collapsed tool output is wanted, recorded at `built` in `ToolCard.svelte`, and server-backed search is a new issue, ark3/agentpane#5, which no card carried.
 
 ## The starting proposal
 
