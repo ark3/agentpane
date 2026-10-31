@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: promoted
 ---
 
 # An interrupted Codex turn is marked aborted neither live nor in the stored preview, and live it inherits the previous turn's token count
@@ -37,3 +38,8 @@ Stored, the rollout again kept no assistant message, holding a user-role `<turn_
 
 OW-luvema, filed 2026-09-30, has the preview build items from the rollout's `item_completed` records wherever a rollout carries them, and the `<turn_aborted>` user-role message has no such record, so the stored `user <turn_aborted>` row goes with it, and with it the preview half of this card's `interrupt` entry in `KNOWN_DIFFERENCES`.
 This card keeps its live half and the stored turn's aborted marking, which the `turn_aborted` event still carries.
+
+## Close note
+
+Promoted to ark3/agentpane#11 during the card triage, 2026-10-31.
+The owner wants the findings here measured again on current versions before any design; the issue opens with that re-measurement, then a design discussion, after which the work is split into fresh cards.

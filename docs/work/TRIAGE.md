@@ -38,6 +38,7 @@ Where a decision departs from it, or does not belong to one card, it goes in the
   The owner considers the designs in the cards outdated and expects most issues to need significant design discussion, and implementation will still go through `card`.
   So an issue states the need, summarises the cards' design as dated prior thinking, lists the questions for the design discussion, and is done when the design is agreed, recorded in `docs/DESIGN.md`, and split into cards.
 - 2026-10-31, round 7 (the D27 session-list features): A1 became ark3/agentpane#7 (star and hide, with OW-ruyewe), A2 ark3/agentpane#8 (fork markers), A3 ark3/agentpane#9 (Pi and Claude Code names).
+- 2026-10-31, round 8 (turns drawn wrong): A7 became ark3/agentpane#10 and A8 ark3/agentpane#11; the owner asked that both open by measuring again on current versions.
 
 ## The starting proposal
 
@@ -348,5 +349,6 @@ Overtaken by OW-sofige: the smoke probes now abort twenty thousand characters in
 ## E. Left for the end
 
 - Whether GitHub issues replace cards for new work, or cards stay for new work and only this backlog moves; the AGENTS.md "Cards" section is rewritten accordingly.
+- Sweep `docs/` and code comments for references that present a now-closed card as open or as the carrier of work (D13's "OW-66 carries it", for one), and point them at the issue instead.
 - The GitHub label set: proposed `defect`, `change`, `question`, plus `browser`, `emacs`, `work-laptop`, `browser-testing`.
   The GitHub tools in a cloud session can attach labels but not create them.

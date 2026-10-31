@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: promoted
 ---
 
 # Only the last transcript entry is marked streaming, so an earlier concurrent pending tool call can look complete while it is still running.
@@ -31,3 +32,8 @@ As of `pi 1.2.0` a `role: "system"` message is a visible transcript entry, drawn
 That message becomes `view.lastIndex`, so the assistant message before it loses `streaming` in both clients until the next assistant `message_start`: its cursor disappears for the time to first token.
 Read at the source by OW-wavini's adversarial reader, not run; a tool set changing mid-turn needs an extension, which nothing on the home server installs as of 2026-10-14.
 Whatever fix this card lands should hold for a system message after the streaming one, and the done-condition's entry-level shape may use one.
+
+## Close note
+
+Promoted to ark3/agentpane#10 during the card triage, 2026-10-31.
+The owner wants the findings here measured again on current versions before any design; the issue opens with that re-measurement, then a design discussion, after which the work is split into fresh cards.

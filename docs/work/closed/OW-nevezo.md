@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: promoted
 ---
 
 # After a Pi Stop during an auto-retry backoff, the failed attempt stays drawn as a provider error and nothing says the turn was stopped
@@ -33,3 +34,8 @@ The stored-file preview reads the raw session file, where Pi keeps the failed at
 
 A reducer or adapter test replaying a Stop during the backoff (failed attempt, `agent_end` with `willRetry: true`, `auto_retry_start`, `auto_retry_end` "Retry cancelled", `agent_settled`) asserts the transcript the fix decides on, seen red before the fix and green after.
 A test shows the live transcript and the one hydrated from `get_messages` for the same session agree on whether the failed attempt appears.
+
+## Close note
+
+Promoted to ark3/agentpane#11 during the card triage, 2026-10-31.
+The owner wants the findings here measured again on current versions before any design; the issue opens with that re-measurement, then a design discussion, after which the work is split into fresh cards.
