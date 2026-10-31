@@ -1,6 +1,7 @@
 ---
 labels: [change, d27]
 blocked-by: [OW-jamaha]
+closed: promoted
 ---
 
 # Pi and Claude Code session names are read from the store files the walk already opens
@@ -51,3 +52,8 @@ Each watched red first.
 `ENTRY_READS` in `resources/probes/pi_store_survey.ts` (OW-tadoju), the hand-kept mirror of what `parsePiSession` reads, names `session_info` and its `name`, so that `bun resources/probes/pi_store_survey.ts` no longer lists `entry(session_info)` under "entry types no reader reads"; no test holds that table, so this sentence is all that keeps the survey honest after this card.
 
 `bun run check` passes, and a listing of the home server's real corpus is timed before and after, the figures recorded in the close note with the date; that timing is the guard on enumeration staying cheap, since no parser-level bounded-read test exists (`src/server/sessions/line-reader.test.ts` bounds the reader alone), and OW-20, which waits on a measured listing latency, gets one from it.
+
+## Close note
+
+Promoted to ark3/agentpane#9 during the card triage, 2026-10-31.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

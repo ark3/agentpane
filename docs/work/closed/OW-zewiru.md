@@ -1,6 +1,7 @@
 ---
 labels: [change, d27]
 blocked-by: [OW-66]
+closed: promoted
 ---
 
 # The browser can neither star nor hide a session, nor show the server's session-less notice (D13, D27)
@@ -29,3 +30,8 @@ Each watched red first, in `src/client/App.test.ts`:
 3. The session-less notice renders outside `view.error`, and a later session snapshot leaves it standing; assert on structure, not wording.
 
 `bun run check` passes.
+
+## Close note
+
+Promoted to ark3/agentpane#7 during the card triage, 2026-10-31.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

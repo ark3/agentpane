@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs, d27]
 blocked-by: [OW-66]
+closed: promoted
 ---
 
 # agentpane-mode's picker can neither star nor hide a session, nor show the server's session-less notice (D13, D27)
@@ -28,3 +29,8 @@ Each watched red first, in `emacs/agentpane-test.el`:
 3. The helper's notice notification leaves something the user can see after a following `sessions/list` redraws the picker.
 
 Run the suite as the commentary at the head of `emacs/agentpane-test.el` gives it: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Promoted to ark3/agentpane#7 during the card triage, 2026-10-31.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

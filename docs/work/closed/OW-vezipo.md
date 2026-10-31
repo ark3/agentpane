@@ -1,5 +1,6 @@
 ---
 labels: [change, d27]
+closed: promoted
 ---
 
 # A forked session's row in the list is a character-for-character copy of its parent's, so the two cannot be told apart.
@@ -45,3 +46,8 @@ Each watched red first.
 3. A Claude parser test asserts whatever the live run found.
 
 `bun run check` passes.
+
+## Close note
+
+Promoted to ark3/agentpane#8 during the card triage, 2026-10-31.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

@@ -1,5 +1,6 @@
 ---
 labels: [deferral, d27]
+closed: promoted
 ---
 
 # The Codex name read at thread/start and at a borrowed fork is pinned by a test
@@ -13,3 +14,8 @@ Deferred because a fresh `thread/start` has no name to read, so only the borrowe
 ## Done when
 
 A test drives a borrowed fork whose `thread/resume` answer carries `thread.name` and asserts the fork adapter's `getState().name` before any rename, watched red with that assignment removed.
+
+## Close note
+
+Promoted to ark3/agentpane#9 during the card triage, 2026-10-31.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

@@ -1,6 +1,7 @@
 ---
 labels: [deferral, d27]
 blocked-by: [OW-66]
+closed: promoted
 ---
 
 # Forks pile up in the list as sessions nobody wants back, and nothing hides the kinds of fork that are known dead
@@ -16,3 +17,8 @@ One kind is already known: `docs/MANUAL_TESTING.md`, in the paragraph beginning 
 
 OW-66 has landed and forking has been used long enough for the owner to say which forks they want out of sight.
 Closing this means a decision recorded in `docs/DESIGN.md` beside D13 and D27, whether to set a mark at fork time or not at all, and, if one is set, the cards that build it in both clients' terms per `AGENTS.md`, "Both clients".
+
+## Close note
+
+Promoted to ark3/agentpane#7 during the card triage, 2026-10-31.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

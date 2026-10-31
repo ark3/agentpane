@@ -1,6 +1,7 @@
 ---
 labels: [change, d27]
 blocked-by: [OW-vezipo, OW-bumonu]
+closed: promoted
 ---
 
 # The browser draws a fork's row as a copy of its parent's, with nothing marking the lineage forkedFrom carries (D27)
@@ -19,3 +20,8 @@ Hiding forks automatically is not this card's: D27 leaves it deferred until use 
 
 Watched red first, in `src/client/App.test.ts`: a row whose summary carries `forkedFrom` naming a listed parent draws the marker with that parent's label in its tooltip, and a row with `forkedFrom` null draws none.
 `bun run check` passes.
+
+## Close note
+
+Promoted to ark3/agentpane#8 during the card triage, 2026-10-31.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

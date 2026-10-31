@@ -34,6 +34,10 @@ Where a decision departs from it, or does not belong to one card, it goes in the
   OW-wawipu became ark3/agentpane#6, verify and document, with Pi's resume added.
   OW-68, OW-hilake and OW-hipote declined; OW-hipote's advice moved to AGENTS.md, "Code".
   OW-25 closed `--moot`; OW-20 closed `--done`, its trigger recorded in D9.
+- 2026-10-31, the shape of every issue from round 7 on: one issue per group with its parts as a checklist, not sub-issues, which can be added later.
+  The owner considers the designs in the cards outdated and expects most issues to need significant design discussion, and implementation will still go through `card`.
+  So an issue states the need, summarises the cards' design as dated prior thinking, lists the questions for the design discussion, and is done when the design is agreed, recorded in `docs/DESIGN.md`, and split into cards.
+- 2026-10-31, round 7 (the D27 session-list features): A1 became ark3/agentpane#7 (star and hide, with OW-ruyewe), A2 ark3/agentpane#8 (fork markers), A3 ark3/agentpane#9 (Pi and Claude Code names).
 
 ## The starting proposal
 
