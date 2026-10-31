@@ -1,5 +1,6 @@
 ---
 labels: [deferral, browser-testing]
+closed: declined
 ---
 
 # The condense-side anchor assertion cannot tell a reconcile pin from a bare clamp when the scroller is already at bottom
@@ -14,3 +15,7 @@ The strengthening would be a deterministic way to force the flush-attainable geo
 That needs fixture-height knowledge the harness metrics in `e2e/harness.ts` do not currently expose, which is why OW-gahoki deferred it rather than doing it in place.
 
 Done when the condense-side assertion is shown exercising its strict `anchorOffset` branch deterministically (or this is recorded as declined), with `bunx playwright test e2e/follow.spec.ts` run repeatedly in ordered-file context and `bun run test:browser` green.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: a dead toggle is still caught, at 120.25px by the non-bottom-pinned fixture and by the test's settled assertion, so the indirect coverage stands.

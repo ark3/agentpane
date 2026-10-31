@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: declined
 ---
 
 # A customised shr-bullet that opens with whitespace, or uses a character outside agentpane's marker set, draws Emacs list rows with no hanging indent
@@ -21,3 +22,8 @@ In service of: text in the Emacs client wrapping as the browser's does, whatever
 ## Done
 
 An ert test in `emacs/agentpane-test.el` that draws a bulleted list with `shr-bullet` let-bound to `" * "` and to `"→ "` and expects each row's `wrap-prefix` aligned past the whole marker is red against the code as OW-bisima left it, and green after, with `agentpane-test-text-part-hanging-indents` unchanged.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: neither shr-bullet setting is in use, and agentpane never sets it.
+Reopen if one is; the route the card named, reading shr-continuation-indentation and shr-prefix-length instead of a character set, still applies.

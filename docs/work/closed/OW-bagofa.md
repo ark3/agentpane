@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # Nothing catches the perf harness losing its Edit controls again
@@ -25,3 +26,8 @@ A spec under `e2e/` fails on a `e2e/perf-harness.ts` whose `forkPoints` answers 
 Show it red first by reverting that one method.
 
 Alternatively, if the decision is that a spec loading `e2e/perf.html` is not worth its cost in the browser job, record that decision and its reasoning in the close note and close `--declined`; the divergence is then knowingly unguarded rather than forgotten.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: the perf harness is run by hand and has no assertions by design, and a spec loading e2e/perf.html only to guard its fidelity is not worth its place in the browser job.
+The divergence OW-sibebe fixed is knowingly unguarded; whoever takes perf figures should count `.conversation [data-edit]` against the seeded user messages first (sessions 2, seedTurns 5, otherTurns 5 gave 5).

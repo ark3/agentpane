@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # The Attach button does not focus the prompt when the attach reply beats its snapshot, since no composer is drawn yet
@@ -12,3 +13,7 @@ Since OW-forinu the composer is drawn only in the live mode (`paneMode`), so whe
 The App test's `FakeController.select` in `src/client/App.test.ts` models only the snapshot-first ordering, so nothing covers this.
 
 Done when a test in `src/client/App.test.ts`, red first, has the fake's attach resolve before the view appears and finds the prompt focused once it does; `bun run check` passes.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: it needs the reply-before-snapshot ordering the server makes rare, and costs one click into the prompt.

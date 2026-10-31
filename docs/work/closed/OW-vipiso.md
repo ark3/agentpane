@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: declined
 ---
 
 # agentpane--fit-header measures a header in the selected frame, not the frame whose window it is fitted to, so a transcript shown only on another frame is cut to the wrong width
@@ -17,3 +18,8 @@ If the measure moves to the fit window's frame, that condition is what this chan
 
 A test in `emacs/agentpane-test.el` that shows the transcript only on a second frame whose character width differs from the selected frame's goes red first and green after, asserting the drawn header fits that frame's window.
 Two tty frames on one terminal share a character width, so the test needs frames that differ; if no batch or tty setup can make that, the close note says so and says how the fix was checked instead.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: it needs a transcript shown only on a frame other than the selected one, with different fonts, and was found by reading, never run.
+agentpane--motion-window's selected-frame condition stays as the guard that keeps the vertical-motion path from diverging further.

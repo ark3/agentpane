@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: declined
 ---
 
 # Neither `CodexConnectionRegistry.forget` call site is individually tested, because the fake app-server exits synchronously inside `kill()`
@@ -30,3 +31,7 @@ Whether that is best served by deferring the fake's exit, by a second fake, or b
 The measured CLI behaviour the fake stands in for is in `docs/MANUAL_TESTING.md`, "`thread/unsubscribe` does not release a Codex thread's writer lock (OW-voyezi)" and the section after it, both on `codex-cli 0.154.0`.
 
 This is a test-strength card, not a defect report: both `forget` call sites were read as individually correct, and no sequence was found in which the registry hands out a dead connection.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: both forget call sites were read as individually correct and no sequence hands out a dead connection; what is missing is test strength only.
