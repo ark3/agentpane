@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # The session walkers skip symlinked files and directories silently
@@ -14,3 +15,8 @@ The fix, if wanted, is `stat` on `isSymbolicLink()` entries and the same contain
 
 A test under `src/server/sessions/` creates a temporary store with a symlinked session file and asserts it is listed; it fails before the change.
 Or this card closes `--declined` with the reason.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: nobody is known to symlink a session store or its files.
+Reopen if sessions are found missing behind a link; the fix is a stat of isSymbolicLink() entries plus the containment check OW-fumegi gave the Pi id.

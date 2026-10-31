@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # The SIGKILL survivor report cannot tell a child that outlived SIGKILL from one that exited while something else still holds its pipes
@@ -20,3 +21,8 @@ The decision this card holds is whether the shell should listen for `exit` too, 
 
 The decision is made either way and recorded in that DESIGN bullet.
 If the shell is changed, a test in `src/server/adapters/child-process.test.ts` drives a fake child that emits `exit` but not `close` past `KILL_GRACE_MS` and asserts the report says the process exited with stdio still held, red before the change.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: the survivor report still means that something the server spawned has not let go, which is what a person needs at shutdown.
+The shell still listens for `close` only, so "outlives SIGKILL" in the stderr line, the kill() docblock and the DESIGN bullet names a case it cannot observe; that imprecision stands knowingly.

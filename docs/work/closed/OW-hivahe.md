@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # A Pi fork's session_start notify goes out under the parent's handle before the adapter learns of the move
@@ -15,3 +16,8 @@ What shows is that notice drawn briefly on the parent's view, and only when its 
 
 Worth picking up if an extension whose `session_start` text varies per session shows up in use.
 Done when a Pi fork whose extension notifies at `session_start` with text unlike any notice the parent holds produces no `notice` event under the parent's handle, shown by a `session-manager` or adapter test that fails first.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: nothing is lost, since the fork's snapshot carries the notice, and with the home server's extension the text never varies, so nothing shows as of pi 1.2.0.
+Reopen if an extension whose session_start text varies per session comes into use.

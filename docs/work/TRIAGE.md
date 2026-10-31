@@ -25,6 +25,7 @@ Where a decision departs from it, or does not belong to one card, it goes in the
   OW-vaviza closed `--done`: Ctrl-F not reaching collapsed tool output is wanted, recorded at `built` in `ToolCard.svelte`, and server-backed search is a new issue, ark3/agentpane#5, which no card carried.
 - 2026-10-31, round 2 (declines, performance and memory): OW-nitima, OW-luzipe, OW-suyizo, OW-nodade, OW-gipopo and OW-fanopi declined as proposed.
   OW-luzipe's wording fix was done with it: "O(1) per token" is gone from D3 and the three code comments that repeated it.
+- 2026-10-31, round 3 (declines, server edge cases): OW-pazuwi, OW-vefofo, OW-henazu, OW-hivahe, OW-kahuni and OW-manulu declined as proposed.
 
 ## The starting proposal
 

@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # A turn killed between a tool block's last input_json_delta and its authoritative assistant event now leaves that call's arguments at {}
@@ -29,3 +30,8 @@ Absent that, the cost of reinstating an accumulator to serve one line of stream 
 
 The observable is a hand-built event sequence, not a fixture: no capture stops in that window, so a test must feed `content_block_start`, every `input_json_delta` for the block, and then nothing, and assert on the call's `arguments`.
 Whatever is decided, record the decision in the comment at the `input_json_delta` arm, which is where the next reader meets the coupling.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: the window is one stream line wide, the tool never ran, and reinstating the accumulator would undo OW-bizulo's deletion.
+Reopen on a report of an interrupted turn showing a blank tool card where arguments had streamed.

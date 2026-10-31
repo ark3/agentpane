@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # A rejected thread/compact/start re-raises app-server text unframed
@@ -28,3 +29,7 @@ The framing is deliberately *not* worth generalizing into a helper across the tw
 
 `src/server/adapters/codex/adapter.test.ts` grows a case that goes red first and green after, driving a failing `thread/compact/start` -- the fixture already supports it via `configureHappyServer`'s `failCompact` option -- and asserting the error the caller receives carries the adapter's own framing alongside app-server's message.
 The existing `failCompact` tests assert the reducer's compaction state is rolled back; this is about the error text those tests let through.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: compact()'s own guards refuse first, and no window has been seen where app-server rejects a compaction the adapter was willing to send.

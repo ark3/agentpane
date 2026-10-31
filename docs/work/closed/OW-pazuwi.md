@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # A command written before a stdin EPIPE waits until close, which never comes if the child keeps running
@@ -15,3 +16,8 @@ No backend is known to close its stdin while staying alive, which is why this is
 If one is ever seen doing it, the load-bearing question is whether a stdin EPIPE should itself be treated as the child's death — kill it and report — rather than waiting on `close`.
 
 Done when a test in `src/server/adapters/child-process.test.ts` emits `error` on the fake child's stdin with no `close` and asserts the shell reports a death within a bounded time (fake timers), red before the change; or the card closes `--declined` with that reasoning recorded.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: no backend is known to close its stdin and stay alive, and a child that really dies still reports through `close`.
+Reopen if one is seen doing it; the question is then whether a stdin EPIPE should itself count as the child's death.
