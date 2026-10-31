@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: promoted
 ---
 
 # A Pi compaction holds its session's mutation queue until it ends, and whether a Pi compact sent mid-turn waits for the turn is unmeasured
@@ -31,3 +32,8 @@ Since OW-sewewe, one request that never settles holds every later queued verb on
 - A live run on the home server with `pi --model openrouter/deepseek/deepseek-v4.1-flash:high`, recorded in `docs/MANUAL_TESTING.md` under a heading naming this card and the `pi` version, answers two things: when Pi's `compact` response arrives relative to `compaction_start` and `compaction_end`, and what Pi does with `compact` sent mid-turn: whether it answers before the turn ends, waits for it, or refuses.
 - The decision on whether `PiAdapter.compact` keeps settling on Pi's response or settles earlier, so the queue admits the next verb once the compaction has started, is recorded in `#serially`'s docblock with the measurement it rests on, whichever way it goes.
   If it changes, a test in `src/server/adapters/pi/process.test.ts` shows `compact` settling at the new point, red first.
+
+## Close note
+
+Promoted to ark3/agentpane#12 during the card triage, 2026-10-31.
+The owner wants the findings here measured again on current versions before any design; the issue opens with that re-measurement, then a design discussion, after which the work is split into fresh cards.

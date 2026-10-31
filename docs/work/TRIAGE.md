@@ -39,6 +39,7 @@ Where a decision departs from it, or does not belong to one card, it goes in the
   So an issue states the need, summarises the cards' design as dated prior thinking, lists the questions for the design discussion, and is done when the design is agreed, recorded in `docs/DESIGN.md`, and split into cards.
 - 2026-10-31, round 7 (the D27 session-list features): A1 became ark3/agentpane#7 (star and hide, with OW-ruyewe), A2 ark3/agentpane#8 (fork markers), A3 ark3/agentpane#9 (Pi and Claude Code names).
 - 2026-10-31, round 8 (turns drawn wrong): A7 became ark3/agentpane#10 and A8 ark3/agentpane#11; the owner asked that both open by measuring again on current versions.
+- 2026-10-31, round 9 (Pi's Stop and fork): A9 became ark3/agentpane#12 and A10 ark3/agentpane#13, both opening with a re-measurement.
 
 ## The starting proposal
 

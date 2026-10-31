@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-jifibo]
+closed: promoted
 ---
 
 # A Pi stop waits out every unanswered prompt's preflight, so an extension command awaiting idle defeats Stop, and client timeouts outrun the waits
@@ -47,3 +48,8 @@ The decision must keep what OW-jifibo's test "sends its clear only once ..." in 
 - Case 2 has a test, red first, at whichever layer the decision puts the fix, showing a held prompt whose client has gone is not later sent; or the decision records why it is.
 - Case 3: `agentpane-abort`'s timeout matches the server's bound, with an ERT test in `emacs/agentpane-test.el` if the change is more than the constant.
 - `bun run check` passes.
+
+## Close note
+
+Promoted to ark3/agentpane#12 during the card triage, 2026-10-31.
+The owner wants the findings here measured again on current versions before any design; the issue opens with that re-measurement, then a design discussion, after which the work is split into fresh cards.

@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: promoted
 ---
 
 # A Pi fork at the first message of a 0.86.0+ session may restore the early model, not the parent's current one
@@ -41,3 +42,8 @@ So Pi restores the opening level, not the parent's current one, and the done-con
 The same section's fact 5 confirms that on a file written since `0.86.0` the kept system message counts, so `keptNoMessage` in `fork` never fires for a first-message fork of such a file.
 The model half is still unrun: no run has yet `set_model`ed to another model after a turn, resumed, and forked at the first user message.
 What remains of the live run is that half, by the method above; the test the done-condition names covers both the model and the level.
+
+## Close note
+
+Promoted to ark3/agentpane#13 during the card triage, 2026-10-31.
+The owner wants the findings here measured again on current versions before any design; the issue opens with that re-measurement, then a design discussion, after which the work is split into fresh cards.
