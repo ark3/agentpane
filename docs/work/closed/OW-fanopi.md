@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: declined
 ---
 
 # The visual-wrap width memo agentpane--insert-html keeps lives for one text part, so a full redraw still measures each list marker once per text part, about 142 calls where one memo per redraw would make 24
@@ -16,3 +17,7 @@ Worth doing only if a profile of a graphical redraw shows the visual-wrap pass s
 ## Done
 
 A test in `emacs/agentpane-test.el` in the manner of `agentpane-test-list-rows-measure-once-per-text-part`, drawing two text parts with the same list markers, red at twice the one-part count against today's code and green at the one-part count, with `agentpane-test-text-part-hanging-indents` unchanged.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: the saving is about 7-14 ms per full redraw, and the card itself made it worth doing only if a profile of a graphical redraw showed the visual-wrap pass standing out.

@@ -219,8 +219,9 @@ export type ServerEvent =
 	| {
 			/**
 			 * Streaming only ever touches the tail, and completed messages are
-			 * immutable -- so this is O(1) per token regardless of transcript
-			 * length. `index` may equal messages.length to append.
+			 * immutable -- so a token costs the same whatever the transcript's
+			 * length, though it re-sends the whole message so far (D3).
+			 * `index` may equal messages.length to append.
 			 */
 			type: "upsert";
 			session: SessionRef;

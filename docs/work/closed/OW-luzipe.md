@@ -1,6 +1,7 @@
 ---
 labels: [deferral]
 blocked-by: [OW-lisaye]
+closed: declined
 ---
 
 # D3 calls the tail upsert "O(1) per token", but it re-sends the whole message, so a turn is quadratic in its own length.
@@ -77,3 +78,9 @@ No measurement has been made.
 
 "O(1) per token" sits in four places, and the wording fix covers all of them: D3 in `docs/DESIGN.md` ("upsert during a turn — O(1) per token"), the `#onUpdate` docblock in `session-manager.ts`, the `upsert` variant's docblock in `src/shared/protocol.ts` ("so this is O(1) per token regardless of transcript length"), and a comment in `src/server/http/app.test.ts` ("That is what makes a turn O(1) per token.").
 The `src/emacs/helper.ts` docblock (OW-jeruye) already states the per-message cost -- "The server sends every streamed token as an `upsert` carrying the whole message so far" -- and is the citation to reuse.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: the per-message re-send is real but has never shown up in a profile, and the 2026-08-19 profile found client render cost two orders of magnitude larger.
+The wording half was done in the same change: "O(1) per token" is gone from D3 in docs/DESIGN.md, the upsert docblock in src/shared/protocol.ts, the #onUpdate docblock in src/server/http/session-manager.ts and the comment in src/server/http/app.test.ts, each now saying the cost is free of the transcript's length but not of the message's.
+Reopen with a measurement of bytes per turn on the SSE stream from a real turn; coalescing upserts in the broadcaster is the cheap route, a delta event would reverse D3.

@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: declined
 ---
 
 # agentpane-mode draws a backlog of session/node once per pipe read that holds one, not once for the whole backlog
@@ -13,3 +14,8 @@ Worth picking up if agentpane-mode is still observed lagging during a streaming 
 An idle timer, or a short non-zero delay, in `agentpane--record` are the obvious levers; the constraint on either is that every non-snapshot notification must still find the recorded nodes drawn before it is handled, which `agentpane--on-notification` already guarantees independently of the timer.
 
 Done: a batch test or a recorded live run that feeds a backlog across more than one process-filter call shows how many redraws it costs before and after, with the change's cost to latency stated beside it.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: the extra redraws were inferred from source, never measured, and no lag has been seen since OW-jeruye capped node updates at one per 250 ms.
+Reopen if agentpane-mode is seen lagging during a streaming turn; an idle timer or a short delay in agentpane--record are the levers the card named.

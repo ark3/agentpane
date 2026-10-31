@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # SSE writes have no backpressure, so a stalled tab accumulates whole-transcript snapshots in server memory without bound
@@ -20,3 +21,8 @@ A test in `app.test.ts` or `broadcaster.test.ts` holds a subscriber's reader clo
 
 Under D25 a client whose stream drops detaches every session it held (OW-fiheli, OW-mepufi), so the policy of dropping a stalled subscriber and letting it reconnect into fresh snapshots is no longer free: it detaches that tab's live sessions.
 Weigh that when choosing the bound.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: nothing has been observed, and the stream is loopback.
+Reopen if server memory is seen to grow with a stalled or throttled tab; the policy choice (drop the subscriber, which under D25 detaches its sessions, or coalesce snapshots per subscriber) is still the first decision.

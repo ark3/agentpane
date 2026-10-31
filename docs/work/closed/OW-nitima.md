@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # Every Codex delta rebuilds the whole transcript array and rescans every slot, which is linear in the transcript per token
@@ -16,3 +17,8 @@ The card that measures it should use the `compact.jsonl` fixture replayed severa
 ## Done when
 
 A reducer benchmark under `src/server/adapters/codex/` records the per-delta cost at one, ten, and fifty replays of `compact.jsonl`, and either the cost is flat after the change or the number is recorded here as acceptable.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: no session has been measured at a length where per-delta transcript rebuilding shows.
+Reopen if a long Codex (or Pi) session is seen to lag while streaming; the measurement this card describes, compact.jsonl replayed one, ten and fifty times through the reducer, is still the way in.

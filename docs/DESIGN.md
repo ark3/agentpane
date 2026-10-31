@@ -163,7 +163,7 @@ What loopback does *not* make free is serialization CPU: re-serializing the whol
 But streaming only ever touches the tail, and completed messages are immutable, so:
 
 - snapshot on attach, reconnect, and session switch
-- `{seq, index, message}` upsert during a turn — O(1) per token
+- `{seq, index, message}` upsert during a turn — constant in the transcript's length, since only the tail message goes out, but not in the message's: each upsert carries the whole message so far, so a turn costs the square of its own length on the wire, which the 2026-08-19 profile found buried under client render cost and which nobody has measured since (OW-luzipe, declined 2026-10-31)
 - a `status` event for a change to the status fields alone, a turn's start and end among them (OW-yirosu)
 - beyond attach, reconnect and session switch, a snapshot goes out only where no upsert or `status` can say what changed; as of OW-yirosu those are a rename of the session's id, a transcript replaced wholesale, an update naming an index that holds no message, and a changed message landing with a compaction change (OW-jelovu)
 - an `error-cleared` event when the server stops holding a session's turn error, at the admission of a prompt that started or joined a turn or a client's dismissal, which until OW-jopifu only a snapshot could say

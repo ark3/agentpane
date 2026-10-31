@@ -1198,8 +1198,9 @@ export class SessionManager {
 	/**
 	 * D3's tail upsert. The adapter's `change` says what moved, and each kind
 	 * goes out as the smallest event that reports it: a changed message as an
-	 * upsert, O(1) per token; a status-only change, a turn's start and end
-	 * among them, as a `status`, and as nothing when nothing moved; and only a
+	 * upsert carrying the whole message so far, never the transcript; a
+	 * status-only change, a turn's start and end among them, as a `status`,
+	 * and as nothing when nothing moved; and only a
 	 * replaced transcript as a snapshot. A snapshot sends every message to
 	 * every client, and the Emacs helper re-projects and redraws all of them,
 	 * which on a 348-message session held each prompt 1-2s before its draft

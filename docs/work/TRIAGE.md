@@ -23,6 +23,8 @@ Where a decision departs from it, or does not belong to one card, it goes in the
   OW-taweso became ark3/agentpane#3, a test matrix across backend, path and client, since the owner does not remember the details.
   OW-yiduso became ark3/agentpane#4, with the observation at a real browser as its first step.
   OW-vaviza closed `--done`: Ctrl-F not reaching collapsed tool output is wanted, recorded at `built` in `ToolCard.svelte`, and server-backed search is a new issue, ark3/agentpane#5, which no card carried.
+- 2026-10-31, round 2 (declines, performance and memory): OW-nitima, OW-luzipe, OW-suyizo, OW-nodade, OW-gipopo and OW-fanopi declined as proposed.
+  OW-luzipe's wording fix was done with it: "O(1) per token" is gone from D3 and the three code comments that repeated it.
 
 ## The starting proposal
 

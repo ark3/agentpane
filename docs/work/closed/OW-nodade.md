@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # The browser's foldSessionTurns never drops a key the live session map no longer carries, so its streaming and finished tables grow for the life of the tab
@@ -12,3 +13,7 @@ Under the "Both clients" rule in AGENTS.md this is internal housekeeping, not a 
 
 Confirm first whether the map `App.svelte` passes carries every live session, as the Emacs listing does; dropping absent keys is only right if absence means let go.
 Done when a vitest case in `src/client/session-turns.test.ts` folds a map without a key previously observed and asserts the key is gone from both tables — red before, green after — or when it is declined in the `foldSessionTurns` docblock with the reason.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: the stale keys cost a few bytes per released session until the tab reloads, and since handles are never reused nothing is ever drawn from them.

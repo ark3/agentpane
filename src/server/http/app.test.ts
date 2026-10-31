@@ -387,7 +387,7 @@ describe("SSE stream", () => {
 		);
 
 		// Only ever the tail moves, and it moves by index -- never by resending
-		// the transcript. That is what makes a turn O(1) per token.
+		// the transcript. That keeps a token's cost free of the transcript's length.
 		expect(client.typed("upsert").map((u) => u.index)).toEqual([0, 1, 1]);
 		expect(client.typed("status").map((s) => s.isStreaming)).toEqual([true, false]);
 		expect(client.typed("snapshot")).toHaveLength(1);
