@@ -32,6 +32,8 @@ Run it through an uncommitted config that spreads `playwright.config.ts` and set
 - The `@earendil-works/pi-*` packages are types-only (D10).
   `import type` only; `src/import-boundaries.test.ts` fails the build and names your file.
 - Assert on structure, never on model wording — fixture text varies per capture.
+- `src/client/App.svelte` has three seams it does not yet use: the scroll, follow and nav-rail engine, the session list, and the composer.
+  Split them out when a change touches two of them at once, never as a drive-by, and keep `$state.raw` on `view` confining re-parsing to the tail block (D5), which `App.streaming-cost.test.ts` and `App.sort-cost.test.ts` measure (OW-hipote, declined as a card 2026-10-31).
 
 ## Documentation
 

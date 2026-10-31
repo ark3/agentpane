@@ -315,6 +315,8 @@ So:
 - **No index cache initially.** pipane caches its Pi index at `~/.pi/agent/cache/`, and Codex's `thread/list` has a `useStateDbOnly` escape hatch, so both upstreams evidently found listing slow at some point.
   Our numbers do not justify a cache yet.
   Leave room for one; do not build it.
+  What triggers one is a measured listing latency, not corpus size: `GET /api/sessions` timed slow enough to notice in a client on the owner's real corpus, recorded here beside the numbers above, then a decision (OW-20, 2026-10-31).
+  The walk is readdir-only and its per-file reads are bounded and abandoned early, so a bigger corpus alone does not settle it, and a listing slowed by one store's pathological files is a different problem with a different fix.
 - **Tolerate header drift.** 5 of 583 Codex files use an older bare `{id,timestamp}` header with no `cwd`.
   Bucket those as unknown-workspace rather than failing the walk.
   Expect more drift over time — the walk should never throw on a file it does not recognise.

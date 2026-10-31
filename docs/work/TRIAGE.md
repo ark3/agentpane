@@ -29,6 +29,11 @@ Where a decision departs from it, or does not belong to one card, it goes in the
 - 2026-10-31, round 4 (declines, client edge cases and test strength): OW-didose, OW-vipiso, OW-dulime, OW-weboto, OW-yorita, OW-bagofa and OW-wayovu declined as proposed.
 - 2026-10-31, round 5 (the last declines): OW-muvili, OW-husuju, OW-tegoje, OW-kehose and OW-miwofi declined as proposed, and OW-12 closed `--moot`.
   OW-ruyewe moved into A1 instead of being declined, to close `--promoted` with that issue.
+- 2026-10-31, round 6 (the small decisions):
+  OW-40 is to be built eventually, so it joins A4, the browser-parity issue, and closes `--promoted` with it.
+  OW-wawipu became ark3/agentpane#6, verify and document, with Pi's resume added.
+  OW-68, OW-hilake and OW-hipote declined; OW-hipote's advice moved to AGENTS.md, "Code".
+  OW-25 closed `--moot`; OW-20 closed `--done`, its trigger recorded in D9.
 
 ## The starting proposal
 
@@ -65,10 +70,11 @@ OW-mepivi is one missing test on the Codex name read; it fits naturally here.
 - OW-kokemo  forkAndSubmit resolves to an attach reply its only caller reads as a boolean, and its docblock still justifies the handle for a lookup nothing performs
 - OW-zigepi  The browser keeps one composer draft across every session, where each agentpane-mode transcript keeps its own
 - OW-homeja  The browser's session list sorts by recency only, where agentpane-mode's picker sorts by its Backend, Status or Updated column
+- OW-40  No way to start a session in a workspace that has no existing sessions.
 
 Plain fork, a draft per session, sortable list.
 OW-kokemo depends on OW-sobutu's design, so it goes with it.
-OW-40 joins this if you say yes (see below).
+OW-40 joined in round 6: the owner wants it built eventually.
 
 ### A5. agentpane-mode parity with the browser
 
@@ -225,10 +231,6 @@ Both are cheap.
 **Needs you, now.** Does Ctrl-F find text inside a collapsed tool card?
   Either way: accept the loss (I write that into the `built` docblock and close), or file an issue.
 
-- OW-40  No way to start a session in a workspace that has no existing sessions.
-**Your call.** Starting a session in a brand-new workspace from the browser.
-  You deferred it twice ("do not build without asking"), but agentpane-mode can already do it, so it is now a parity gap.
-  If you say build it, it goes into the browser-parity issue; if not, I decline it.
 
 - OW-68  Nothing pushes, so the two clones only converge when the owner moves commits by hand.
 **Your call.** "Nothing pushes." Moving to GitHub issues makes pushing matter more (issue links point at files on `main`).

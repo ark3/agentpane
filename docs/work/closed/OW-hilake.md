@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # The expanded-block dialog claims `aria-modal` without trapping focus, and the streaming and thinking dots label bare spans that screen readers drop
@@ -17,3 +18,8 @@ Three accessibility gaps found by reading on 2026-09-09, none reproduced with a 
 ## Done when
 
 A test per item in the component's test file asserts the new structure: focus stays inside the dialog on Tab from its last control, the dots carry a role, and the menu's role matches its behaviour.
+
+## Close note
+
+Declined by the owner on 2026-10-31 in the card triage: agentpane has one user, who does not rely on a screen reader or keyboard-only navigation.
+The three gaps stand as found: Expanded.svelte claims aria-modal without trapping focus, the streaming and thinking dots label bare spans, and the tools menu's role="menu" promises arrow keys it does not bind.

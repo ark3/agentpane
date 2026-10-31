@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # `App.svelte` is 1300 lines with no style block and three seams it is not using: the follow engine, the session list, and the composer
@@ -23,3 +24,8 @@ Do not take it as a drive-by inside another card: `docs/DESIGN.md` D5 records th
 ## Done when
 
 The three files exist, `App.svelte` holds only wiring, and `App.streaming-cost.test.ts` and `App.sort-cost.test.ts` report the same counts as before the split.
+
+## Close note
+
+Declined as a card by the owner on 2026-10-31 in the card triage: nothing is broken, and the split is worth taking only when a change touches two of the three seams.
+Its advice moved to AGENTS.md, "Code", where the implementer of the star/hide and browser-parity issues will meet it, including the D5 constraint that a split must keep.

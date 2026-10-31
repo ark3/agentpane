@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: promoted
 ---
 
 # agentpane-created Claude sessions are hidden from the claude --resume picker by their sdk-cli entrypoint, while its Codex sessions show up as vscode
@@ -41,3 +42,8 @@ So the sentence the done-condition asks for goes in D9's paragraph opening "**RE
 `buildClaudeSpawnCommand` in `src/server/adapters/claude/process.ts` still passes `-p` with stream-json input and output, read at b758f98.
 Nothing in `docs/` or `src/` records either half yet.
 The Codex fixtures carry `"source":"vscode"` headers -- `resources/fixtures/codex/compact-rollout.rollout.jsonl`'s `session_meta` on `codex-cli 0.157.1` among them -- which shows the tag but not what `codex resume` does with it.
+
+## Close note
+
+Promoted to ark3/agentpane#6 during the card triage, 2026-10-31.
+The owner expects `claude --resume <id>` to reopen an agentpane session the picker hides, and wants that verified and documented; the issue adds Pi's resume to the two halves this card carried.
