@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: promoted
 ---
 
 # An attach that joins a virtual session's failed start during its reaping gives the virtual container back the name the failure took, so the stored session under that name is hidden and resolves to the virtual one
@@ -21,3 +22,8 @@ OW-kamave also made `#start`'s arbitration hand an attach over to a startup that
 
 A test in `src/server/http/session-manager.test.ts` drives steps 1 to 3 with the dispose held (the OW-yufazo tests under "a rename announced inside start()" have the fakes: `renamingInsideStart`, `holdDispose`), and asserts, after the reaping, that `summaryOf(R)` does not answer the virtual container and that `list()` carries R's stored row. It goes red first and green after.
 The rule it rests on is written once, where a hold decides whether to name the container. It must not be a check at each caller.
+
+## Close note
+
+Promoted to ark3/agentpane#27 during the card triage, 2026-11-01.
+The owner chose to simplify the session manager's startup and naming state rather than add another guard; this card is one of the issue's examples, which the simplification must make impossible or cover with a test.

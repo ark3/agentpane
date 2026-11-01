@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: promoted
 ---
 
 # close()'s reach through names has two edges: a later close can replace an earlier one's #disposing entry, and the closure over a startup's keys can reach a startup of another container when a backend's rename disagrees with the index
@@ -24,3 +25,7 @@ The comment in `close()` beside the closure says this. Look for "the closure ove
 ## Done when
 
 Each edge is either a test in `src/server/http/session-manager.test.ts` that goes red first and green after, or closed as not worth fixing with the reason recorded here. A fix for 2 must come from what owns a name (the table owns a name a container answers to), not from a skip at the closure site.
+
+## Close note
+
+Promoted to ark3/agentpane#27 during the card triage, 2026-11-01, as an example for simplifying the session manager's startup and naming state.

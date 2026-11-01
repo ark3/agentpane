@@ -54,6 +54,8 @@ Where a decision departs from it, or does not belong to one card, it goes in the
 - 2026-11-01, round 13 (lost Emacs errors, A16): OW-fakefe and OW-zugetu became ark3/agentpane#25, OW-fakefe small enough to card directly and OW-zugetu the lower priority.
 - 2026-11-01, round 14 (a server that goes away, A17): OW-pohusi and OW-vipito became ark3/agentpane#26, reframed by the owner.
   The direction, which may bear on later groups too: most of this logic guards fiddly cases that do not happen in use, so a heavier-handed but simpler rule is warranted, and such logic belongs in TypeScript shared by the web UI and the Emacs helper, not in elisp.
+  At the owner's request, ark3/agentpane#17 and ark3/agentpane#25 each gained a paragraph saying the direction applies there too.
+- 2026-11-01, round 15 (session-manager edge cases, A13): OW-giyimu and OW-loromi became ark3/agentpane#27, "Simplify the session manager's startup and naming state", in #26's spirit, with the two as its examples.
 
 ## The starting proposal
 
