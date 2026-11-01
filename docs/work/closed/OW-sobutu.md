@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: promoted
 ---
 
 # The browser can fork only by sending an edited message, where agentpane-mode's f forks at a message and opens the fork with nothing sent
@@ -15,3 +16,8 @@ The Emacs behaviour is pinned by ERT `agentpane-test-fork-at-a-fork-point`, `age
 Where the control sits is this card's to choose; D20 already limits it to messages a fork point names.
 
 Done when a test in `src/client/App.test.ts` or `src/client/controller.test.ts` sees the fork created and selected with no prompt sent, red before the change and green after.
+
+## Close note
+
+Promoted to ark3/agentpane#17 during the card triage, 2026-11-01.
+The owner decided the opposite of this card: the browser's edit-and-send fork is the right model, and agentpane-mode's f, which opens a fork with nothing sent, is to change to it. The issue carries that change; nothing here is to be built as filed.

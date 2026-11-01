@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: promoted
 ---
 
 # agentpane-mode can copy only the text shr drew for a block, where the browser's Copy takes the block's markdown source
@@ -15,3 +16,8 @@ A text node's `text` is its markdown source, alongside the `html` drawn from it 
 The browser's behaviour is pinned by `src/client/render/BlockActions.test.ts` "copies a text block's markdown source, not its rendered prose" and "copies the whole source from the panel".
 
 Done when an ERT test in `emacs/agentpane-test.el` runs the command at a text node whose markdown differs from its rendering and finds that markdown at the head of the kill ring, red before the change and green after.
+
+## Close note
+
+Promoted to ark3/agentpane#18 during the card triage, 2026-11-01.
+One of four small agentpane-mode parity gaps the issue carries as a checklist, to be checked against the code and then carded directly.

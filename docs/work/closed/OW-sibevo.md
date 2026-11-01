@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: promoted
 ---
 
 # agentpane-mode draws an image part as an [image <mime>] line, where the browser draws the image itself
@@ -18,3 +19,8 @@ ERT `agentpane-test-tool-result-images-in-the-fold` in `emacs/agentpane-test.el`
 Done when ERT tests go red before the change and green after.
 One stubs whatever display predicate the code gates on, since neither `--batch` nor a tty frame can display images, and sees a PNG part inserted with an image `display` property.
 One sees a part whose mime type is not an image refused.
+
+## Close note
+
+Promoted to ark3/agentpane#23 during the card triage, 2026-11-01.
+The owner asked for one discussion covering everything about images in agentpane; the issue also takes in generated images, from OW-kehose, declined earlier in the triage.

@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: promoted
 ---
 
 # agentpane-mode does not mark which user messages are fork points, so a user learns one is not only by pressing f on it (D20)
@@ -22,3 +23,8 @@ Done when an ERT test in `emacs/agentpane-test.el` draws a transcript with one f
 
 Under D25 the fork-points route no longer attaches first (OW-sirofi): fetching points for a preview is refused rather than spawning a backend.
 The conclusion above, fetch only for an attached buffer, holds; its reason changes.
+
+## Close note
+
+Promoted to ark3/agentpane#17 during the card triage, 2026-11-01.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

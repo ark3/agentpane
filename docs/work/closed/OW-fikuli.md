@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs-native]
+closed: promoted
 ---
 
 # agentpane-mode draws neither of the browser's empty-transcript lines, Waiting for the agent… and No messages yet.
@@ -19,3 +20,8 @@ Every path that changes the nodes or the streaming status already calls `agentpa
 
 `ert` tests in `emacs/agentpane-test.el` show each line under the browser's condition and not otherwise — an empty snapshot not streaming shows "No messages yet.", a streaming one with no nodes shows "Waiting for the agent…", and neither shows once a drawn node arrives — shown red before the change, with the pass count in `emacs/agentpane.el`'s Commentary updated.
 The helper `agentpane-test--above-prompt` there returns whatever that overlay shows.
+
+## Close note
+
+Promoted to ark3/agentpane#18 during the card triage, 2026-11-01.
+One of four small agentpane-mode parity gaps the issue carries as a checklist, to be checked against the code and then carded directly.

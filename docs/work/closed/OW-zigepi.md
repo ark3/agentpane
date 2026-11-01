@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: promoted
 ---
 
 # The browser keeps one composer draft across every session, where each agentpane-mode transcript keeps its own
@@ -15,3 +16,8 @@ The nearest ERT, `agentpane-test-attach-onto-a-held-handle-keeps-drafts` in `ema
 Two other things hold a draft in the browser and bear on the change: the `displacedDraft` an edit keeps from `startEdit` until the release `$effect` beside `heldQueued` gives it back (renamed from `stashedDraft` by OW-kijuju), and the external editor round trip through `/api/edit-draft`.
 
 Done when a test in `src/client/App.test.ts` types into session A, switches to B and finds B's own draft, then switches back and finds A's text, red before the change and green after.
+
+## Close note
+
+Promoted to ark3/agentpane#19 during the card triage, 2026-11-01.
+The owner decided agentpane-mode's one draft per session is right, and the browser should match it.

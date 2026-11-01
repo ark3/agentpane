@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: promoted
 ---
 
 # agentpane-mode's n and p step through every node, with no key that steps between user messages as the browser's rail does
@@ -14,3 +15,8 @@ No wire is needed.
 The browser's behaviour is pinned by `src/client/App.test.ts` "steps the rail between user turns".
 
 Done when an ERT test in `emacs/agentpane-test.el` draws a transcript interleaving user, assistant and tool nodes and sees the new command land only on user nodes in both directions, red before the change and green after.
+
+## Close note
+
+Promoted to ark3/agentpane#18 during the card triage, 2026-11-01.
+One of four small agentpane-mode parity gaps the issue carries as a checklist, to be checked against the code and then carded directly.

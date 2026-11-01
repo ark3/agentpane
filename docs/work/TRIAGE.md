@@ -41,6 +41,15 @@ Where a decision departs from it, or does not belong to one card, it goes in the
 - 2026-10-31, round 8 (turns drawn wrong): A7 became ark3/agentpane#10 and A8 ark3/agentpane#11; the owner asked that both open by measuring again on current versions.
 - 2026-10-31, round 9 (Pi's Stop and fork): A9 became ark3/agentpane#12 and A10 ark3/agentpane#13, both opening with a re-measurement.
 - 2026-10-31, round 10 (Codex): A6 became ark3/agentpane#14, A11 ark3/agentpane#15, A12 ark3/agentpane#16; A14's OW-sujizi and OW-hejoza were declined instead of filed.
+- 2026-11-01, round 11 (parity between the clients), reshaped by the owner rather than filed as two checklists:
+  The browser's edit-and-send fork is right and agentpane-mode's is wrong: `f` on an earlier message is to start that behaviour. ark3/agentpane#17 carries it with OW-wozoju and OW-bileva, and OW-sobutu, which proposed the opposite, closed into it.
+  agentpane-mode's draft per session is right: OW-zigepi is ark3/agentpane#19, the browser to match.
+  Session list features wait for a discussion with more features than the cards held: OW-homeja is ark3/agentpane#20.
+  The Emacs backend default matters far more than a new-folder session: OW-radoga is ark3/agentpane#21, OW-40 is ark3/agentpane#22, marked low priority.
+  Images get one discussion covering everything about them: OW-sibevo is ark3/agentpane#23, which also takes in the declined OW-kehose.
+  The other four Emacs gaps (OW-yidapi, OW-zudihi, OW-kafupo, OW-fikuli) are ark3/agentpane#18.
+  OW-kokemo, with OW-sobutu declined in substance, is a plain internal tidy-up and moves into A24, renamed "Small code cleanups".
+- 2026-11-01, batch size: the owner found round 11's thirteen cards confusing, so from round 12 on each round briefs one group.
 
 ## The starting proposal
 
@@ -74,7 +83,6 @@ OW-mepivi is one missing test on the Codex name read; it fits naturally here.
 ### A4. Browser parity with agentpane-mode
 
 - OW-sobutu  The browser can fork only by sending an edited message, where agentpane-mode's f forks at a message and opens the fork with nothing sent
-- OW-kokemo  forkAndSubmit resolves to an attach reply its only caller reads as a boolean, and its docblock still justifies the handle for a lookup nothing performs
 - OW-zigepi  The browser keeps one composer draft across every session, where each agentpane-mode transcript keeps its own
 - OW-homeja  The browser's session list sorts by recency only, where agentpane-mode's picker sorts by its Backend, Status or Updated column
 - OW-40  No way to start a session in a workspace that has no existing sessions.
@@ -216,12 +224,13 @@ This is done by hand on the work laptop; the issue keeps the exact commands.
 You called these not urgent.
 The choice is between keeping them as one issue and declining them; see the questions below.
 
-### A24. Small server cleanups
+### A24. Small code cleanups
 
 - OW-geveja  Claude's `toolNames` is a per-turn map that nothing expires
+- OW-kokemo  forkAndSubmit resolves to an attach reply its only caller reads as a boolean, and its docblock still justifies the handle for a lookup nothing performs
 - OW-tijilo  The server repeats small helpers across adapters and session readers: ZERO_USAGE, isRecord, idFromFilename, the Claude store root
 
-A leaking per-turn map and duplicated helpers.
+A leaking per-turn map, a return value nobody reads (OW-kokemo, moved here in round 11), and duplicated helpers.
 Both are cheap.
 
 ## B. Questions for you

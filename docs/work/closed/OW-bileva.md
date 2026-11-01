@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs]
 blocked-by: [OW-kihisa]
+closed: promoted
 ---
 
 # agentpane-mode's edit says C-RET forks even when the send will first stop a streaming Pi turn, where the browser's button says Stop and fork
@@ -16,3 +17,8 @@ The exact wording, and whether it lives in the overlay or elsewhere, is this car
 OW-jerege, the Stop and edit shortcut, touches the same state and may land either side of this.
 
 Done when an ERT test in `emacs/agentpane-test.el`, run as that file's Commentary says, goes red before the change and green after: it opens an edit on a Pi buffer, drives a turn start and a turn end through the notifications the existing streaming tests use, and asserts the edit's displayed text names the stop only while the turn streams.
+
+## Close note
+
+Promoted to ark3/agentpane#17 during the card triage, 2026-11-01.
+The owner considers the design this card carries out of date: the issue keeps it as prior thinking and opens with a design discussion, after which the work is split into fresh cards.

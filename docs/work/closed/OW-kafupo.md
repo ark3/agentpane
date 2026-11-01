@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: promoted
 ---
 
 # A previewed transcript in agentpane-mode stays as drawn until g, where the browser's preview refreshes itself (OW-76)
@@ -23,3 +24,8 @@ Done when an ERT test in `emacs/agentpane-test.el` sees a shown preview buffer r
 Once OW-vugefa lands (D26 point 7 in `docs/DESIGN.md`), a buffer is a preview exactly when it is not `agentpane--attached`, which is the predicate to gate the poll on.
 A poll answered `404` `gone` (OW-royosa) kills the buffer as any other preview read does there, matching the browser's `refetchPreview` under OW-lilami.
 Building this before OW-vugefa means gating on `(and (not agentpane--attached) (not agentpane--dropped))` and changing it when the flag goes.
+
+## Close note
+
+Promoted to ark3/agentpane#18 during the card triage, 2026-11-01.
+One of four small agentpane-mode parity gaps the issue carries as a checklist, to be checked against the code and then carded directly.

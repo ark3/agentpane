@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: promoted
 ---
 
 # agentpane-mode's new session asks for a backend with no default and takes the calling buffer's project, where the browser's New conversation inherits the selected session's backend and workspace (OW-72)
@@ -17,3 +18,8 @@ The browser's behaviour is pinned by `src/client/App.test.ts` "the composer's Ne
 Run from a buffer that is not a transcript, today's behaviour stays.
 
 Done when an ERT test in `emacs/agentpane-test.el`, using the stubbed request that `agentpane-test--new-session` sets up, runs the command from a transcript whose session's cwd differs from the buffer's project, and sees `sessions/create` sent with that session's backend and cwd, red before the change and green after.
+
+## Close note
+
+Promoted to ark3/agentpane#21 during the card triage, 2026-11-01.
+The owner ranks the backend default well above a new-folder session (ark3/agentpane#22).
