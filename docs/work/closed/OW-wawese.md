@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # The smoke probes' post-abort growth check takes its baseline when the probe next polls, not at the idle event, so text arriving just after idle is never checked
@@ -25,3 +26,8 @@ Then the comparison covers everything from idle onwards.
 Both probes take the growth check's baseline from the events up to and including the idle event, and the post-poll `snapshot()` read is gone from that baseline.
 Seen red first: a synthetic event list (in the shape of OW-sofige's throwaway `synthetic_red.py`, which built `ServerEvent`s by hand) with an upsert growing the aborted message after the idle `status` but before the next poll must fail the new check, and the record of that is in the write-up.
 A run of each probe on the home server passes, written up in `docs/MANUAL_TESTING.md` with the CLI versions, and the OW-sofige section's sentence naming this limit is updated to point at the fix.
+
+## Close note
+
+Declined by the owner on 2026-11-01 in the card triage: a fiddly case nobody has hit, since no run has shown text arriving in the up-to-50 ms between the idle event and the probe's next poll, and fixing it needs fresh live runs of both smoke probes.
+OW-sofige's section of docs/MANUAL_TESTING.md, which names this limit, stays as the record of it.

@@ -56,6 +56,7 @@ Where a decision departs from it, or does not belong to one card, it goes in the
   The direction, which may bear on later groups too: most of this logic guards fiddly cases that do not happen in use, so a heavier-handed but simpler rule is warranted, and such logic belongs in TypeScript shared by the web UI and the Emacs helper, not in elisp.
   At the owner's request, ark3/agentpane#17 and ark3/agentpane#25 each gained a paragraph saying the direction applies there too.
 - 2026-11-01, round 15 (session-manager edge cases, A13): OW-giyimu and OW-loromi became ark3/agentpane#27, "Simplify the session manager's startup and naming state", in #26's spirit, with the two as its examples.
+- 2026-11-01, round 16 (wire drift, A18): OW-pukado, OW-wujuda and OW-jetofe became ark3/agentpane#28; OW-wawese declined as a fiddly case.
 
 ## The starting proposal
 

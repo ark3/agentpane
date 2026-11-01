@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: promoted
 ---
 
 # fork_probe.py's Pi mid-stream cell still predicts 2 messages after the fork, where pi 0.86.0+ answers 3
@@ -16,3 +17,7 @@ Incidental: whether the prediction is fixed at 3, derived from the branch the pr
 ## Done when
 
 A run of `python3 resources/probes/fork_probe.py --backend pi --no-fixtures` on the installed `pi` prints a `midstream_expected_message_count` equal to the `messageCount` `get_state` answers after the fork, with the version recorded in the commit message.
+
+## Close note
+
+Promoted to ark3/agentpane#28 during the card triage, 2026-11-01: one issue for a wire-drift report on CLI upgrade, its first run on Codex, and the fork_probe prediction fix.

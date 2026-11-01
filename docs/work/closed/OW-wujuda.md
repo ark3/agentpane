@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: promoted
 ---
 
 # Five of six Codex fixtures were captured on 0.147.0 against an installed 0.154.0, and nothing has measured whether the wire moved
@@ -46,3 +47,7 @@ This needs a live Codex run on the home server -- `codex -m gpt-5.6-luna` per AG
 OW-zadupu re-captured none of the five 0.147.0 fixtures: it added seven new scenarios on `codex-cli 0.157.1`, each with the rollout of its run, and kept `compact` because `reducer.test.ts`'s OW-kelomi assertions rest on its 0.147.0 figure (`compact-rollout` covers compaction on 0.157.1 instead).
 The new captures carry three event types no 0.147.0 fixture has: `account/updated`, `thread/settings/updated` and `item/plan/delta` (the last only because plan mode was driven); `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
 That is not this card's per-scenario diff, since none of the new scenarios is one of the five, so the done condition above stands as written.
+
+## Close note
+
+Promoted to ark3/agentpane#28 during the card triage, 2026-11-01: one issue for a wire-drift report on CLI upgrade, its first run on Codex, and the fork_probe prediction fix.

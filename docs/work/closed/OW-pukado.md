@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: promoted
 ---
 
 # The fixture censuses are a conformance baseline nothing compares against, so a backend version bump reports no wire changes at all
@@ -40,3 +41,7 @@ Note the counts are noisy by nature -- delta events scale with reply length and 
 
 OW-zadupu did not wait on this card: `capture_fixtures.py` now writes an `item_census` (`item/completed` counted by item type) into every Codex `.meta.json`, and a `rollout_census` (rollout lines counted by `(type, payload.type)`) for a scenario that keeps its rollout, alongside the per-method `event_census`.
 Nothing compares one census with another yet, which is still this card's work; the new censuses give it a per-item-kind baseline the per-method one could not, since every item kind is counted under `item/completed` there.
+
+## Close note
+
+Promoted to ark3/agentpane#28 during the card triage, 2026-11-01: one issue for a wire-drift report on CLI upgrade, its first run on Codex, and the fork_probe prediction fix.
