@@ -2,6 +2,84 @@
 
 A temporary document: it holds the approach steady across compactions and fresh sessions while the owner triages every open card, and the triage's last commit deletes it.
 
+**A fresh session reads "State at the end of the first session" below before anything else.**
+The card part of the triage is finished; what remains is parked behind a larger question, and that section says which and why.
+
+## State at the end of the first session (2026-11-01)
+
+The session that ran rounds 1 to 21 grew too long to continue, with neither compaction nor handoff.
+This section holds everything from its last stretch that was recorded nowhere else.
+
+The cards are done: `card status` read 0 open, 593 closed at 0fc66f8, and what still wants doing is ark3/agentpane#3 to #35.
+What remains is E, and E is parked behind a question the owner raised at the end: where the project's durable record lives.
+
+### The owner's corrections to the proposed AGENTS.md rewrite
+
+The session proposed a replacement for AGENTS.md's "Cards" section, and the owner rejected it.
+These are the points, so that no later session proposes them again:
+
+- GitHub issues are not the durable record.
+  They live outside the repo; to the extent the project wants a durable record, it lives in the repo, in one or more documents meant to be read.
+  The session had said the owner called issues the durable record; the owner may have, and withdrew it on reflection.
+- AGENTS.md should not describe the workflow for doing the work, beyond perhaps mentioning that `card` will probably be used.
+  The proposal's "executed as today" (`card execute`, worktrees, the adversarial reader) was wrong as a description of what comes next.
+- The proposal's rule that findings surfacing mid-work become GitHub issues rather than cards was wrong too; how findings are handled is not decided.
+- The section is not ready to be written.
+
+### The durable-record principle, as far as it got
+
+- Card close notes are far too much, which is why they are generally searched rather than read, and the archive as a whole is search-only.
+- So the record splits: a small, curated set of documents meant to be read in one sitting, and everything else explicitly searched, reached through a pointer from that set.
+- Handoff documents should not persist, and `docs/HANDOFF.md` is not one: it mixes orientation, history and live environment facts.
+- The owner called the documentation's accretion chaos allowed to reign too long, and treats restructuring it as its own piece of work, not a tail of the triage.
+  Nothing about the new structure is decided beyond the points above.
+
+### What the documents held, measured 2026-11-01
+
+Words by `wc -w`: the 593 closed cards about 431,000, `docs/MANUAL_TESTING.md` about 76,000, `docs/DESIGN.md` about 31,000, `docs/HANDOFF.md` about 5,600, `AGENTS.md` about 3,800, `docs/WORKSTREAMS.md` about 1,400, `docs/TRACKING.md` about 1,000, `README.md` about 280.
+
+- `docs/HANDOFF.md` holds three kinds of content.
+  Orientation: what agentpane is, "verify at the source", and pointers onward, including the sentence that every outstanding item lives only in the card deck, false since this triage.
+  History: eight rounds of numbered findings with how each was verified, the evidence behind DESIGN's decisions.
+  Two sections it calls live: "Environment gotchas" (the home server's sandbox and why worktrees must sit inside the repo tree; each backend's writable state directory and the throwaway-directory workaround; `direnv` first in every spawn; never matching agent processes by name; `sbox` refusing a `/tmp` cwd without a marker file; Pi's LF-only framing) and "Reference material on the work laptop" (absolute paths to pipane, sbox, `sandboxed-pi`, omnigent and the Pi packages' docs).
+  Two of the gotchas are restated in AGENTS.md, under "Do not assume how your session was launched" and the worktree rule in "Dispatching an implementer".
+- `docs/TRACKING.md` is a historical decision record for the card storage, and says itself that it is not normative.
+- `docs/WORKSTREAMS.md` holds the build-slice Status table; whether that has outlived the build was not checked.
+- `docs/MANUAL_TESTING.md` is searched by nature; `docs/DESIGN.md` is meant to be read, but its size strains that.
+
+### What definitely stays in AGENTS.md
+
+The session listed these at the owner's request on 2026-11-01, as true whatever the tracker becomes:
+
+- The opening pointer to `docs/DESIGN.md` for decisions (its pointer to `docs/HANDOFF.md` depends on the restructure).
+- "Commands", whole.
+- "Code", whole, including the `App.svelte` seams line this triage added.
+- "Documentation", whole.
+- "Evidence", nearly whole: verify at the source; name the version; the three CLIs and their model pins; not assuming how a session was launched, and the throwaway state directories (only its `card run` wording is incidental); the work laptop as the machine itself, one visit for all its work, and naming the machine (how such an item is marked will change); the recorded Pi fork and Claude Code mid-turn and mid-stream facts; a test that has never failed; retiring every copy of an overturned fact; stating the why only where there is a body behind it.
+- "Landing work", nearly whole: commit directly on `main`, small and single-purpose, no branch or PR; a writing subagent's commits cherry-picked; never push unless asked; where a doc defect, a verified fact and live-run evidence go; build-slice status only in `docs/WORKSTREAMS.md` (unless the restructure retires that table).
+- "Both clients", the owner's parity rule, apart from its sentence giving each client "its own card".
+- From "Dispatching an implementer", the environment facts: worktrees inside the repo tree on the home server, `bun install` in a fresh worktree, and never `/code-review ultra`.
+
+What depends on the tracking answer: the "Cards" section whole (its config, labels, streams and `now`), "Anything left undone becomes a card", the sibling-rule paragraph under "Evidence", and how `card worktree` cuts its tree.
+
+Until the rewrite, AGENTS.md is out of date where it describes `docs/work/` as the live deck and says to run `card status` for work.
+
+### Open questions for the owner
+
+- Where the live card deck will live, and its id prefix; that decides what AGENTS.md says about `.git/card/card-config.toml`, `public = true`, and citing `OW-` ids in commit subjects.
+- How findings that surface mid-work are handled.
+- The GitHub label set, proposed in E; every issue from #3 to #35 is unlabelled.
+- Which documents the owner actually reads today: the session proposed this as the restructure's first question, because the answer decides the read set.
+
+### E, parked
+
+Every item in E waits on the restructure except labelling the issues, which needs only the label set.
+
+- The AGENTS.md "Cards" rewrite waits on the corrections above and the open questions.
+- The declined-cards index waits on where the durable record lives; the declines and their reopen triggers are in the close notes and summarised in C and D below.
+- The sweep for references to closed cards would patch documents the restructure may move or delete, so it comes after.
+- Deleting this file comes last, once this section's content has a home.
+
 ## How this works
 
 The goal is no open card left: whatever still wants doing becomes a GitHub issue on `ark3/agentpane`, usually one issue covering several related cards.
@@ -372,6 +450,8 @@ Never seen in a real file; the cost argument stands.
 Overtaken by OW-sofige: the smoke probes now abort twenty thousand characters into the long turn's text.
 
 ## E. Left for the end
+
+Parked on 2026-11-01; see "State at the end of the first session" at the top, which supersedes the first bullet here.
 
 - Whether GitHub issues replace cards for new work, or cards stay for new work and only this backlog moves; the AGENTS.md "Cards" section is rewritten accordingly.
 - Sweep `docs/` and code comments for references that present a now-closed card as open or as the carrier of work (D13's "OW-66 carries it", for one), and point them at the issue instead.
