@@ -51,6 +51,7 @@ Where a decision departs from it, or does not belong to one card, it goes in the
   OW-kokemo, with OW-sobutu declined in substance, is a plain internal tidy-up and moves into A24, renamed "Small code cleanups".
 - 2026-11-01, batch size: the owner found round 11's thirteen cards confusing, so from round 12 on each round briefs one group.
 - 2026-11-01, round 12 (agentpane-mode buffer state, A15): OW-zulaho and OW-tukuvo folded into ark3/agentpane#17, since the fork rework rebuilds that code; OW-luwita declined; OW-tujami's Emacs half declined and its Claude Code half became ark3/agentpane#24, a measurement.
+- 2026-11-01, round 13 (lost Emacs errors, A16): OW-fakefe and OW-zugetu became ark3/agentpane#25, OW-fakefe small enough to card directly and OW-zugetu the lower priority.
 
 ## The starting proposal
 

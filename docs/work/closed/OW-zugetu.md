@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: promoted
 ---
 
 # A render that throws in the Emacs helper is contained per node at the flush but nowhere else, and leaves no trace
@@ -52,3 +53,7 @@ The deferral still rests on nobody having seen a render throw.
 Tests in `src/emacs/helper.test.ts`, with a `render` that throws for one text (the OW-vejeka cases already build one, `unrenderable`), go red first and green after, showing a snapshot carrying that text goes out with its other parts intact from `onEvent` (both to an attached handle and as an attach answered by the stream's snapshot), before an attach's reply where the view is already held, and from `sessions/preview`.
 The per-node catch in `flushNodes` is gone, along with the helper.ts docblock sentence that explains it ("A held node whose rendering throws is skipped").
 The two OW-vejeka tests ("skips a held node whose rendering throws ...") assert the node is skipped, which is exactly what this changes, so they are rewritten to expect the node sent with its failed part's fallback, and pass.
+
+## Close note
+
+Promoted to ark3/agentpane#25 during the card triage, 2026-11-01, as its second, lower-priority part: insurance against a render throw nobody has seen, whose consequence in the snapshot path is every buffer detaching.

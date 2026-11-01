@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: promoted
 ---
 
 # With no server listening, jsonrpc's 'Server exited with status 0' overwrites agentpane-mode's 'could not reach the agentpane server' in the echo area of an interactive Emacs
@@ -23,3 +24,7 @@ Both are rare, and both are dying-helper error replies of exactly this kind.
 With the helper run against a port nothing listens on and Emacs handling messages as they come, the last message in the echo area after a `sessions/list` names the reason the helper gave, not jsonrpc's exit line.
 Show it red first: extend or copy `resources/probes/emacs_helper_no_server_probe.py`'s setup into an Emacs batch probe, or an ert case in `emacs/agentpane-test.el` driving the real helper, that records `current-message` (or every `message`, in order) and fails on the current code.
 Whether agentpane-mode silences jsonrpc's line, or re-shows the reason from its teardown, is the implementer's call; either must keep the ert suite and `bun run check` green.
+
+## Close note
+
+Promoted to ark3/agentpane#25 during the card triage, 2026-11-01, as its first part: small, to be carded directly.
