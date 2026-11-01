@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: promoted
 ---
 
 # bun run check takes about 62s on the home server against the 40s AGENTS.md records, and nobody has profiled where the 22s went
@@ -15,3 +16,7 @@ A prior attempt bears on it: splitting `App.test.ts` made the run slower and was
 
 The time is split by phase on an idle machine (load average under 0.5) -- svelte-check alone, `bun run test` alone -- and each is compared with `git checkout` of the last commit on or before 2026-09-11 run the same way.
 Either the regression is found and fixed, with the before and after timings in the commit message, or the 40s figure in AGENTS.md is corrected to the measured one with the reason it grew; AGENTS.md's number is current either way.
+
+## Close note
+
+Promoted to ark3/agentpane#34 during the card triage, 2026-11-01.

@@ -63,6 +63,7 @@ Where a decision departs from it, or does not belong to one card, it goes in the
 - 2026-11-01, round 20 (ERT state leaks, A20): OW-visegi and OW-zowuji became ark3/agentpane#33 rather than being declined: removing shared state between tests is worth doing for its own sake.
 - 2026-11-01, close notes reach almost nobody from here on: future work runs `card` against a deck that will not live in this repo, so the in-repo `docs/work/closed/` becomes an archive nobody meets by default.
   Whatever a later reader must know therefore goes into the issue body, not only into a card's close note, and declined cards, which no issue links, need a way in; see E.
+- 2026-11-01, round 21 (the last two cards): OW-hinohi became ark3/agentpane#34; OW-furivo became ark3/agentpane#35, wanted soon. No open card is left; what remains is E.
 
 ## The starting proposal
 

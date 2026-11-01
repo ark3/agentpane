@@ -1,6 +1,7 @@
 ---
 labels: [unverified, work-laptop]
 blocked-by: [OW-tadoju]
+closed: promoted
 ---
 
 # agentpane's Pi store readers have only been checked against the home server's 13 session files, never against the work laptop's store
@@ -35,3 +36,7 @@ That section's "Not seen in this store" paragraph names the entry types and role
 
 The survey's output from the work laptop's store is recorded in `docs/MANUAL_TESTING.md` with the date, that machine's `pi --version`, and the number of files surveyed.
 Every shape in it that the home server's run did not show, and that agentpane mishandles, gets a card filed on the home server, or is added to the open card that already carries it.
+
+## Close note
+
+Promoted to ark3/agentpane#35 during the card triage, 2026-11-01, wanted soon by the owner; the issue carries the visit's exact commands.
