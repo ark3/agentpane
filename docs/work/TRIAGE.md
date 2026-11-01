@@ -52,6 +52,8 @@ Where a decision departs from it, or does not belong to one card, it goes in the
 - 2026-11-01, batch size: the owner found round 11's thirteen cards confusing, so from round 12 on each round briefs one group.
 - 2026-11-01, round 12 (agentpane-mode buffer state, A15): OW-zulaho and OW-tukuvo folded into ark3/agentpane#17, since the fork rework rebuilds that code; OW-luwita declined; OW-tujami's Emacs half declined and its Claude Code half became ark3/agentpane#24, a measurement.
 - 2026-11-01, round 13 (lost Emacs errors, A16): OW-fakefe and OW-zugetu became ark3/agentpane#25, OW-fakefe small enough to card directly and OW-zugetu the lower priority.
+- 2026-11-01, round 14 (a server that goes away, A17): OW-pohusi and OW-vipito became ark3/agentpane#26, reframed by the owner.
+  The direction, which may bear on later groups too: most of this logic guards fiddly cases that do not happen in use, so a heavier-handed but simpler rule is warranted, and such logic belongs in TypeScript shared by the web UI and the Emacs helper, not in elisp.
 
 ## The starting proposal
 

@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: promoted
 ---
 
 # The browser drops its turn-done badge and follow for a prompt whose POST failed in transport, though the server may have admitted it, where agentpane-mode since OW-hiliti keeps its watch for anything but a refusal
@@ -25,3 +26,8 @@ A client test, red first, fails the prompt POST with a transport error (a reject
 What the browser does with a watch left standing when its event stream then drops is part of the question: check what `watchAbandon`/`watchSubmit` and the stream-drop path do with it, and record the answer in the docblock of `disarmSubmit`.
 OW-jadoda's adversarial read (2026-09-30, at the code) found part of that answer: `onDisconnect` in `src/client/controller.ts` leaves the watch waiting, a reconnect to a server that survived re-forms the view under the same handle and its turn's end badges, but after a server that exited the new server mints handles under a new prefix, so the watch waits forever and badges nothing, where agentpane-mode raises the indicator at a helper's death for a watch that saw its turn stream (D25 point 4, OW-zedawo); `watchSessions`' docblock in `src/client/favicon.ts` states the survived case only.
 `bun run check` passes.
+
+## Close note
+
+Promoted to ark3/agentpane#26 during the card triage, 2026-11-01.
+The owner judged that most of this logic guards fiddly cases that do not happen in use, and asked for a heavier-handed, simpler rule shared by the web UI and the Emacs helper rather than living in elisp; the issue is that design discussion, with this card as one of its examples.

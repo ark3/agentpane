@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: promoted
 ---
 
 # A stream retrying against a server that is gone reads the same as a healthy retry
@@ -36,3 +37,7 @@ What is not proven is that a real `EventSource` against a server that was gone f
 
 A step in `e2e/event-stream.spec.ts` opens an `EventSource` on a `page.route` that serves `text/event-stream` and then cuts, answers the retries with `route.abort()` for several errors, serves again, and asserts `onopen` fires.
 With the controller test above, that settles it: if `onopen` fires, close this as moot with that evidence recorded beside `onDisconnect` in `src/client/controller.ts`; if it does not, the remaining gap is a deadline on `reconnecting`, as above.
+
+## Close note
+
+Promoted to ark3/agentpane#26 during the card triage, 2026-11-01, as one example for a simpler, shared rule on a server that goes away; the e2e step that would show a real EventSource reconnecting is recorded there.
