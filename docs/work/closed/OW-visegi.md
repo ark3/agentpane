@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: promoted
 ---
 
 # An ERT test that fails partway through a helper's death leaves its teardown's answers pending, and they land in the next test's captured messages
@@ -18,3 +19,7 @@ There, `agentpane-test--noting` captures it in `said`, and the reader saw it fal
 A test that fails partway through a helper's death leaves nothing that runs in the next test: for example, `agentpane-test--outliving` or `agentpane-test--noting` drains or cancels the teardown's timers on the way out.
 To show it, make one such test fail on purpose (throwaway) ahead of `agentpane-test-late-error-reply-fails-once` and watch only the deliberate failure go red.
 The ERT suite passes: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Promoted to ark3/agentpane#33 during the card triage, 2026-11-01: the owner wants shared state between tests removed for its own sake.

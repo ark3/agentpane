@@ -60,6 +60,9 @@ Where a decision departs from it, or does not belong to one card, it goes in the
 - 2026-11-01, round 17 (test gaps, A19): OW-24 and OW-42 became ark3/agentpane#29; OW-muyawi declined; OW-hutaki became ark3/agentpane#30, a new issue on the browser's scrolling, which the owner says is still not right.
 - 2026-11-01, round 18 (process limits, A23): OW-33 and OW-34 became ark3/agentpane#31, wanted soon, above #22; the owner set aside the cards' concern with whether a client notices a reaped session.
 - 2026-11-01, round 19 (small code cleanups, A24): OW-geveja, OW-kokemo and OW-tijilo became ark3/agentpane#32.
+- 2026-11-01, round 20 (ERT state leaks, A20): OW-visegi and OW-zowuji became ark3/agentpane#33 rather than being declined: removing shared state between tests is worth doing for its own sake.
+- 2026-11-01, close notes reach almost nobody from here on: future work runs `card` against a deck that will not live in this repo, so the in-repo `docs/work/closed/` becomes an archive nobody meets by default.
+  Whatever a later reader must know therefore goes into the issue body, not only into a card's close note, and declined cards, which no issue links, need a way in; see E.
 
 ## The starting proposal
 
@@ -371,5 +374,6 @@ Overtaken by OW-sofige: the smoke probes now abort twenty thousand characters in
 
 - Whether GitHub issues replace cards for new work, or cards stay for new work and only this backlog moves; the AGENTS.md "Cards" section is rewritten accordingly.
 - Sweep `docs/` and code comments for references that present a now-closed card as open or as the carrier of work (D13's "OW-66 carries it", for one), and point them at the issue instead.
+- Make the in-repo deck findable once the live deck moves elsewhere: an AGENTS.md instruction to read the cards an issue links and to grep `docs/work/closed/` for the area being worked on, and a durable index of the cards declined in this triage with what would reopen each, grouped by area (perhaps replacing this file).
 - The GitHub label set: proposed `defect`, `change`, `question`, plus `browser`, `emacs`, `work-laptop`, `browser-testing`.
   The GitHub tools in a cloud session can attach labels but not create them.

@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: promoted
 ---
 
 # agentpane-mode's turn-done tests leave their indicator entry in the global global-mode-string for every later test
@@ -12,3 +13,7 @@ The duplicate is skipped by `add-to-list`, and the lighter draws nothing once `a
 The OW-ratati test `agentpane-test-turn-done-raised-beside-a-users-own-construct` already let-binds it itself, which is the shape the macro could take for all of them.
 
 Done when `global-mode-string` after a batch run of `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit` equals its value before the run (for example, checked by a final test or an `--eval` after the run), and the suite stays green.
+
+## Close note
+
+Promoted to ark3/agentpane#33 during the card triage, 2026-11-01: the owner wants shared state between tests removed for its own sake.
