@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: promoted
 ---
 
 # forkAndSubmit resolves to an attach reply its only caller reads as a boolean, and its docblock still justifies the handle for a lookup nothing performs
@@ -20,3 +21,7 @@ If the reply has a reader once OW-sobutu is accounted for, the docblocks name th
 
 Load-bearing: no docblock states a reason for a shape that no code relies on.
 Done when either `forkAndSubmit` resolves `Promise<boolean>`, with the `controller.test.ts` fork tests adjusted and `bun run check` passing, or the type stays and both docblocks name a reader of the reply that exists in the code; in either case neither docblock justifies a lookup or a shape that nothing performs.
+
+## Close note
+
+Promoted to ark3/agentpane#32 during the card triage, 2026-11-01: one of three small code cleanups, to be carded directly.

@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: promoted
 ---
 
 # Claude's `toolNames` is a per-turn map that nothing expires
@@ -16,3 +17,7 @@ Clear it at `result` like the others, or record why it must survive the turn.
 ## Done when
 
 A test in `claude/reducer.test.ts` asserts `toolNames` is empty after `result`, and fails before the change.
+
+## Close note
+
+Promoted to ark3/agentpane#32 during the card triage, 2026-11-01: one of three small code cleanups, to be carded directly.

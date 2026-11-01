@@ -59,6 +59,7 @@ Where a decision departs from it, or does not belong to one card, it goes in the
 - 2026-11-01, round 16 (wire drift, A18): OW-pukado, OW-wujuda and OW-jetofe became ark3/agentpane#28; OW-wawese declined as a fiddly case.
 - 2026-11-01, round 17 (test gaps, A19): OW-24 and OW-42 became ark3/agentpane#29; OW-muyawi declined; OW-hutaki became ark3/agentpane#30, a new issue on the browser's scrolling, which the owner says is still not right.
 - 2026-11-01, round 18 (process limits, A23): OW-33 and OW-34 became ark3/agentpane#31, wanted soon, above #22; the owner set aside the cards' concern with whether a client notices a reaped session.
+- 2026-11-01, round 19 (small code cleanups, A24): OW-geveja, OW-kokemo and OW-tijilo became ark3/agentpane#32.
 
 ## The starting proposal
 

@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: promoted
 ---
 
 # The server repeats small helpers across adapters and session readers: ZERO_USAGE, isRecord, idFromFilename, the Claude store root
@@ -17,3 +18,7 @@ In service of the same thing OW-sozopu was: a fix to one copy lands in all of th
 Nothing is known to be broken; this is a deferral because no copy has yet drifted from another in a way a user saw.
 
 Done when `rg -n 'ZERO_USAGE: Usage =|function isRecord|function idFromFilename|"\.claude", "projects"' src/server` returns one definition of each, and `bun run check` passes.
+
+## Close note
+
+Promoted to ark3/agentpane#32 during the card triage, 2026-11-01: one of three small code cleanups, to be carded directly.
