@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: promoted
 ---
 
 # A buffer told its handle is gone, whose ref a rename it never heard and then a close left naming nothing, cannot come back: its attach by the old ref answers 404 for a Pi virtual session
@@ -38,3 +39,9 @@ OW-zavehi's decision, D26 in `docs/DESIGN.md`, point 7, retires `agentpane--drop
 For a gone `virtual` ref the preview answers `404` `gone` (OW-royosa) and, as a first cut, the buffer is killed, though the conversation lives on under the name it went to and is reachable from the picker.
 The endless retry this card describes goes with that; what remains is whether the buffer can learn the name its session went to instead of being killed, and the Claude Code `init` measurement, which still stands.
 Re-read the sequence against `main` once OW-vugefa lands; the done-condition's `g` then previews.
+
+## Close note
+
+Promoted in part to ark3/agentpane#24 during the card triage, 2026-11-01.
+The owner declined the Emacs half: since D26 a buffer whose virtual ref is gone is killed, and the conversation stays reachable from the picker, which is acceptable.
+The unmeasured Claude Code half, an init rename that may leave the old id resumable so an attach by it silently resumes the pre-rename conversation, is the issue: a measurement first.

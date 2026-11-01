@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: declined
 ---
 
 # A preview still out when agentpane--attach-now attaches its buffer synchronously draws the stored transcript over the live one, since that attach does not supersede it
@@ -21,3 +22,7 @@ Done when an ERT test in `emacs/agentpane-test.el` that sends a preview, attache
 Whether the fix makes the synchronous attach supersede outstanding requests or makes the preview's handlers read `agentpane--attached-p` is the implementer's call; a guard in the handlers alone should say in its docstring which routes make it reachable.
 
 Amended 2026-09-30: since OW-wukako the snapshot answering an attach carries the attach's `token` rather than `askedFor`, and `agentpane--attach-sent` holds that token, so the second route reads as a snapshot whose `token` is the one a buffer's timed-out attach sent.
+
+## Close note
+
+Declined by the owner on 2026-11-01 in the card triage: it needs a g and a synchronous attach (agentpane-set-model or agentpane-set-effort on an unattached buffer) within one preview's round trip.

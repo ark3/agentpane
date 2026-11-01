@@ -50,6 +50,7 @@ Where a decision departs from it, or does not belong to one card, it goes in the
   The other four Emacs gaps (OW-yidapi, OW-zudihi, OW-kafupo, OW-fikuli) are ark3/agentpane#18.
   OW-kokemo, with OW-sobutu declined in substance, is a plain internal tidy-up and moves into A24, renamed "Small code cleanups".
 - 2026-11-01, batch size: the owner found round 11's thirteen cards confusing, so from round 12 on each round briefs one group.
+- 2026-11-01, round 12 (agentpane-mode buffer state, A15): OW-zulaho and OW-tukuvo folded into ark3/agentpane#17, since the fork rework rebuilds that code; OW-luwita declined; OW-tujami's Emacs half declined and its Claude Code half became ark3/agentpane#24, a measurement.
 
 ## The starting proposal
 

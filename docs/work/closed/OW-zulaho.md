@@ -1,5 +1,6 @@
 ---
 labels: [question, emacs]
+closed: promoted
 ---
 
 # An Emacs edit whose fork lands but whose prompt fails keeps the edit open, where the browser gives its draft back
@@ -23,3 +24,8 @@ The decision is recorded in the `agentpane--send-edit` docstring.
 If the decision is to match the browser, an ERT test in `emacs/agentpane-test.el` (run as its header says) must also be shown red first: it fails the fork's prompt after the fork answers and asserts the parent holds no edit and its region holds the displaced draft.
 That test then replaces the `sessions/prompt` case of `agentpane-test-edit-send-failed-keeps-the-displaced-draft`.
 If the decision is to keep the edit open, the docstring must say why the edit stays open where the browser's does not.
+
+## Close note
+
+Promoted to ark3/agentpane#17 during the card triage, 2026-11-01.
+The owner decided agentpane-mode forks the way the browser does, and that rework decides what an edit does when its fork lands but its prompt fails, so this card is a constraint on it rather than a decision of its own.

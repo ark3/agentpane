@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: promoted
 ---
 
 # A fork in flight is held per Emacs buffer, so a sibling buffer on the same session attaches or forks again while it is out
@@ -25,3 +26,8 @@ Which buffer the fork's reply answers in is OW-larele's and stays as it is.
 
 Done when ERT tests in `emacs/agentpane-test.el`, run as that file's Commentary says, go red before and green after for case 1 (no second fork goes out, or no attach goes out while either fork is out -- say which the remedy chose) and for case 2 as far as the client can see it (a second buffer on the session refuses its attach while the first's fork is out), and `agentpane--absorb` no longer copies `agentpane--forking`: the copy OW-larele added is gone, not joined by more checks.
 Retire every docstring claim the change makes false; OW-larele left "refusing every attach and a second fork as OTHER did" in `agentpane--absorb` and "one fork at a time per buffer" in `agentpane-fork` standing on the copy.
+
+## Close note
+
+Promoted to ark3/agentpane#17 during the card triage, 2026-11-01.
+The rework of agentpane-mode's forking rebuilds this code path, so the issue carries both cases as a constraint: the fork-in-flight state has one owner keyed by the session, and the copy in agentpane--absorb goes.
