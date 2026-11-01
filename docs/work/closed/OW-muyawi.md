@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: declined
 ---
 
 # The snapshot arm's exemption from the sequence check is contract, but the client suite never replays the wire shape that proves it
@@ -59,3 +60,8 @@ The Emacs helper has no reducer of its own -- `src/emacs/helper.ts` imports `red
 The regression this card guards is already caught, though not by name: the adversarial read of this amendment found that adding `acceptsSequence` to the snapshot arm turns that OW-bipume test red (its `error: null` fails) and "takes the new ref from the snapshot a reconnect sends under a known handle (D21)" too.
 What is left is two assertions the done-condition names and nothing makes: after the `seq: 0` snapshot `recover` is empty, and an upsert at `seq: 1` then applies with `recover` still empty.
 They can go in the OW-bipume test itself.
+
+## Close note
+
+Declined by the owner on 2026-11-01 in the card triage: OW-geselo's amendment found the regression this card guards already caught, since adding acceptsSequence to the snapshot arm turns the OW-bipume test and the D21 reconnect test red.
+The two assertions it names, recover empty after the seq 0 snapshot and after the following upsert, stay unwritten.

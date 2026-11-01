@@ -1,5 +1,6 @@
 ---
 labels: [unverified, browser-testing]
+closed: promoted
 ---
 
 # Opening a tool card is now two height changes rather than one, and nothing has checked what scroll anchoring does with the second
@@ -23,3 +24,8 @@ Per AGENTS.md, jsdom sees no layout, no scroll anchoring and no real scroll-even
 An `e2e/` spec in the shape of `e2e/follow.spec.ts` seeds a transcript long enough to scroll, with a large collapsed tool card above the viewport, records the scroll position, opens that card by clicking its `<summary>`, and asserts what the position does.
 
 Whichever way it comes out is the result: if the position holds, the spec is the guard and this card closes `--done` on it; if it jumps, that jump is a defect and the fix is a new card, with this spec as its red test.
+
+## Close note
+
+Promoted to ark3/agentpane#30 during the card triage, 2026-11-01.
+The owner has not seen jumps from the two height changes, but says the browser's scrolling is still not right, so the issue starts from their description of what is wrong, with this unchecked case as one data point and its spec shape kept.
