@@ -1483,3 +1483,51 @@ describe("origin", () => {
 		expect((await withOrigin("/", "https://evil.example")).status).toBe(200);
 	});
 });
+
+describe("host", () => {
+	// A page that rebinds its own name to 127.0.0.1 reaches us as same-origin,
+	// so Origin and Sec-Fetch-Site both pass; only the Host it names is not ours.
+	// `request.url` stays 127.0.0.1 here, as a socket's would not, so these
+	// tests can only pass on a check that reads the header.
+	function withHost(path: string, host: string, method = "GET"): Promise<Response> {
+		return app.fetch(
+			new Request(`http://127.0.0.1${path}`, {
+				method,
+				headers: { host, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+				...(method === "POST" ? { body: JSON.stringify({ backend: "pi", cwd: WORKSPACE }) } : {}),
+			}),
+		);
+	}
+
+	async function expectForbidden(response: Response): Promise<void> {
+		expect(response.status).toBe(403);
+		expect(((await response.json()) as ApiError).error).toBe("forbidden_host");
+	}
+
+	it("refuses a rebound name on every route, and spawns nothing", async () => {
+		await expectForbidden(await withHost(ROUTES.sessions, "evil.example:4173", "POST"));
+		await expectForbidden(await withHost(ROUTES.session(PI_SESSION), "evil.example:4173"));
+		await expectForbidden(await withHost(ROUTES.events, "evil.example:4173"));
+		expect(pi.created).toHaveLength(0);
+	});
+
+	it("refuses a rebound name on the static bundle too", async () => {
+		app = createApp({
+			index,
+			adapters: { pi },
+			staticHandler: () => new Response("<!doctype html>", { status: 200 }),
+		});
+		await expectForbidden(await withHost("/", "evil.example:4173"));
+	});
+
+	it("refuses a name that only starts like loopback", async () => {
+		await expectForbidden(await withHost(ROUTES.sessions, "127.0.0.1.evil.example"));
+		await expectForbidden(await withHost(ROUTES.sessions, "127.0.0.1.evil.example:4173"));
+	});
+
+	it("allows every loopback name on any port, since a forward or the dev proxy picks it", async () => {
+		for (const host of ["localhost:8022", "127.0.0.1:5173", "127.1.2.3:9999", "[::1]:41730"]) {
+			expect((await withHost(ROUTES.sessions, host)).status, host).toBe(200);
+		}
+	});
+});

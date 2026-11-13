@@ -69,6 +69,12 @@ export function createApp(deps: AppDeps): App {
 	const logError = deps.logError ?? ((message: string) => console.error(message));
 
 	async function handle(request: Request): Promise<Response> {
+		// Before anything parses `request.url`, which Bun leaves relative for an
+		// HTTP/1.0 request that names no host.
+		if (!isLoopbackHost(request)) {
+			return error(403, "forbidden_host", "this server answers only to a loopback name");
+		}
+
 		const url = new URL(request.url);
 		const segments = url.pathname.split("/").filter((s) => s.length > 0).map(decodeSegment);
 
@@ -606,9 +612,46 @@ function isLoopbackOrigin(origin: string | null): boolean {
 		// iframe or a `data:` document. Not a URL, and never ours.
 		return false;
 	}
+	return isLoopbackHostname(hostname);
+}
+
+/**
+ * DNS rebinding gets past the Origin check above: a page whose own name has
+ * been pointed at 127.0.0.1 is same-origin with us as far as the browser can
+ * tell, so it sends `Sec-Fetch-Site: same-origin` and an Origin naming itself
+ * only on the requests that carry one. What it cannot hide is that name, in the
+ * `Host` header, so every request -- the static bundle included -- must name
+ * loopback there. Any port: an `ssh -L` forward may pick its own local port,
+ * and the Vite dev proxy forwards with `changeOrigin: false`, so we see its.
+ *
+ * The header is read directly rather than through `request.url`. As of
+ * `bun 1.4.0` `Bun.serve` builds the URL from it anyway, but a `Request` built
+ * in-process keeps its own URL beside whatever header it was given. With no
+ * header the URL is all there is: in-process it is the test's own, and from
+ * Bun it is relative -- an HTTP/1.0 request that names no host -- which does
+ * not parse and is refused. (HTTP/1.1 without one Bun answers 400 itself.)
+ *
+ * This stops a browser, not a local process, which can send any header.
+ */
+function isLoopbackHost(request: Request): boolean {
+	const host = request.headers.get("host");
+	if (host === null) {
+		try {
+			return isLoopbackHostname(new URL(request.url).hostname);
+		} catch {
+			return false;
+		}
+	}
+	// `uri-host [ ":" port ]` taken apart by hand: `new URL` would read
+	// `evil.example@127.0.0.1` as userinfo and hand back a loopback hostname.
+	const match = /^(\[[^\]]*\]|[^:]*)(?::\d*)?$/.exec(host);
+	return match !== null && isLoopbackHostname((match[1] as string).toLowerCase());
+}
+
+function isLoopbackHostname(hostname: string): boolean {
 	// Anchored, because `127.0.0.0/8` is all loopback but `startsWith("127.")`
 	// also accepts `127.0.0.1.evil.example`, which is a name someone else owns.
-	// Caught by the test above, not by reading this back.
+	// Caught by the tests in `app.test.ts`, not by reading this back.
 	return (
 		hostname === "localhost" ||
 		hostname === "[::1]" ||
