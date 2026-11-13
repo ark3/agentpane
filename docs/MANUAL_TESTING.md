@@ -4,10 +4,9 @@
 
 **The evidence behind the live runs**, and the instructions for reproducing
 them. It does not state project status — `WORKSTREAMS.md`'s Status table does
-that, and the deck at `docs/work/` holds what is still outstanding. Record a
-run's results here; record what the run left undone as a card, filed with
-`card new` — never by hand-creating a file under `docs/work/open/`, which card
-forbids outright.
+that, and GitHub issues hold what is still outstanding.
+Record a run's results here; record what the run left undone as a GitHub issue.
+`OW-` ids below name the legacy cards retired on 2026-11-13 into `docs/work/closed/` (`docs/work/README.md`).
 
 Two substantial live-backend runs are recorded below, both on 2026-08-11
 (America/New_York): Codex with `codex-cli 0.147.0`, and Pi with `pi 0.84.1`,
@@ -1631,7 +1630,7 @@ Codex's rejection of a mid-turn `submit()` was therefore the adapter's own choic
 
 ## Still unverified
 
-Tracked as work items under `docs/work/open/`, not restated here:
+Tracked as legacy cards in `docs/work/closed/`, not restated here (OW-24 became ark3/agentpane#29, and OW-25 closed moot):
 **OW-24** (no browser automation yet of a real backend-backed turn — the `e2e/`
 browser UI suite drives the real client against a synthetic `AgentpaneApi` port,
 with no server in the loop) and **OW-25** (whether Pi raises approval dialogs
