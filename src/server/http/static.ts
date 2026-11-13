@@ -5,10 +5,11 @@
  * only Bun-specific part is opening a file, which is injected. Path resolution,
  * which is the part with a security property, is a pure function.
  *
- * Loopback only (D8), so there is no auth to get wrong -- but "no remote
- * attacker" is not "no attacker": a page in any browser tab can issue requests
- * to 127.0.0.1, and this handler reads the filesystem. Resolution is therefore
- * written to be safe on its own terms rather than on the strength of D8.
+ * Loopback only (D8), and outside `/api`, so no bearer token guards it (D29)
+ * -- and "no remote attacker" is not "no attacker": a page in any browser tab
+ * can issue requests to 127.0.0.1, and this handler reads the filesystem.
+ * Resolution is therefore written to be safe on its own terms rather than on
+ * the strength of D8.
  */
 
 import { join, normalize, resolve, sep } from "node:path";

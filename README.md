@@ -41,6 +41,10 @@ bun run build
 bun run start
 ```
 
+On first start the server creates its API token in `~/.ssh/agentpane-token`, readable by you alone, and it refuses to start when `~/.ssh` does not exist.
+The browser asks for the token once per origin: paste the file's contents.
+The Emacs client reads the file itself.
+
 Run the complete offline verification suite with:
 
 ```bash

@@ -283,7 +283,8 @@ The run did not establish whether the tool call was refused or never issued, and
 ### D8. Loopback only
 
 Bind `127.0.0.1` explicitly.
-No auth token, no cookie, no localhost-bypass layer — none of which needs to exist once remote access is off the table. (pipane binds all interfaces on purpose and gates it with a token; that is a different product decision.)
+This decision first read that no auth token, no cookie and no localhost-bypass layer needed to exist once remote access was off the table. (pipane binds all interfaces on purpose and gates it with a token; that is a different product decision.)
+**Superseded in part by D29**: the bind keeps out the network and not a local process sharing the loopback, so every `/api` route but the event stream now needs a bearer token, and every request must name a loopback `Host`; there is still no cookie and no localhost bypass.
 
 **Closing the network is not closing the browser**, and the original wording above conflated them.
 Any page in any tab can issue a cross-origin request to a loopback port, and a `POST` with a simple content type is not preflighted — so `evil.com` cannot *read* our replies, but it can drive them, and every route behind `/api` spawns sandboxed agents with write access to the user's repositories.
@@ -292,7 +293,7 @@ The transport therefore rejects any `/api` request carrying a non-loopback `Orig
 Note the rule is loopback-*origin*, not same-origin: in dev the page is served by Vite on another port and proxied here (`changeOrigin: false`), so an exact match would reject the only client we have.
 The OW-fumegi browser reproduction showed that cross-site no-CORS GETs can omit `Origin` while the browser still sends `Sec-Fetch-Site`; curl and other non-browser clients may omit both headers, so header absence remains allowed.
 The production client and the development client through Vite's proxy are same-origin and therefore pass the request-metadata guard.
-This is still not auth, and it is not meant to be; it is the missing half of "not remotely accessible". pipane has no equivalent (HANDOFF finding 17).
+The `Origin` rule is still not auth, and it is not meant to be; it is the missing half of "not remotely accessible", and D29's token is what authenticates a request. pipane has no equivalent (HANDOFF finding 17).
 
 ### D9. Sessions: enumerate from the filesystem, spawn only on attach
 
@@ -1319,6 +1320,76 @@ Compaction writes `"requesting"` at the click, with two races accepted (OW-natih
 `handleOf` in `src/client/session-state.ts` reads the handle from the summary an attach's reply left, in the window before its snapshot.
 The Emacs helper holds an attach's reply until the snapshot that answers it (D25).
 ark3/agentpane#42 asks for a mechanism that retires them, and ark3/agentpane#41 moves the chains of requests, each `await` of which is such a window, into the server.
+
+### D29. Every `/api` route but the event stream needs a bearer token, and every request must name a loopback host
+
+The owner took this on 2026-11-13, once it was found that D8's loopback bind kept out the network and not the processes sharing it.
+Built: the server, both clients and the probes, so the prose describes the code as it stands.
+
+**The finding it closes.**
+As of `main` at `ada7204d`, 2026-11-13, agentpane had no authentication, and the API was open to any process that could reach the loopback port.
+`isTrustedRequestMetadata` in `src/server/http/app.ts` let through a request carrying neither `Origin` nor `Sec-Fetch-Site`, so that curl would work, and a request built outside a browser carries neither unless its author adds them.
+`sbox --share-net` shares the host's loopback with every sandbox, so an agent jailed to one workspace, or one a hostile repository had prompt-injected, could create a session in another workspace, attach to it, which spawns an agent there (D25), and prompt it.
+Pi asks no approval before a tool call — on `pi 0.85.1` a shell tool call reached the wire with no dialog request beside it (`docs/HANDOFF.md` finding 42) — so that prompt is code run with write access to a workspace nobody gave the first agent.
+`resources/probes/loopback_token_repro_probe.py` reproduced the create and the attach on the home server on 2026-11-13, on `pi 1.5.2`, and since this decision has answered both with 401.
+And with no `Host` check, a page that DNS rebinding had pointed at 127.0.0.1 was same-origin with agentpane as far as the browser could tell, so it could read every GET route and spawn through the attach GET.
+
+**The threat model.**
+Two attackers, stopped by different things.
+A local process, a sandboxed or prompt-injected agent among them, forges every header, so the only thing that stops it is a secret it cannot read.
+A rebinding page sends whatever `Host` its own name puts there, which the allowlist below refuses, and it cannot read `localStorage` on agentpane's origin, which is where the browser keeps the secret.
+`sbox` confines writes, not reads: it mounts the root read-only and hides only `~/.ssh`, so a sandboxed agent can already read every workspace and every session store on the machine.
+The token therefore protects against **acting** outside a workspace: creating, attaching, prompting, forking, closing.
+It makes no claim that what agentpane serves is confidential from agents.
+How permissive seatbelt is on the work laptop beyond its denial of `~/.ssh` was not checked.
+
+**The token.**
+Every `/api` route needs `Authorization: Bearer <token>`, and answers 401 `unauthorized` with `WWW-Authenticate: Bearer` without it (`hasBearerToken` in `src/server/http/app.ts`).
+The comparison is constant-time, and a length mismatch still runs a full comparison.
+It is checked after the `Host` check and D8's `Origin` rule, so a browser's forged request still reads as the 403 it is.
+It is read from that header and nowhere else: never a cookie, which a browser attaches on its own to requests a hostile page triggers, and never a query parameter, which lands in logs and history.
+
+**The one exemption is `GET /api/events`**, by method and path and nothing wider.
+`EventSource` cannot set a header.
+The stream is read-only and starts nothing.
+What it carries a sandboxed agent can already read from the session stores, apart from content not yet on disk, such as a Claude Code reply mid-turn, which the CLI writes to its store only once the turn ends (`docs/MANUAL_TESTING.md`, "A mid-stream fork on Claude Code loses the partial reply"); that margin is accepted.
+There is no exemption by category, such as every GET: the attach GET spawns an agent, and it stays behind the token.
+
+**The `Host` allowlist.**
+Every request, the static bundle and the event stream included, must carry a `Host` whose hostname is `localhost`, a dotted `127.0.0.0/8` address or `[::1]`, and is answered 403 `forbidden_host` before any route runs otherwise (`isLoopbackHost` in `src/server/http/app.ts`).
+The hostname only, on any port: the owner's `ssh -L` forward may pick its own local port, and Vite's dev proxy forwards with `changeOrigin: false`, so the server sees the Vite port, not its own.
+This stops a browser, not a local process, which can send any `Host` it likes; the token is what stops that.
+
+**The token file is `~/.ssh/agentpane-token`** (`src/server/api-token.ts`), read by the server at startup.
+When absent it is created exclusively at mode `0600`, holding 32 random bytes in base64url.
+An existing file is refused when it grants any group or other permission or is owned by another user, as ssh refuses such a key, and the server refuses to start when `~/.ssh` is absent, which it does not create.
+Rotation is deleting the file and restarting the server.
+`~/.ssh` because it is the one directory `sbox` hides from the agents it jails: a tmpfs on the home server, a seatbelt read denial on the work laptop.
+The token is never put in any environment, the server's or a child's: every agent is a child of the server, so an environment variable would hand it to them.
+Its costs, accepted by the owner on 2026-11-13:
+
+- The server must run outside any sandbox; one started inside `sbox` sees the sandbox's tmpfs `~/.ssh` and creates a throwaway token no client outside can read.
+- `sbox --ssh` or `sbox --rw ~/.ssh` exposes the file to whatever runs under it.
+- The protection is a side effect of `sbox`'s ssh mask, which agentpane does not control; `resources/probes/sbox_token_mask_probe.py` reports when a command run through `sbox` can read the file.
+  As of 2026-11-13 that probe had been run only inside a sandbox against stand-ins, never against a real `~/.ssh` or on macOS.
+
+**The clients.**
+The browser asks for the token on any 401, and the owner pastes the file's contents once per origin, where they are kept in that origin's `localStorage` and sent on every `/api` request (`src/client/token.ts`, `TokenPrompt.svelte`).
+The server never serves the token, in a page or from a route: whatever it served without authentication, a sandboxed agent could fetch as well.
+The Emacs helper reads the file on every request, since Emacs starts it outside any sandbox, and names the file when the server answers 401 (`src/emacs/token.ts`).
+The probes that drive a live server read the file too (`resources/probes/agentpane_live_support.py`), all but the reproduction probe, whose point is a request holding no token.
+
+**Rejected.**
+
+- The token in a cookie: a browser attaches it to requests a hostile page triggers, which is the forgery D8's `Origin` rule exists to stop.
+- The server handing the browser the token, in `index.html` or from a bootstrap route gated on request headers: an agent forges those headers, so it could fetch the token the same way.
+- A token URL printed at startup: declined by the owner in favour of pasting.
+- The token on `/api/events` too: it means replacing `EventSource` or putting the token in a URL, and it protects nothing the exemption leaves exposed.
+- Exempting every GET: the attach GET spawns.
+- Making the attach a POST: no longer needed once the header is required; a GET with side effects is a separate cleanup.
+- A port check: it would refuse the owner's `ssh -L` forward on a port of its own choosing and every request through the Vite proxy, which forwards with `changeOrigin: false`.
+- A change to `sbox`: the mask on `~/.ssh` already does what is needed, and the probe above guards it.
+- An environment variable for the token: every agent would inherit it.
 
 ## The backend adapter contract
 

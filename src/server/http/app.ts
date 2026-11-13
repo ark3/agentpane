@@ -596,10 +596,10 @@ function sessionRefFromRequest(request: Request): SessionRef | undefined {
  * behind here spawns sandboxed agents with write access to the user's
  * repositories, which makes a blind write plenty.
  *
- * D8's reasoning ("no auth needs to exist once remote access is off the table")
- * is about remote *network* access and does not extend to this, so it is not
- * being overturned here. pipane has no origin check either (HANDOFF finding
- * 17), which is where the gap was inherited from.
+ * This stops a browser, not a local process, which can send any header; the
+ * bearer token below is what stops that (D29, which overturned D8's "no auth
+ * needs to exist once remote access is off the table"). pipane has no origin
+ * check either (HANDOFF finding 17), which is where the gap was inherited from.
  *
  * The Origin rule is loopback-*origin*, not same-origin: in dev the page is
  * served by Vite on another port and proxied here, so an exact match would
