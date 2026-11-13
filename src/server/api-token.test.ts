@@ -1,4 +1,14 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +31,38 @@ vi.mock("node:child_process", async (importOriginal) => {
 		spawn: (command: string, _args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
 			spawned.push({ command, options });
 			throw new Error("spawn intercepted");
+		},
+	};
+});
+
+// A second server starting at the instant the first one's file appears at
+// `path`. Armed by one test only, and disarmed before `second` runs, so the
+// file's own `writeFileSync` calls and the second load's own creation pass
+// straight through. `writeFileSync` opens and writes inside Node, where this
+// mock cannot reach between the two, so its wrapper reproduces the two steps
+// itself: the file exists, empty, while the second load runs.
+const race = vi.hoisted(() => ({ armed: undefined as { path: string; second: () => void } | undefined }));
+
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs")>();
+	const fire = (target: unknown): (() => void) | undefined => {
+		const armed = race.armed;
+		if (armed === undefined || String(target) !== armed.path) return undefined;
+		race.armed = undefined;
+		return armed.second;
+	};
+	return {
+		...actual,
+		writeFileSync: (...args: Parameters<typeof actual.writeFileSync>) => {
+			const second = fire(args[0]);
+			if (second === undefined) return actual.writeFileSync(...args);
+			actual.writeFileSync(args[0], "", { flag: "wx", mode: 0o600 });
+			second();
+			actual.writeFileSync(args[0], args[1]);
+		},
+		linkSync: (...args: Parameters<typeof actual.linkSync>) => {
+			actual.linkSync(...args);
+			fire(args[1])?.();
 		},
 	};
 });
@@ -102,6 +144,30 @@ describe("loadApiToken", () => {
 		const path = withSsh();
 		writeFileSync(path, " \n\t\n", { mode: 0o600 });
 		expect(refusal().message).toContain(path);
+	});
+
+	it("leaves only the token file in ~/.ssh after creating it", () => {
+		withSsh();
+		loadApiToken();
+		expect(readdirSync(join(home, ".ssh"))).toEqual(["agentpane-token"]);
+	});
+
+	it("reads the winner's token when another server creates the file at the same moment", () => {
+		const path = withSsh();
+		let loser: string | undefined;
+		race.armed = {
+			path,
+			second: () => {
+				loser = loadApiToken();
+			},
+		};
+		try {
+			const winner = loadApiToken();
+			expect(loser).toBeDefined();
+			expect(loser).toBe(winner);
+		} finally {
+			race.armed = undefined;
+		}
 	});
 
 	it("trims a newline after a hand-written token", () => {

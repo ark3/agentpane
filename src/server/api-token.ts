@@ -17,7 +17,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { closeSync, fstatSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, linkSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -40,9 +40,13 @@ export class ApiTokenError extends Error {}
  *
  * - No `~/.ssh`: refused. The directory is not created; its mode and contents
  *   are the owner's to decide, as they are for ssh.
- * - No file: created exclusively with mode `0600`, holding 32 random bytes in
- *   base64url, then read back like any existing file. Losing a race to another
- *   server creating it at the same moment reads the winner's file.
+ * - No file: created holding 32 random bytes in base64url, then read back like
+ *   any existing file. The token is written to a temporary file beside it,
+ *   created exclusively at `0600`, which is then hard-linked to the token
+ *   file's path; the link is atomic and fails when the path exists, so the
+ *   file never appears there short of its whole token. Losing a race to
+ *   another server creating it at the same moment fails the link, and the
+ *   winner's file is read. The temporary file is removed whatever happened.
  * - An existing file is refused when it is not owned by the running user or
  *   grants any group or other permission, as ssh refuses such a key, and when
  *   it holds nothing but whitespace. Trailing whitespace is trimmed, so a
@@ -57,10 +61,16 @@ export function loadApiToken(): string {
 				`Create the directory (mkdir -m 700 ${dir}) and start again; agentpane does not create it.`,
 		);
 	}
+	const temp = join(dir, `.agentpane-token.${process.pid}.${randomBytes(8).toString("hex")}`);
 	try {
-		writeFileSync(path, randomBytes(32).toString("base64url"), { flag: "wx", mode: 0o600 });
-	} catch (err) {
-		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+		writeFileSync(temp, randomBytes(32).toString("base64url"), { flag: "wx", mode: 0o600 });
+		try {
+			linkSync(temp, path);
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+		}
+	} finally {
+		rmSync(temp, { force: true });
 	}
 	return readTokenFile(path);
 }
