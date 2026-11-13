@@ -180,7 +180,7 @@ Verified with: `pi` 1.2.0 on the home server, 2026-10-14, two runs, in `docs/MAN
 ## `loopback_token_repro_probe.py`
 
 Proves: **a separate process holding no token can create a Pi session in a directory nobody gave it, and attach to it, which spawns the agent there**.
-It sends neither `Authorization` nor `Origin` nor `Sec-Fetch-Site`, as any local non-browser process can.
+It sends neither `Authorization` nor `Origin` nor `Sec-Fetch-Site`, as any local non-browser process can; its `Http` client is built with `send_token=False`, so it never picks up the token the other probes send.
 Its passing condition is refusal: it passes (exit 0) only when both the create and the attach are answered 401 or 403, fails (exit 1) when either is answered 2xx, and is inconclusive (exit 2) on anything else; exit 3 means it could not close what it attached or clean up.
 
 ```bash
@@ -201,6 +201,12 @@ Verified with: `pi` 1.5.2 on the home server, 2026-11-13, against the server at 
 Not a probe. The machinery both smoke checks share: the HTTP/SSE client, the
 process-tree walk, the temporary state dir, and the cleanup criteria. It exists
 because the two harnesses differ only in which backend they drive.
+
+Every Python probe that calls agentpane's API goes through its `Http` client, which sends `Authorization: Bearer <token>` on every request, reading the token from `~/.ssh/agentpane-token` -- the file the server reads or creates on startup -- at the moment each request is sent.
+Read then rather than when the client is built, because the probe's own server creates the file on its first start; until it exists requests go out without the header.
+The token reaches a probe only through that file, never through an environment variable, because every agent is a child of the server and inherits its environment.
+A probe run inside `sbox` sees the sandbox's tmpfs `~/.ssh`, so the server it starts there creates and reads a throwaway token in it, and a server running outside the sandbox refuses it.
+`SseReader` sends it too, read when the stream opens, though the event stream is the one `/api` route the server exempts.
 
 ## `capture_fixtures.py`
 
@@ -473,6 +479,7 @@ What it showed is the same `docs/MANUAL_TESTING.md` section.
 
 Proves: **what agentpane's event stream carries for a prompt to an attached Claude Code session**, event by event, and how many snapshots each prompt drew between its send and its turn's end (OW-yirosu).
 It starts the server of the checkout `--root` names on a free loopback port, so pointing it at a checkout before a change and after it shows both.
+Once that server is listening it reads the API token from `~/.ssh/agentpane-token`, through `apiTokenPath` in `src/server/api-token.ts`, and sends it on every `/api` request; a `--root` from before the token creates no file, and the probe then sends no header.
 Without `--workspace` it makes a `git init`ed scratch directory, since the home server's `claude` wrapper refuses a directory with no workspace marker.
 
 ```bash

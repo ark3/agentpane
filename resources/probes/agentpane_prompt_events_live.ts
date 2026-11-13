@@ -18,10 +18,11 @@
  * Costs:  two tiny Haiku turns.
  */
 
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { apiTokenPath } from "../../src/server/api-token.ts";
 
 // Home-server agent sessions pin Claude Code to one model (AGENTS.md, "Evidence").
 const MODEL = "haiku";
@@ -99,15 +100,24 @@ function describe(event: Event): string {
 
 for (let attempt = 0; ; attempt++) {
 	try {
-		// A path no route serves, which answers 404 and starts nothing.
-		if ((await fetch(`${base}/api/sessions/claude/probe/live`)).status > 0) break;
+		// Outside `/api`, so it needs no token, and any answer means listening.
+		if ((await fetch(`${base}/`)).status > 0) break;
 	} catch {
 		if (attempt > 100) throw new Error("server did not come up");
 		await Bun.sleep(100);
 	}
 }
 
-const stream = await fetch(`${base}/api/events`);
+// Read from the file only now that the server is listening, since its first
+// start is what creates it; never from the environment, which agents inherit.
+// A `--root` from before the token sees no file and sends no header.
+let token: string | undefined;
+try {
+	token = readFileSync(apiTokenPath(), "utf8").trimEnd() || undefined;
+} catch {}
+const auth: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+
+const stream = await fetch(`${base}/api/events`, { headers: auth });
 void (async () => {
 	const decoder = new TextDecoder();
 	let buffer = "";
@@ -134,13 +144,13 @@ void (async () => {
 const version = Bun.spawnSync(["claude", "--version"]).stdout.toString().trim();
 const created = await fetch(`${base}/api/sessions`, {
 	method: "POST",
-	headers: { "content-type": "application/json" },
+	headers: { ...auth, "content-type": "application/json" },
 	body: JSON.stringify({ cwd: workspace, backend: "claude", model: MODEL }),
 });
 let ref = ((await created.json()) as { ref: { backend: string; id: string } }).ref;
 const path = () => `${base}/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}`;
 log("attach sent");
-const attached = await fetch(path());
+const attached = await fetch(path(), { headers: auth });
 ref = ((await attached.json()) as { session: { ref: typeof ref } }).session.ref;
 log(`attach answered ${attached.status}`);
 // The attach's snapshot races its answer (D2); it belongs to the attach, not the first prompt.
@@ -156,7 +166,7 @@ for (const text of PROMPTS) {
 	log(`prompt sent: ${JSON.stringify(text)}`);
 	const answered = await fetch(`${path()}/prompt`, {
 		method: "POST",
-		headers: { "content-type": "application/json" },
+		headers: { ...auth, "content-type": "application/json" },
 		body: JSON.stringify({ text }),
 	});
 	log(`prompt answered ${answered.status}`);
@@ -170,7 +180,7 @@ for (const text of PROMPTS) {
 	counts.push(events.slice(from).filter((event) => event.type === "snapshot").length);
 }
 
-await fetch(path(), { method: "DELETE" });
+await fetch(path(), { method: "DELETE", headers: auth });
 server.kill("SIGTERM");
 await server.exited;
 flushRepeats();

@@ -97,8 +97,9 @@ def make_workspace() -> Path:
 def call(http: Http, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
     """One request, sent with no token and no browser metadata, and its whole answer.
 
-    `Http.request` adds only `content-type` for a body; `http.client` adds
-    `Host` and `Accept-Encoding`, and nothing else.
+    `http` is built with `send_token=False`, so `Http.request` adds only
+    `content-type` for a body; `http.client` adds `Host` and
+    `Accept-Encoding`, and nothing else.
     """
     status, raw = http.request(method, path, body)
     text = raw.decode(errors="replace")
@@ -176,14 +177,14 @@ def main() -> int:
             parts = urlsplit(args.base_url)
             if parts.scheme != "http" or not parts.hostname or parts.port is None:
                 raise RuntimeError(f"--base-url must be http://host:port, got {args.base_url!r}")
-            http = Http(parts.hostname, parts.port)
+            http = Http(parts.hostname, parts.port, send_token=False)
             evidence["target"] = f"http://{parts.hostname}:{parts.port}"
         else:
             repo = args.app_root.expanduser().resolve()
             if not (repo / "package.json").is_file():
                 raise RuntimeError(f"not an agentpane checkout: {repo}")
             port = free_port()
-            http = Http(HOST, port)
+            http = Http(HOST, port, send_token=False)
             evidence["target"] = f"http://{HOST}:{port}"
             state_home, copied = make_state_home(
                 args.credential_source.expanduser().resolve(), PI_STATE_FILES, "agentpane-loopback-pihome-"
