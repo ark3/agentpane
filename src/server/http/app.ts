@@ -605,9 +605,10 @@ function sessionRefFromRequest(request: Request): SessionRef | undefined {
  * served by Vite on another port and proxied here, so an exact match would
  * reject the only client we have. Browsers can omit Origin on cross-site
  * no-CORS GETs, so Sec-Fetch-Site closes that gap: when present it must say
- * `same-origin` or `none`. Header absence remains valid for non-browser clients
- * such as curl, while the production and proxied development clients are
- * same-origin and send `same-origin`.
+ * `same-origin` or `none`. Header absence passes this check for non-browser
+ * clients such as curl, which still need the bearer token and a loopback `Host`
+ * (D29), while the production and proxied development clients are same-origin
+ * and send `same-origin`.
  */
 function isTrustedRequestMetadata(headers: Headers): boolean {
 	const site = headers.get("sec-fetch-site");

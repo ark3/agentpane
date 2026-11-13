@@ -61,6 +61,8 @@ CODEX_HOME="$CODEX_SMOKE_HOME" PORT="$SMOKE_PORT" \
 SERVER_PID=$!
 ```
 
+The calls below read the API token from `~/.ssh/agentpane-token`, which is the server's own token only when the server runs outside `sbox`, since a server started inside it creates a throwaway token in its own tmpfs `~/.ssh`.
+
 Once the server reports that it is listening, confirm the built SPA is being
 served as a browser navigation:
 
@@ -74,19 +76,20 @@ curl --fail --silent --show-error \
 Open one SSE stream before creating a session and retain it across the turn:
 
 ```bash
+AUTH="Authorization: Bearer $(cat ~/.ssh/agentpane-token)"
 SSE_LOG="$(mktemp /var/tmp/agentpane-live-sse-XXXXXX.log)"
-curl --no-buffer --silent --show-error \
+curl --no-buffer --silent --show-error -H "$AUTH" \
   "http://127.0.0.1:$SMOKE_PORT/api/events" >"$SSE_LOG" &
 SSE_PID=$!
 
-CREATE_RESPONSE="$(curl --fail --silent --show-error \
+CREATE_RESPONSE="$(curl --fail --silent --show-error -H "$AUTH" \
   -H 'content-type: application/json' \
   -d "{\"cwd\":\"$WORKSPACE\",\"backend\":\"codex\"}" \
   "http://127.0.0.1:$SMOKE_PORT/api/sessions")"
 VIRTUAL_ID="$(jq -r '.ref.id' <<<"$CREATE_RESPONSE")"
 ENCODED_VIRTUAL_ID="$(jq -rn --arg value "$VIRTUAL_ID" '$value|@uri')"
 
-ATTACH_RESPONSE="$(curl --fail --silent --show-error \
+ATTACH_RESPONSE="$(curl --fail --silent --show-error -H "$AUTH" \
   "http://127.0.0.1:$SMOKE_PORT/api/sessions/codex/$ENCODED_VIRTUAL_ID")"
 CODEX_ID="$(jq -r '.session.ref.id' <<<"$ATTACH_RESPONSE")"
 ENCODED_CODEX_ID="$(jq -rn --arg value "$CODEX_ID" '$value|@uri')"
@@ -98,7 +101,7 @@ on live model wording: look for multiple `upsert` events and a lifecycle
 `snapshot` or `status` whose `isStreaming` value returns to `false`.
 
 ```bash
-curl --fail --silent --show-error \
+curl --fail --silent --show-error -H "$AUTH" \
   -H 'content-type: application/json' \
   -d '{"text":"Do not use tools. Write one sentence of at least 120 words explaining why deterministic tests are useful."}' \
   "$SESSION_URL/prompt"
@@ -118,7 +121,7 @@ wait "$SSE_PID" 2>/dev/null || true
 pstree -ap "$SERVER_PID"
 
 SSE_LOG_2="$(mktemp /var/tmp/agentpane-live-sse-reconnect-XXXXXX.log)"
-curl --no-buffer --silent --show-error \
+curl --no-buffer --silent --show-error -H "$AUTH" \
   "http://127.0.0.1:$SMOKE_PORT/api/events" >"$SSE_LOG_2" &
 SSE_PID_2=$!
 ```
@@ -128,12 +131,12 @@ For abort, submit work deliberately long enough to remain active, wait for
 `false`:
 
 ```bash
-curl --fail --silent --show-error \
+curl --fail --silent --show-error -H "$AUTH" \
   -H 'content-type: application/json' \
   -d '{"text":"Do not use tools. Write a long, detailed handbook on growing vegetables in a home garden. Write twenty chapters, each under its own title and each at least 400 words long, covering in order: planning the plot, soil testing, soil preparation, raised beds, choosing varieties, starting seeds indoors, transplanting, direct sowing, watering, mulching, sunlight and siting, fertilising, composting, companion planting, pest control, disease control, weeding, crop rotation, harvesting, and storing the harvest. Write every chapter in full and do not summarise or abbreviate any of them."}' \
   "$SESSION_URL/prompt"
 
-curl --fail --silent --show-error -X POST "$SESSION_URL/abort"
+curl --fail --silent --show-error -H "$AUTH" -X POST "$SESSION_URL/abort"
 ```
 
 This is the prompt `LONG_PROMPT` in `resources/probes/agentpane_live_support.py` holds; the integers 1 through 10000 this step asked for until OW-sofige drew a turn that ended on its own holding 76 characters of reply on `codex-cli 0.157.1` with `gpt-5.6-luna`, which is not long enough to remain active.
@@ -248,6 +251,7 @@ Reproduce, with the server already listening:
 
 ```bash
 curl -s -o /tmp/sessions.json \
+  -H "Authorization: Bearer $(cat ~/.ssh/agentpane-token)" \
   -w '%{time_total}s %{size_download}B\n' \
   http://127.0.0.1:4173/api/sessions
 jq '.sessions | length' /tmp/sessions.json
@@ -3762,7 +3766,7 @@ Over two such runs the first round trip, which started the helper, took 1450ms a
 What `agentpane--refetch-sessions` does with the reply after, folding it into the finished-turn marks and filtering it to a picker's one row, took 0.24ms more, byte-compiled, with no session held.
 So an unfiltered listing costs Emacs about a millisecond per picker per `sessions/changed`, two of which each turn sends, and the picker keeps asking for every session.
 
-To re-run, start a server as above, then from the checkout root run `emacs --batch -l /tmp/listing-size/e2e.el` on the file below, and `curl -s -o /dev/null -w '%{size_download} %{time_total}\n' http://127.0.0.1:4999/api/sessions` for the server alone.
+To re-run, start a server as above, then from the checkout root run `emacs --batch -l /tmp/listing-size/e2e.el` on the file below, and `curl -s -o /dev/null -H "Authorization: Bearer $(cat ~/.ssh/agentpane-token)" -w '%{size_download} %{time_total}\n' http://127.0.0.1:4999/api/sessions` for the server alone.
 
 ```elisp
 ;;; -*- lexical-binding: t; -*-

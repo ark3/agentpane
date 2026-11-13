@@ -291,7 +291,7 @@ Any page in any tab can issue a cross-origin request to a loopback port, and a `
 The transport therefore rejects any `/api` request carrying a non-loopback `Origin`, and rejects a request whose `Sec-Fetch-Site` is present but is neither `same-origin` nor `none`.
 
 Note the rule is loopback-*origin*, not same-origin: in dev the page is served by Vite on another port and proxied here (`changeOrigin: false`), so an exact match would reject the only client we have.
-The OW-fumegi browser reproduction showed that cross-site no-CORS GETs can omit `Origin` while the browser still sends `Sec-Fetch-Site`; curl and other non-browser clients may omit both headers, so header absence remains allowed.
+The OW-fumegi browser reproduction showed that cross-site no-CORS GETs can omit `Origin` while the browser still sends `Sec-Fetch-Site`; curl and other non-browser clients may omit both headers, so header absence remains allowed by this check alone: curl still needs the bearer token and a loopback `Host` under D29.
 The production client and the development client through Vite's proxy are same-origin and therefore pass the request-metadata guard.
 The `Origin` rule is still not auth, and it is not meant to be; it is the missing half of "not remotely accessible", and D29's token is what authenticates a request. pipane has no equivalent (HANDOFF finding 17).
 
