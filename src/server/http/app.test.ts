@@ -32,6 +32,7 @@ import {
 	storedSession,
 	userMessage,
 } from "./testing/fakes.ts";
+import { createTestApp, TEST_API_TOKEN } from "./testing/app.ts";
 import { SseTestClient } from "./testing/sse-client.ts";
 
 const PI_SESSION: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/one two.jsonl" };
@@ -57,7 +58,7 @@ beforeEach(() => {
 	pi = new FakeAdapterFactory({ models: [{ id: "pi-1", label: "Pi One", efforts: [], defaultEffort: null }] });
 	codex = new FakeAdapterFactory({ models: [{ id: "cx-1", label: "Codex One", efforts: [], defaultEffort: null }] });
 	let n = 0;
-	app = createApp({
+	app = createTestApp({
 		index,
 		adapters: { pi, codex },
 		newId: () => `id-${++n}`,
@@ -182,7 +183,7 @@ describe("sessions", () => {
 	it("logs an attach failure with its session ref", async () => {
 		const failing = new FakeAdapterFactory({ failStart: "sbox: no git root" });
 		const logError = vi.fn();
-		app = createApp({ index, adapters: { pi: failing }, logError });
+		app = createTestApp({ index, adapters: { pi: failing }, logError });
 
 		const response = await get(ROUTES.session(PI_SESSION));
 
@@ -325,7 +326,7 @@ describe("preview (OW-38, read-only, non-attaching)", () => {
 
 		it("a parked fork before its attach, which the table does not hold", async () => {
 			const claude = new FakeAdapterFactory({ forkMode: "claude" });
-			app = createApp({ index, adapters: { claude } });
+			app = createTestApp({ index, adapters: { claude } });
 			await get(ROUTES.session(CLAUDE_SESSION));
 			const { ref } = (await (await post(ROUTES.fork(CLAUDE_SESSION), { entryId: "e1" })).json()) as ForkResponse;
 			expect(app.sessions.summaryOf(ref)).toBeNull();
@@ -646,7 +647,7 @@ describe("prompting", () => {
 	it("answers a prompt the backend handled without a turn 200 with a body, and a started one 202 as before (OW-dulipe)", async () => {
 		// Pi's extension commands, `/mcp` say, on `pi 1.2.0` (OW-kokotu).
 		const commands = new FakeAdapterFactory({ onSubmit: (_adapter, text) => (text.startsWith("/") ? "handled" : undefined) });
-		app = createApp({ index, adapters: { pi: commands } });
+		app = createTestApp({ index, adapters: { pi: commands } });
 		await get(ROUTES.session(PI_SESSION));
 
 		const handled = await post(ROUTES.prompt(PI_SESSION), { text: "/mcp" });
@@ -684,7 +685,7 @@ describe("prompting", () => {
 				adapter.setStreaming(false);
 			},
 		});
-		app = createApp({ index, adapters: { pi: eager } });
+		app = createTestApp({ index, adapters: { pi: eager } });
 		await get(ROUTES.session(PI_SESSION));
 		const client = await openStream();
 
@@ -728,7 +729,7 @@ describe("prompting", () => {
 				adapter.append(userMessage(text));
 			},
 		});
-		app = createApp({ index, adapters: { pi: renaming }, newId: () => "n1" });
+		app = createTestApp({ index, adapters: { pi: renaming }, newId: () => "n1" });
 		const client = await openStream();
 
 		const { ref } = (await (
@@ -777,7 +778,7 @@ describe("prompting", () => {
 				throw new Error("agent is wedged");
 			},
 		});
-		app = createApp({ index, adapters: { pi: failing } });
+		app = createTestApp({ index, adapters: { pi: failing } });
 		await get(ROUTES.session(PI_SESSION));
 		const client = await openStream();
 
@@ -963,7 +964,7 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 	it("keeps the error a prompt names when the backend handled it without a turn (OW-fakazi)", async () => {
 		// `/mcp` after an attach whose extension failed, the way Pi answers it (OW-dulipe).
 		pi = new FakeAdapterFactory({ onSubmit: () => "handled" });
-		app = createApp({ index, adapters: { pi } });
+		app = createTestApp({ index, adapters: { pi } });
 		await get(ROUTES.session(PI_SESSION));
 		const held = await raise("extension failed to load");
 		const watching = await openStream();
@@ -1001,7 +1002,7 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 		// sends it: the helper's stream is already open, `sessions/attach` is the GET,
 		// and `sessions/prompt` follows with the `priorErrorId` read before that attach.
 		const raising = new FakeAdapterFactory({ onStart: (adapter) => adapter.emitError("extension failed to load") });
-		app = createApp({ index, adapters: { pi: raising } });
+		app = createTestApp({ index, adapters: { pi: raising } });
 		const watching = await openStream();
 
 		expect((await get(ROUTES.session(PI_SESSION))).status).toBe(200);
@@ -1046,7 +1047,7 @@ describe("fork, model, and enumeration routes", () => {
 		const withPoints = new FakeAdapterFactory({
 			forkPoints: [{ id: "e1", text: "first ask", index: 0 }],
 		});
-		app = createApp({ index, adapters: { pi: withPoints } });
+		app = createTestApp({ index, adapters: { pi: withPoints } });
 		await get(ROUTES.session(PI_SESSION));
 
 		const body = (await (await get(ROUTES.forkPoints(PI_SESSION))).json()) as ForkPointsResponse;
@@ -1068,7 +1069,7 @@ describe("fork, model, and enumeration routes", () => {
 				throw new BackendRefusedError("Invalid entry ID for forking");
 			},
 		});
-		app = createApp({ index, adapters: { pi: refusing } });
+		app = createTestApp({ index, adapters: { pi: refusing } });
 		await get(ROUTES.session(PI_SESSION));
 
 		const refused = await post(ROUTES.fork(PI_SESSION), { entryId: "no-such-entry" });
@@ -1125,7 +1126,7 @@ describe("fork, model, and enumeration routes", () => {
 				log.push(["end", model]);
 			},
 		});
-		app = createApp({ index, adapters: { pi: held } });
+		app = createTestApp({ index, adapters: { pi: held } });
 		await get(ROUTES.session(PI_SESSION));
 
 		const one = post(ROUTES.model(PI_SESSION), { model: "pi-2" });
@@ -1164,7 +1165,7 @@ describe("fork, model, and enumeration routes", () => {
 				await gate.promise;
 			},
 		});
-		app = createApp({ index, adapters: { pi, codex: factory } });
+		app = createTestApp({ index, adapters: { pi, codex: factory } });
 		await get(ROUTES.session(CODEX_SESSION));
 		await post(ROUTES.model(CODEX_SESSION), { model: "cx-plain" });
 
@@ -1187,7 +1188,7 @@ describe("fork, model, and enumeration routes", () => {
 				throw new BackendRefusedError(`Model not found: ${model}`);
 			},
 		});
-		app = createApp({ index, adapters: { pi: refusing } });
+		app = createTestApp({ index, adapters: { pi: refusing } });
 		await get(ROUTES.session(PI_SESSION));
 
 		const refused = await post(ROUTES.model(PI_SESSION), { model: "nobody/nothing" });
@@ -1217,7 +1218,7 @@ describe("fork, model, and enumeration routes", () => {
 				},
 			],
 		});
-		app = createApp({ index, adapters: { pi, codex: withEfforts } });
+		app = createTestApp({ index, adapters: { pi, codex: withEfforts } });
 
 		const listed = (await (await get(`${ROUTES.models}?backend=codex`)).json()) as ModelsResponse;
 		expect(listed.models).toEqual([
@@ -1251,7 +1252,7 @@ describe("fork, model, and enumeration routes", () => {
 				{ id: "cx-plain", label: "Codex Plain", efforts: [], defaultEffort: null },
 			],
 		});
-		app = createApp({ index, adapters: { pi, codex: factory } });
+		app = createTestApp({ index, adapters: { pi, codex: factory } });
 		await get(ROUTES.session(CODEX_SESSION));
 
 		// No model known yet: the clients offer no effort then, and neither does this.
@@ -1285,7 +1286,7 @@ describe("fork, model, and enumeration routes", () => {
 			models: [{ id: "pi-1", label: "Pi One", efforts: [], defaultEffort: null }],
 			modelsNeedStart: true,
 		});
-		app = createApp({ index, adapters: { pi: offline } });
+		app = createTestApp({ index, adapters: { pi: offline } });
 
 		const before = await get(`${ROUTES.models}?backend=pi`);
 		expect(before.status).toBe(500);
@@ -1303,7 +1304,7 @@ describe("fork, model, and enumeration routes", () => {
 
 	it("a backend that cannot answer does not take out the other's list", async () => {
 		const mute = new FakeAdapterFactory({ modelsNeedStart: true });
-		app = createApp({ index, adapters: { pi: mute, codex } });
+		app = createTestApp({ index, adapters: { pi: mute, codex } });
 
 		const response = await get(ROUTES.models);
 		expect(response.status).toBe(200);
@@ -1321,7 +1322,7 @@ describe("fork, model, and enumeration routes", () => {
 			},
 			forRef: () => undefined,
 		} as unknown as typeof pi;
-		app = createApp({ index, adapters: { pi: hostile, codex } });
+		app = createTestApp({ index, adapters: { pi: hostile, codex } });
 
 		const response = await get(ROUTES.models);
 		expect(response.status).toBe(200);
@@ -1344,7 +1345,7 @@ describe("routing and errors", () => {
 	});
 
 	it("501s a backend with no adapter registered", async () => {
-		app = createApp({ index, adapters: { pi } });
+		app = createTestApp({ index, adapters: { pi } });
 		const response = await get(ROUTES.session(CODEX_SESSION));
 		expect(response.status).toBe(501);
 	});
@@ -1376,7 +1377,7 @@ describe("routing and errors", () => {
 	});
 
 	it("falls through to the static handler outside /api", async () => {
-		app = createApp({
+		app = createTestApp({
 			index,
 			adapters: { pi },
 			staticHandler: () => new Response("<!doctype html>", { status: 200 }),
@@ -1475,7 +1476,7 @@ describe("origin", () => {
 	});
 
 	it("leaves the static bundle alone", async () => {
-		app = createApp({
+		app = createTestApp({
 			index,
 			adapters: { pi },
 			staticHandler: () => new Response("<!doctype html>", { status: 200 }),
@@ -1512,7 +1513,7 @@ describe("host", () => {
 	});
 
 	it("refuses a rebound name on the static bundle too", async () => {
-		app = createApp({
+		app = createTestApp({
 			index,
 			adapters: { pi },
 			staticHandler: () => new Response("<!doctype html>", { status: 200 }),
@@ -1529,5 +1530,141 @@ describe("host", () => {
 		for (const host of ["localhost:8022", "127.0.0.1:5173", "127.1.2.3:9999", "[::1]:41730"]) {
 			expect((await withHost(ROUTES.sessions, host)).status, host).toBe(200);
 		}
+	});
+});
+
+describe("token", () => {
+	// A local process can forge every header the checks above read, so only a
+	// secret it cannot read stops it. These tests build the app raw, so the
+	// module's `get`/`post` send no token unless a test adds one.
+	beforeEach(() => {
+		app = createApp({ index, adapters: { pi, codex }, apiToken: TEST_API_TOKEN });
+	});
+
+	function send(method: string, path: string, headers: Record<string, string> = {}, body?: unknown): Promise<Response> {
+		return app.fetch(
+			new Request(`http://127.0.0.1${path}`, {
+				method,
+				headers: { "content-type": "application/json", ...headers },
+				...(method === "GET" ? {} : { body: JSON.stringify(body ?? {}) }),
+			}),
+		);
+	}
+
+	async function expectUnauthorized(response: Response, what: string): Promise<void> {
+		expect(response.status, what).toBe(401);
+		expect(((await response.json()) as ApiError).error, what).toBe("unauthorized");
+	}
+
+	it("refuses to create or attach a session without one, and spawns nothing", async () => {
+		await expectUnauthorized(await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" }), "create");
+		await expectUnauthorized(await get(ROUTES.session(PI_SESSION)), "attach");
+		expect(pi.created).toHaveLength(0);
+		expect(codex.created).toHaveLength(0);
+		const listed = await send("GET", ROUTES.sessions, { authorization: `Bearer ${TEST_API_TOKEN}` });
+		const { sessions } = (await listed.json()) as ListSessionsResponse;
+		expect(sessions.some((s) => s.status === "virtual")).toBe(false);
+	});
+
+	it("refuses a wrong token, another scheme, and a token of another length", async () => {
+		const wrong = TEST_API_TOKEN.replace(/.$/, (c) => (c === "x" ? "y" : "x"));
+		const values = [
+			`Bearer ${wrong}`,
+			`Basic ${btoa(`agentpane:${TEST_API_TOKEN}`)}`,
+			`Basic ${TEST_API_TOKEN}`,
+			`Bearer ${TEST_API_TOKEN}x`,
+			`Bearer ${TEST_API_TOKEN.slice(0, -1)}`,
+			"Bearer ",
+			"Bearer",
+			TEST_API_TOKEN,
+		];
+		for (const authorization of values) {
+			await expectUnauthorized(await send("GET", ROUTES.session(PI_SESSION), { authorization }), authorization);
+		}
+		expect(pi.created).toHaveLength(0);
+	});
+
+	it("takes the token only from the Authorization header", async () => {
+		await expectUnauthorized(await get(`${ROUTES.sessions}?token=${TEST_API_TOKEN}`), "query");
+		await expectUnauthorized(
+			await send("GET", ROUTES.sessions, { cookie: `token=${TEST_API_TOKEN}` }),
+			"cookie",
+		);
+	});
+
+	it("accepts the right one", async () => {
+		const response = await send("GET", ROUTES.session(PI_SESSION), { authorization: `Bearer ${TEST_API_TOKEN}` });
+		expect(response.status).toBe(200);
+		expect(pi.forRef(PI_SESSION)?.started).toBe(true);
+	});
+
+	it("refuses every other route without one, a live session's actions included", async () => {
+		// Attached with the token first, so an action refused here is refused for
+		// the token and not because there is nothing to act on.
+		const attached = await send("GET", ROUTES.session(PI_SESSION), { authorization: `Bearer ${TEST_API_TOKEN}` });
+		expect(attached.status).toBe(200);
+		const live = pi.forRef(PI_SESSION)!;
+
+		// Unset, so that a route the token fails to guard answers 500 here rather
+		// than opening whatever editor the environment names.
+		const priorEditor = process.env.EDITOR;
+		delete process.env.EDITOR;
+		try {
+			// Every branch of `handle` in app.ts but `GET /api/events`.
+			const routes: [string, string, unknown?][] = [
+				["POST", ROUTES.events],
+				["GET", ROUTES.models],
+				["GET", `${ROUTES.models}?backend=pi`],
+				["POST", ROUTES.editDraft, { text: "draft" }],
+				["GET", ROUTES.sessions],
+				["POST", ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" }],
+				["GET", ROUTES.session(CODEX_SESSION)],
+				["DELETE", ROUTES.session(PI_SESSION)],
+				["GET", ROUTES.preview(PI_SESSION)],
+				["POST", ROUTES.prompt(PI_SESSION), { text: "hello" }],
+				["POST", ROUTES.abort(PI_SESSION)],
+				["POST", ROUTES.compact(PI_SESSION)],
+				["DELETE", ROUTES.error(PI_SESSION), { errorId: "e1" }],
+				["POST", ROUTES.fork(PI_SESSION), { entryId: "e1" }],
+				["GET", ROUTES.forkPoints(PI_SESSION)],
+				["POST", ROUTES.model(PI_SESSION), { model: "pi-1" }],
+				["POST", ROUTES.name(PI_SESSION), { name: "renamed" }],
+				["POST", ROUTES.effort(PI_SESSION), { effort: "high" }],
+				["GET", "/api/sessions/gemini/xyz"],
+				["GET", "/api/nope"],
+			];
+			for (const [method, path, body] of routes) {
+				await expectUnauthorized(await send(method, path, {}, body), `${method} ${path}`);
+			}
+		} finally {
+			if (priorEditor !== undefined) process.env.EDITOR = priorEditor;
+		}
+
+		expect(live.prompts).toHaveLength(0);
+		expect(live.forks).toHaveLength(0);
+		expect(live.disposed).toBe(false);
+		expect(codex.created).toHaveLength(0);
+		expect(index.previewed).toHaveLength(0);
+	});
+
+	it("opens the event stream without one, since EventSource cannot send it", async () => {
+		const client = await openStream();
+		await client.close();
+	});
+
+	it("still checks Origin before the token", async () => {
+		const response = await send("GET", ROUTES.events, { origin: "https://evil.example" });
+		expect(response.status).toBe(403);
+		expect(((await response.json()) as ApiError).error).toBe("forbidden_origin");
+	});
+
+	it("leaves the static bundle alone", async () => {
+		app = createApp({
+			index,
+			adapters: { pi },
+			apiToken: TEST_API_TOKEN,
+			staticHandler: () => new Response("<!doctype html>", { status: 200 }),
+		});
+		expect((await get("/")).status).toBe(200);
 	});
 });

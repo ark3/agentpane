@@ -10,6 +10,7 @@
  * here, while the transport remains independently testable behind its seams.
  */
 
+import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_PORT } from "../shared/protocol.ts";
@@ -23,6 +24,11 @@ const productionDeps = createProductionDeps();
 
 const app = createApp({
 	...productionDeps,
+	// Fresh per start and held only here, never in `process.env`, where every
+	// agent this server spawns would inherit it. Nothing hands it to a client
+	// yet, so until the token is read from its file every `/api` route but the
+	// event stream answers 401.
+	apiToken: randomBytes(32).toString("base64url"),
 	// Comfortably inside Bun's idle timeout below, and enough to notice a dead
 	// stream without generating noticeable traffic.
 	heartbeatMs: 15_000,
@@ -34,8 +40,8 @@ const app = createApp({
 	}),
 });
 
-// Loopback only (D8). No auth token, no cookie, no localhost bypass -- none of
-// it needs to exist once remote access is off the table.
+// Loopback only (D8), which keeps the network out; the token above is what
+// keeps out a local process that shares this loopback.
 const server = Bun.serve({
 	hostname: "127.0.0.1",
 	port,

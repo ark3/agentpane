@@ -13,6 +13,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { timingSafeEqual } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -67,6 +68,7 @@ export function createApp(deps: AppDeps): App {
 	const broadcaster = new Broadcaster(deps.heartbeatMs ?? 0);
 	const sessions = new SessionManager(deps, broadcaster);
 	const logError = deps.logError ?? ((message: string) => console.error(message));
+	const apiToken = Buffer.from(deps.apiToken, "utf8");
 
 	async function handle(request: Request): Promise<Response> {
 		// Before anything parses `request.url`, which Bun leaves relative for an
@@ -85,6 +87,17 @@ export function createApp(deps: AppDeps): App {
 
 		if (!isTrustedRequestMetadata(request.headers)) {
 			return error(403, "forbidden_origin", "this API is reachable only from a local page");
+		}
+
+		// Last, so a browser's forged request still reads as the 403 it is. The
+		// one exemption is the event stream's GET, by method and path and nothing
+		// wider: `EventSource` cannot set a header, and the stream is read-only
+		// and starts nothing. The attach GET spawns an agent and stays behind it.
+		const isEventStream = request.method === "GET" && segments.length === 2 && segments[1] === "events";
+		if (!isEventStream && !hasBearerToken(request.headers, apiToken)) {
+			const response = error(401, "unauthorized", "this API needs its bearer token");
+			response.headers.set("www-authenticate", "Bearer");
+			return response;
 		}
 
 		// /api/events
@@ -646,6 +659,24 @@ function isLoopbackHost(request: Request): boolean {
 	// `evil.example@127.0.0.1` as userinfo and hand back a loopback hostname.
 	const match = /^(\[[^\]]*\]|[^:]*)(?::\d*)?$/.exec(host);
 	return match !== null && isLoopbackHostname((match[1] as string).toLowerCase());
+}
+
+/**
+ * The loopback bind and the checks above stop a browser; a local process can
+ * send any header, so what stops it is a secret it cannot read. Only from the
+ * `Authorization` header, never a cookie, which a browser attaches on its own,
+ * or a query parameter, which lands in logs and history.
+ *
+ * Constant-time over equal lengths. A length mismatch still runs the same
+ * comparison, of the token against itself, so the time spent says nothing
+ * about how much of a guess was right.
+ */
+function hasBearerToken(headers: Headers, expected: Buffer): boolean {
+	const match = /^Bearer +(\S+)$/i.exec(headers.get("authorization") ?? "");
+	if (match === null) return false;
+	const given = Buffer.from(match[1] as string, "utf8");
+	const sameLength = given.length === expected.length;
+	return timingSafeEqual(sameLength ? given : expected, expected) && sameLength;
 }
 
 function isLoopbackHostname(hostname: string): boolean {
