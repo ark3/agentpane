@@ -21,8 +21,7 @@ import { createStaticHandler } from "./http/static.ts";
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
 
 // Held only here and handed to `createApp`, never put in `process.env`, where
-// every agent this server spawns would inherit it. No client reads the file
-// yet, so every `/api` route but the event stream still answers them 401.
+// every agent this server spawns would inherit it.
 let apiToken: string;
 try {
 	apiToken = loadApiToken();
