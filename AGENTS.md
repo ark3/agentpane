@@ -1,7 +1,7 @@
 # agentpane
 
 Decisions D1–D27 in `docs/DESIGN.md`, the evidence behind the work in `docs/HANDOFF.md`.
-Work items are cards, in the deck at `docs/work/`, read and written through the `card` CLI — see "Cards" below, and run `card status`.
+Outstanding work is tracked in GitHub issues; see "Issues and cards" below.
 
 ## Commands
 
@@ -58,7 +58,7 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   The pin binds the turns an agent session drives while coding, debugging, or testing, because that work belongs on inexpensive models; it says nothing about agentpane's users, and the owner driving agentpane on the home server may choose any model.
   A reader on 2026-09-08 took it as a property of the machine and proposed restricting the model picker to enforce it; that was never the intent.
 - **Do not assume how your session was launched.**
-  A card may be executed by Claude Code, Codex or Pi, by hand or through `card run`, under whatever sandbox that launch builds, and what is writable differs between them: on 2026-10-14 a `card run` session, started as plain `sbox claude`, found `~/.pi/agent` read-only, while an interactive session on the same machine could write it (OW-robozi).
+  A card may be executed by Claude Code, Codex or Pi, by hand or as a `card` role session, under whatever sandbox that launch builds, and what is writable differs between them: on 2026-10-14 a `card run` session, started as plain `sbox claude`, found `~/.pi/agent` read-only, while an interactive session on the same machine could write it (OW-robozi).
   Driving a backend CLI directly against its own state directory is fine for development on the home server, and is the first thing to try.
   When the state directory is not writable, the CLI says so, if quietly: Pi refuses a prompt with `EROFS ... auth.json.lock` or answers `get_state` with model `"id": "unknown"`, and Codex fails with `failed to initialize sqlite state runtime` (`docs/HANDOFF.md`, "Each backend needs a writable state directory").
   Then give that run a throwaway state directory, as every probe in `resources/probes/` already does: `PI_CODING_AGENT_DIR` or `CODEX_HOME` pointed at a fresh private temp directory holding the credential and settings files copied in by name, and removed when the run ends (`make_state_home` in `resources/probes/capture_fixtures.py`).
@@ -66,12 +66,11 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   Say which of the two a run used beside the evidence it produced.
   `agentpane_pi_smoke.py` passed with `--tool-check` in a `card run` session whose `~/.pi/agent` refused a `touch`, on `pi 1.2.0` on 2026-10-14 (`docs/MANUAL_TESTING.md`, OW-fitopi).
 - **What is still confined to the work laptop is that machine itself.**
-  Live Pi evidence was, until 2026-09-13, the main reason to go there; it no longer is, and a card asking for one belongs wherever the session is.
-  What remains is that clone's own provisioning — its `.git/card/` and its PATH, as in OW-gabemi — the reference material `docs/HANDOFF.md` addresses there by absolute path under "Reference material on the work laptop", and that machine's own session stores, where the owner uses agentpane daily and which therefore hold the most real use (OW-furivo).
-  Such an item carries the label `work-laptop`, and its body still opens with the line `**Work laptop:**` naming what the visit needs.
-  Since 2026-10-14 no agent session develops agentpane on the work laptop: cards are authored and executed on the home server, and a work-laptop item is one the owner carries out by hand, so its body names the exact commands to run and what to bring back, and anything that needs an agent — writing a probe, filing cards from the result — happens on the home server before or after the visit.
+  Live Pi evidence was, until 2026-09-13, the main reason to go there; it no longer is, and an issue asking for one belongs wherever the session is.
+  What remains is that clone's own provisioning, as in OW-gabemi, the reference material `docs/HANDOFF.md` addresses there by absolute path under "Reference material on the work laptop", and that machine's own session stores, where the owner uses agentpane daily and which therefore hold the most real use (OW-furivo).
+  Such an issue's title opens `Work laptop:`.
+  Since 2026-10-14 no agent session develops agentpane on the work laptop: work is planned and executed on the home server, and a work-laptop item is one the owner carries out by hand, so its body names the exact commands to run and what to bring back, and anything that needs an agent — writing a probe, filing issues from the result — happens on the home server before or after the visit.
   The owner updates every CLI to its latest release on both machines each morning, so as of 2026-10-14 a version measured on the home server is the version the work laptop runs that day.
-  The label is the filter: `card list --open --label work-laptop` prints those cards with their headlines, which is the intersection view the old two-command survey could not produce.
   Name the machine rather than writing "here": this file is checked in and read from both clones, so a sentence that resolves against the reader's location is false on one of them.
 - **A work-laptop item does all of its work in one visit.**
   The scarce resource is trips, not minutes once you are there, so never rank such an item's contents by urgency or name the half that matters most: that is an excuse to do part of it and come back, and the second question usually costs almost nothing while the CLI is already running.
@@ -91,9 +90,6 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   The loss is agentpane's kill, not the CLI's; see `docs/MANUAL_TESTING.md` OW-japuzo.
 - A test that has never failed has not been shown to test anything.
   For a fix, break it again and watch it go red first.
-- The sibling rule -- a guard at the site whose adversarial read names a case it misses gets one sibling card that changes the state's owner and retires the guard -- is `card execute`'s, and what follows is what it cost here.
-  OW-gusaru's review filed four cards on 2026-09-25, OW-nibihi as the sibling and OW-ruzazi, OW-nukuse and OW-novone beside it, where one card carrying all four cases would have cost a quarter of the authoring and left nothing out.
-  Three of the eight race fixes closed between 2026-09-22 and 2026-09-24 produced exactly such a sibling -- OW-zovaye filed OW-nuzepi, OW-zasozo filed OW-woyifu, OW-vijuyi filed OW-zudase -- and D24 is what those three cost.
 - When a run overturns a fact the repo already recorded, the same change retires **every** copy of it.
   Grep the flag name or the phrase; the copies are not all in docs.
   On 2026-08-20 a run flipped `moved_file_on_disk_at_fork` and left the old answer standing in `docs/MANUAL_TESTING.md`, in the conclusion that section had drawn from it, and in the `pi/process.ts` docblock a reader meets at the code (034d7dd).
@@ -111,78 +107,28 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   A doc defect: fix the doc in the same change.
   A fact you verified: the commit message, or `docs/DESIGN.md` if it changes a decision.
   Live-run evidence: `docs/MANUAL_TESTING.md`.
-  Anything left undone becomes a card.
 - Build-slice status lives in the Status table at the top of `docs/WORKSTREAMS.md` and nowhere else.
-  That table tracks slices, not cards.
+  That table tracks slices, not issues.
 
-## Cards
+## Issues and cards
 
-Work items are cards.
-`card status` reports this repo's deck, `card workflow` is the contract, and `card author` and `card execute` carry the two procedures.
-Read those rather than a retelling; what follows is only what card cannot know about this repo.
-
-Card reads this deck through per-clone config that is deliberately not synced: `.git/card/card-config.toml` must carry `prefix = "OW"`, `deck = "../../docs/work"` (resolved relative to `.git/card/`), and `public = true`, which stands card's commit-lint gate down and is what keeps citing `OW-` ids in commit subjects legal here.
-It may also carry local card-runner settings, such as this work laptop's `[run]` block; those do not change the deck contract.
-Writing that file, like installing card or Bun, is the owner's provisioning of a machine, not any session's work.
-A claude.ai cloud container is the exception, since it starts with neither and is thrown away: on 2026-10-30 the owner had a session clone `ark3/card` at tag `card-1.0`, link its `src/card.ts` (run by Bun, no dependencies to install) onto PATH, and write that config file, all of which lasts only as long as the container.
-
-Do not take formatting from the cards already in the deck.
-`card author` sets the body's shape — one sentence per line — and the existing cards are hard-wrapped instead, so a card read for prior art teaches the wrong house style while looking authoritative.
-Read those cards for their content and the payload for their form.
-
-### Labels
-
-Card treats labels as opaque strings and cannot know this repo's set.
-Every card carries exactly one kind, given to `card new --label`:
-
-- `change` — a deliberate change to behaviour or presentation, including a new feature, that nobody considers broken today.
-- `defect` — behaviour observed or read as broken, with no dependency on leaving it that way.
-- `deferral` — a finding judged not worth blocking current work on.
-- `question` — a decision nobody has made yet; it closes when the decision is recorded where the next reader will look.
-- `unverified` — behaviour believed to work but never proven; it closes when durable evidence exists.
-
-Nine cross-cutting labels may follow that kind.
-`work-laptop` marks work that needs the work laptop itself — that clone's provisioning, or the reference material addressed there by absolute path — as described under "Evidence"; it stopped gating live Pi evidence when the home server got `pi` on 2026-09-13.
-`browser-testing` marks work whose done condition needs `bun run test:browser` or a human observation in a real browser; it does not belong on ordinary client work that jsdom can settle.
-`card list --open --label browser-testing` is the browser-validation queue.
-`emacs` groups the Emacs client work; `card list --open --label emacs` is the open set, blockers and all.
-D22 chose a native `agentpane-mode` over a JSON-RPC helper agentpane owns on 2026-09-22, and the ACP-shim stream filed 2026-09-13 as OW-fenobo, OW-basoga, OW-limejo and OW-mikuyo closed `--declined` under it; OW-vibipo is the question card that chose.
-`emacs-native` rides on top of `emacs` and marks that chosen stream, filed 2026-09-15 as OW-mutufa, OW-refibu, OW-wavone, OW-gunuke and OW-fojike, with OW-dekate the spike that decided it; `card list --open --label emacs-native` is that stream alone.
-`d24` marks the seven cards D24 filed on 2026-09-24 -- OW-sewewe, OW-dutute, OW-nikogo, OW-suyinu, OW-kimaya, OW-danifa and OW-mofuho -- and `card list --open --label d24` is that stream, blockers and all.
-`d25` marks the six cards D25 filed on 2026-09-28 -- OW-sirofi, OW-fiheli, OW-lunihe, OW-kakate, OW-filuge and OW-mepufi -- and the three its follow-up filed the same day -- OW-forinu, OW-rebawa and OW-mopuyi -- and `card list --open --label d25` is that stream.
-`d27` marks the stream D27 filed on 2026-10-01 for what a session's row carries and how both clients label it: three wire cards, each with a browser card and an `emacs` card blocked by it -- OW-jamaha (rename) with OW-bumonu and OW-jidihu, OW-66 (marks) with OW-zewiru and OW-hahuna, and OW-vezipo (fork lineage) with OW-galuhu and OW-kepemu -- beside OW-yilene, which reads Pi and Claude Code names from their store files, and the deferrals OW-muvili and OW-ruyewe; the rename slice's review filed OW-kametu, OW-husuju and OW-mepivi into it on 2026-10-01, and OW-kametu's review filed OW-depari on 2026-10-02.
-The blockers set its order, so `card list --open --label d27` is the stream, blockers and all.
-`sweep-0929` marks what a sweep of the open deck for consolidations filed or amended on 2026-09-29: new cards where several open cards were one state with more than one owner, amendments where one open card already had the right shape, and OW-geselo for the cards it found moot or stale.
-Unlike `now`, this stream has an order, proposed by the session that filed it, and it is recorded here because a label cannot carry it: OW-letevu, OW-bulanu, OW-pihuko, OW-zavehi (which absorbed OW-denuse), OW-kamave (reframed from OW-yufazo's review), OW-hiliti then OW-pezelo, OW-kutome, OW-sihoma, OW-nuzoto (filed 2026-09-30 from what OW-kutome and OW-pezelo left, absorbing OW-homogu, OW-rugeba and OW-reyayi), OW-wukako, OW-bepudu and OW-jadoda (a gap drops the watch, in either order), OW-linowe (filed from OW-wukako's review), OW-dajove, OW-sozopu, OW-yehisa then OW-sofige and OW-zadupu, OW-pirobi (the last of the fork-moves-nothing-from-its-parent cards after OW-koledi and OW-vitefo), OW-luvema (one Codex mapper for live and preview, from OW-zadupu's captures), OW-novuye then OW-gogona, OW-fifaji, OW-geselo, and OW-vehuji whenever convenient.
-OW-novuye and OW-fifaji are decisions for the owner and OW-geselo closes cards on judgment, so those three run with the owner in the session; the rest can go through `card run`.
-Only OW-pezelo and OW-zadupu carry real blockers; the rest of the order is a judgment about which change makes the next one smaller, so a card executed out of it is not wrong, only possibly larger than it needed to be.
-OW-zavehi's D26 filed six more into the stream on 2026-09-29, whose blockers set their order: OW-sodohi, then OW-vebeno and OW-likopo; OW-royosa once OW-kamave closes; then OW-lilami, and OW-vugefa once OW-bupivi closes too.
-`card list --open --label sweep-0929` is the stream.
-
-`now` marks cards the owner wants soon, but a label carries no order, so `card list --open --label now` is a reminder and never the sequence to execute.
-Open cards are not a backlog awaiting their turn — they are the archive, read by grep when a theme comes up.
+Outstanding work is tracked in GitHub issues on `ark3/agentpane`.
+Issues say what is to be done; they are not the record of what was decided, which lives in the repo's documents -- decisions in `docs/DESIGN.md`, live-run evidence in `docs/MANUAL_TESTING.md`.
+An issue is worked as a plan through `card`, whose deck is ephemeral and lives under `.git`; `card` delivers its own procedure, and `deck agent-help` gives the deck's conventions.
+A claude.ai cloud container starts without `card` and is thrown away; install it there with `bun install -g github:ark3/card`, which delivers both `card` and `deck` (card's `BRIEF.md`, as of 2026-11-13).
+`OW-` ids name legacy cards, retired on 2026-11-13; `docs/work/README.md` says how to read them.
 
 ### Both clients
 
 The Emacs client is first-class and stays at feature parity with the browser; set by the owner on 2026-09-23.
-A card that adds or changes a user-facing capability lands it in both clients or in neither.
-One that lands it in neither carries the capability onto both wires -- the HTTP API and the Emacs helper's JSON-RPC in `src/emacs/protocol.ts` -- and each client gets its own card blocked by it, the Emacs one labelled `emacs`.
+A change that adds or changes a user-facing capability lands it in both clients or in neither.
+One that lands it in neither carries the capability onto both wires -- the HTTP API and the Emacs helper's JSON-RPC in `src/emacs/protocol.ts` -- and each client gets its own issue.
 
-### Committing a card you authored
+## Worktrees
 
-Commit it unless the user asks not to.
-Card never commits anything, and its author payload is silent on git.
+On the home server the repo tree is the only path mounted read-write, so a worktree must sit under `.worktrees/` inside it; anywhere else fails with `Read-only file system` (`docs/HANDOFF.md`, "Environment gotchas").
+`card` puts its plan worktree there by construction.
 
-## Dispatching an implementer
+A fresh worktree needs `bun install` before any `src/` work.
 
-`card worktree <id>` cuts the tree — `.worktrees/<id>`, on branch `card/<id>`, from the branch the main checkout is on.
-It therefore starts at local `main`'s tip and there is **nothing to fast-forward**: the `git merge --ff-only main` step the old dispatch procedure carried is gone along with the staleness it existed to fix (`docs/MANUAL_TESTING.md`, "Observed worktree base for dispatched subagents").
-
-`.worktrees/<id>` inside the repo tree is not a preference.
-On the home server that tree is the only path mounted read-write, and a worktree anywhere outside it fails with `Read-only file system` (`docs/HANDOFF.md`, "Environment gotchas"); `card worktree` satisfies that by construction.
-
-The dispatch prompt carries one thing card cannot know: **`bun install` in the fresh worktree** before any `src/` work.
-
-Never `/code-review ultra` in an execution session — it has cost a full budget window.
-The old skill's blanket ban on review subagents does *not* survive with it: `card execute` positively requires dispatching an adversarial reader at finished work, and card wins there.
-Only the `/code-review ultra` ban is repo-local.
+Never `/code-review ultra` in an execution session -- it has cost a full budget window.
