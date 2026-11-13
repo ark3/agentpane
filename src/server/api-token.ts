@@ -24,10 +24,11 @@ import { join } from "node:path";
 /**
  * The token file's path. Resolved through `os.homedir()` on every call, not
  * at module load, so a test that points `HOME` at a temp directory after
- * import moves it.
+ * import moves it. `home` is for a caller that injects its own, as the Emacs
+ * helper's tests do (`src/emacs/token.ts`).
  */
-export function apiTokenPath(): string {
-	return join(homedir(), ".ssh", "agentpane-token");
+export function apiTokenPath(home: string = homedir()): string {
+	return join(home, ".ssh", "agentpane-token");
 }
 
 /** Startup must not proceed; the message says what to fix. */
