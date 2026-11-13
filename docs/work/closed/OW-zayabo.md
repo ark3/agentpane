@@ -1,5 +1,6 @@
 ---
 labels: [question, now]
+closed: moot
 ---
 
 # GitHub Issues should become agentpane's tracker of record, with card kept for decomposing and implementing one issue at a time
@@ -57,3 +58,9 @@ The survey's other seed, remote access to agentpane, was set aside by the owner 
 
 The decision is recorded where the next session looks: `AGENTS.md`, "Cards" and "Landing work", say whether GitHub Issues is the tracker of record and how cards relate to an issue, and `docs/TRACKING.md` gains the dated reason.
 Whatever the answer, the close note says what it means for the open deck: under a yes, the seed issues, the triage and the three mechanics above are the first work under the new tracker; under a no, the deck stays the tracker and the note says why.
+
+## Close note
+
+The card triage of 2026-10-31 to 2026-11-01 did the move this card proposed without it: every open card was promoted to a GitHub issue (ark3/agentpane#3 to #35), declined or closed moot, so GitHub Issues is now where outstanding work is tracked.
+The question this card left open went with the triage and changed shape there: the owner has since said issues are not the project's durable record, and where that record lives is parked in `docs/work/TRIAGE.md`, "State at the end of the first session".
+The body's recommendation stands: agent sessions should reach issues through a fine-grained token scoped to this repository's issues rather than a broad login, which the owner is setting up as of 2026-11-13.
