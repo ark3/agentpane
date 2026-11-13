@@ -196,6 +196,22 @@ An attached session is closed through the ref the attach answered, and in its ow
 
 Verified with: `pi` 1.5.2 on the home server, 2026-11-13, against the server at `ada7204d`, where it reproduced the exposure; the run is recorded in the message of the commit that added this probe.
 
+## `sbox_token_mask_probe.py`
+
+Proves: **a command run through `sbox` cannot read `~/.ssh/agentpane-token`**.
+The server keeps its API token there because `sbox` masks `~/.ssh` from every agent -- a tmpfs holding a seeded `config` under bwrap, a read deny under seatbelt -- and that is a side effect of `sbox`'s ssh mask rather than anything agentpane controls, so this probe says when it stops holding.
+
+```bash
+python3 sbox_token_mask_probe.py                    # outside any sandbox; uses sbox on PATH
+python3 sbox_token_mask_probe.py --sbox PATH/sbox   # a specific sbox
+```
+
+Run it outside any sandbox: it refuses (exit 3) when `SBOX=1` is set or, on Linux, when `~/.ssh` is a mount point in `/proc/self/mountinfo`, as bwrap's tmpfs makes it, since the `~/.ssh` it would check is then the sandbox's.
+It ensures the token file exists, creating it as `loadApiToken` in `src/server/api-token.ts` does when absent and never altering an existing one, and refuses (exit 3) a file that loader would refuse.
+It then runs `sbox --profile none --workspace <fresh temp dir> -- sh -c ...`, which prints a per-run sentinel and `cat`s the path expanded outside the sandbox.
+It passes (exit 0) when the sentinel arrives and the token does not follow it, fails (exit 1) when it does, naming `sbox --ssh` and `sbox --rw ~/.ssh` as what exposes the file, and is inconclusive (exit 2) when no sentinel arrives, since `sbox` then never ran the command -- it exits 1 before starting a sandbox on a missing profile or workspace, which would otherwise read as a refused read.
+It never prints the token.
+
 ## `agentpane_live_support.py`
 
 Not a probe. The machinery both smoke checks share: the HTTP/SSE client, the
