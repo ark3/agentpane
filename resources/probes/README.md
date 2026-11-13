@@ -177,6 +177,25 @@ Costs tokens: two long turns cut a few hundred characters in, and three one-word
 
 Verified with: `pi` 1.2.0 on the home server, 2026-10-14, two runs, in `docs/MANUAL_TESTING.md`, "A Pi session's file appears at its first user message, and a fork at that message has none when `fork` returns (OW-tigaye)".
 
+## `loopback_token_repro_probe.py`
+
+Proves: **a separate process holding no token can create a Pi session in a directory nobody gave it, and attach to it, which spawns the agent there**.
+It sends neither `Authorization` nor `Origin` nor `Sec-Fetch-Site`, as any local non-browser process can.
+Its passing condition is refusal: it passes (exit 0) only when both the create and the attach are answered 401 or 403, fails (exit 1) when either is answered 2xx, and is inconclusive (exit 2) on anything else; exit 3 means it could not close what it attached or clean up.
+
+```bash
+python3 loopback_token_repro_probe.py                                   # starts its own server on a free port
+python3 loopback_token_repro_probe.py --skip-build                      # reuse dist/client
+python3 loopback_token_repro_probe.py --base-url http://127.0.0.1:PORT  # target a running server, e.g. from inside sbox
+```
+
+By default it builds and starts the production server, as `agentpane_pi_smoke.py` does, with Pi on a throwaway `PI_CODING_AGENT_DIR`; with `--base-url` it starts nothing.
+The session's `cwd` is a fresh `/var/tmp` directory holding only `.sandbox-workspace`, so `sbox` accepts it and a server outside the probe's sandbox sees it too.
+The create carries the pinned `--model`; nothing is prompted, so no model is charged.
+An attached session is closed through the ref the attach answered, and in its own-server mode the probe also records the Pi pids the attach spawned and that none outlived the close.
+
+Verified with: `pi` 1.5.2 on the home server, 2026-11-13, against the server at `ada7204d`, where it reproduced the exposure; the run is recorded in the message of the commit that added this probe.
+
 ## `agentpane_live_support.py`
 
 Not a probe. The machinery both smoke checks share: the HTTP/SSE client, the
