@@ -10,25 +10,33 @@
  * here, while the transport remains independently testable behind its seams.
  */
 
-import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_PORT } from "../shared/protocol.ts";
+import { loadApiToken } from "./api-token.ts";
 import { createProductionDeps } from "./composition.ts";
 import { createApp } from "./http/app.ts";
 import { createStaticHandler } from "./http/static.ts";
 
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
+
+// Held only here and handed to `createApp`, never put in `process.env`, where
+// every agent this server spawns would inherit it. No client reads the file
+// yet, so every `/api` route but the event stream still answers them 401.
+let apiToken: string;
+try {
+	apiToken = loadApiToken();
+} catch (err) {
+	console.error(err instanceof Error ? err.message : err);
+	process.exit(1);
+}
+
 const clientDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../dist/client");
 const productionDeps = createProductionDeps();
 
 const app = createApp({
 	...productionDeps,
-	// Fresh per start and held only here, never in `process.env`, where every
-	// agent this server spawns would inherit it. Nothing hands it to a client
-	// yet, so until the token is read from its file every `/api` route but the
-	// event stream answers 401.
-	apiToken: randomBytes(32).toString("base64url"),
+	apiToken,
 	// Comfortably inside Bun's idle timeout below, and enough to notice a dead
 	// stream without generating noticeable traffic.
 	heartbeatMs: 15_000,
