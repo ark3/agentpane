@@ -49,6 +49,8 @@ describe("TokenPrompt", () => {
 		const dialog = await screen.findByRole("dialog");
 		expect(dialog).toHaveTextContent("~/.ssh/agentpane-token");
 		expect(authorizationOf(fetch.mock.calls[0]![1])).toBeNull();
+		// A text field, so the owner sees what they pasted.
+		expect(screen.getByLabelText("API token")).toHaveAttribute("type", "text");
 
 		await fireEvent.input(screen.getByLabelText("API token"), { target: { value: "  pasted-token\n" } });
 		await fireEvent.click(screen.getByRole("button", { name: "Save token" }));

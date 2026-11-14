@@ -4952,8 +4952,9 @@ Whether agentpane renders the tool hold's errored assistant message, or the text
 ## The loopback API refuses a process without its token and a page naming another host
 
 Run on the home server (`may`) on 2026-11-13, local time `-05:00`, on `bun 1.4.0`, `pi 1.5.2` and `codex-cli 0.169.0`, with the `sbox` checkout at `4c19fad` (2026-10-28), from the `fix/loopback-api-token` branch as each commit named below left it.
-Every run took place inside an agent session's own `sbox` (bwrap), whose tmpfs `~/.ssh` held a throwaway `agentpane-token` that a server started there created; none read or wrote the real `~/.ssh`.
-Every Pi ran on a throwaway `PI_CODING_AGENT_DIR` holding copies of `auth.json`, `models-store.json` and `settings.json`, and the Codex run on a throwaway `CODEX_HOME`; neither used the session's own state directory.
+Every run but the owner's trial took place inside an agent session's own `sbox` (bwrap), whose tmpfs `~/.ssh` held a throwaway `agentpane-token` that a server started there created; none of those read or wrote the real `~/.ssh`.
+The owner's trial, the last paragraph before "Not yet run", ran outside any sandbox against the real `~/.ssh`, and recorded no versions; those above are the agent session's.
+In the agent session's runs every Pi ran on a throwaway `PI_CODING_AGENT_DIR` holding copies of `auth.json`, `models-store.json` and `settings.json`, and the Codex run on a throwaway `CODEX_HOME`; neither used the session's own state directory.
 D29 in `docs/DESIGN.md` is the decision these runs check.
 
 **On `main` at `ada7204d` the exposure reproduced.**
@@ -4998,6 +4999,26 @@ With `HOME` pointed at a temp directory the server created `.ssh/agentpane-token
 `python3 resources/probes/loopback_token_repro_probe.py --base-url http://127.0.0.1:49777` exited 0 at 17:25:03, its create and attach both 401; the same command through a nested `sbox --profile none --` exited 0 at 17:25:59, which shows only that the command line works, since a nested `sbox` adds no confinement the session's own did not.
 `python3 resources/probes/sbox_token_mask_probe.py` refused to run, `REFUSED: already inside sbox (SBOX=1 is set)`, exit 3, as it must in a sandbox.
 
+**The owner's trial, outside any sandbox** (`eb6917fb`).
+On 2026-11-13 the owner ran the branch's worktree at `eb6917fb` on the home server, outside any sandbox and against the real `~/.ssh`, with the server started by `bun run start` outside a sandbox.
+The versions of `bun`, `sbox` and the backends were not recorded.
+`ls -l ~/.ssh/agentpane-token` showed `-rw-------`.
+The browser asked for the token, the paste worked, and the sessions appeared.
+The owner's verdict on the prompt: the dialog is fine, but the field must show what was pasted, so the change that added this paragraph made it a text field instead of a password field.
+Emacs listed sessions with no paste.
+Rotation, by deleting the file and restarting the server: the browser asked again, and Emacs worked once its helper restarted.
+The owner was at first surprised that rotation needs a server restart, and on reflection found it sensible; rotation is unchanged.
+`python3 resources/probes/sbox_token_mask_probe.py`, with `sbox` at `/home/ark3/.local/bin/sbox`, printed, apart from `sbox`'s usual "Common mount path not found" warnings:
+
+```
+cat: /home/ark3/.ssh/agentpane-token: No such file or directory
+PASS: the sandboxed command ran, and the read failed (exit 1); it did not return the token in /home/ark3/.ssh/agentpane-token.
+```
+
+That shows that inside `sbox` the real `~/.ssh` is replaced by a tmpfs, so the token file is absent there rather than unreadable.
+`sbox --profile none -- python3 resources/probes/loopback_token_repro_probe.py --base-url http://127.0.0.1:4173`, run from the checkout against that server, printed `create: HTTP 401; attach: HTTP 401; passes: both refused`.
+
 **Not yet run.**
-The mask probe against a real `~/.ssh`, and the reproduction probe run through `sbox` against a server started outside it, on the home server and on the work laptop; the browser's paste prompt and the Emacs helper against the owner's own server, including after a rotation; and anything on macOS, where neither seatbelt's read denial under `~/.ssh` for this file nor `link(2)` creating it has been exercised by these runs.
+Everything on the work laptop and on macOS, which the owner does in one visit after the fix is merged and pushed: the mask probe, and the reproduction probe run through `sbox` against a server started outside it; the browser's paste prompt and the Emacs helper against the owner's own server, including after a rotation; and seatbelt's read denial under `~/.ssh` for this file and `link(2)` creating it, neither of which these runs have exercised.
+Nobody has yet looked at the token field now that it shows what was pasted; the owner's look at it is still to come.
 The owner's outputs from those steps are to be added to this section.

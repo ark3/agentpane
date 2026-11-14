@@ -4,10 +4,11 @@
 	/**
 	 * Asks for the API token while `gate` is asking, which an API request
 	 * answered 401 starts. `onStored` follows a paste, so the page recovers with
-	 * nothing more from the owner. The field is a password field and is emptied
-	 * on save, so a stored token is never shown back.
-	 *
-	 * A first cut, to be judged in use.
+	 * nothing more from the owner. The field is a plain text field, so the owner
+	 * sees what they pasted: they judged the prompt in use on 2026-11-13, found
+	 * the dialog fine, and asked that the field not be a password box. It is
+	 * still emptied on save, so a later 401 asks with an empty field and a
+	 * stored token is never shown back.
 	 */
 	let { gate, onStored }: { gate: TokenGate; onStored: () => void } = $props();
 
@@ -40,7 +41,7 @@
 				<code>~/.ssh/agentpane-token</code> on the server's machine.
 			</p>
 			<form onsubmit={save}>
-				<input type="password" autocomplete="off" spellcheck="false" aria-label="API token" bind:value />
+				<input type="text" autocomplete="off" spellcheck="false" aria-label="API token" bind:value />
 				<button type="submit">Save token</button>
 			</form>
 		</div>
