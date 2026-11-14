@@ -43,13 +43,40 @@ def now() -> str:
 # ---------------------------------------------------------------------------
 
 
+# The file the server keeps its API token in (`apiTokenPath` in
+# `src/server/api-token.ts`). Read from the file, never from the environment:
+# every agent is a child of the server and inherits its environment.
+API_TOKEN_PATH = Path.home() / ".ssh" / "agentpane-token"
+
+
+def read_api_token() -> str | None:
+    """The server's API token, or None while its file does not exist.
+
+    Trailing whitespace is trimmed, as the server trims it.
+    """
+    try:
+        token = API_TOKEN_PATH.read_text().rstrip()
+    except FileNotFoundError:
+        return None
+    return token or None
+
+
 class Http:
     """A host/port-bound client. Bound rather than global so two harnesses can
-    exist in one process without one silently retargeting the other."""
+    exist in one process without one silently retargeting the other.
 
-    def __init__(self, host: str, port: int) -> None:
+    Every request carries `Authorization: Bearer <token>` read from
+    `API_TOKEN_PATH` at the moment it is sent, not when the client is built:
+    the server creates that file on its first start, so a probe that read it
+    before its own server was listening would find nothing. Until the file
+    exists, requests go out without the header. `send_token=False` is for a
+    probe whose point is a request that holds no token.
+    """
+
+    def __init__(self, host: str, port: int, *, send_token: bool = True) -> None:
         self.host = host
         self.port = port
+        self.send_token = send_token
 
     def request(
         self,
@@ -61,6 +88,9 @@ class Http:
         conn = http.client.HTTPConnection(self.host, self.port, timeout=60)
         payload = None if body is None else json.dumps(body).encode()
         request_headers = dict(headers or {})
+        token = read_api_token() if self.send_token else None
+        if token is not None:
+            request_headers["authorization"] = f"Bearer {token}"
         if payload is not None:
             request_headers["content-type"] = "application/json"
         conn.request(method, path, body=payload, headers=request_headers)
@@ -205,7 +235,11 @@ class SseReader:
     def _run(self) -> None:
         try:
             self._conn = http.client.HTTPConnection(self._host, self._port, timeout=120)
-            self._conn.request("GET", "/api/events")
+            # The server exempts the event stream from the token, so the header
+            # is harmless here; sent anyway so no probe request goes without it.
+            token = read_api_token()
+            headers = {} if token is None else {"authorization": f"Bearer {token}"}
+            self._conn.request("GET", "/api/events", headers=headers)
             self._response = self._conn.getresponse()
             if self._response.status != 200:
                 raise RuntimeError(f"SSE returned HTTP {self._response.status}")

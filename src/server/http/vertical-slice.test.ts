@@ -15,7 +15,7 @@ import {
 	sessionKey,
 } from "../../shared/protocol.ts";
 import { initialClientState, reduceServerEvent, viewOf, type ClientState } from "../../client/session-state.ts";
-import { type App, createApp } from "./app.ts";
+import type { App } from "./app.ts";
 import {
 	assistantMessage,
 	FakeAdapterFactory,
@@ -23,6 +23,7 @@ import {
 	storedSession,
 	userMessage,
 } from "./testing/fakes.ts";
+import { createTestApp } from "./testing/app.ts";
 import { SseTestClient } from "./testing/sse-client.ts";
 
 const WORKSPACE = process.cwd();
@@ -35,7 +36,7 @@ afterEach(async () => {
 });
 
 function createOfflineApp(codex: FakeAdapterFactory): App {
-	return createApp({
+	return createTestApp({
 		index: new FakeSessionIndex(),
 		adapters: { codex },
 		newId: () => "offline-virtual-id",
@@ -171,7 +172,7 @@ describe("offline vertical slice", () => {
 				adapter.append(assistantMessage("parent reply"));
 			},
 		});
-		app = createApp({
+		app = createTestApp({
 			index: new FakeSessionIndex([storedSession(parent, WORKSPACE)]),
 			adapters: { pi },
 			newId: () => "offline-virtual-id",

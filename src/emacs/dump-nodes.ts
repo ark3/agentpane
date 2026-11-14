@@ -18,6 +18,7 @@ import { previewMessages } from "$client/preview.ts";
 import { DEFAULT_PORT, type BackendId } from "$shared/protocol.ts";
 import { projectTranscript } from "./nodes.ts";
 import { loadRenderer } from "./render.ts";
+import { withApiToken } from "./token.ts";
 
 const arg = process.argv[2];
 const slash = arg?.indexOf("/") ?? -1;
@@ -29,8 +30,8 @@ if (!arg || slash <= 0) {
 const ref = { backend: arg.slice(0, slash) as BackendId, id: arg.slice(slash + 1) };
 const base = `http://127.0.0.1:${DEFAULT_PORT}`;
 // Only ever called, never asked for Bun's `preconnect`, so the cast is safe.
-const loopback = ((input: RequestInfo | URL, init?: RequestInit) =>
-	fetch(`${base}${String(input)}`, init)) as typeof fetch;
+const loopback = withApiToken(((input: RequestInfo | URL, init?: RequestInit) =>
+	fetch(`${base}${String(input)}`, init)) as typeof fetch);
 const api = createAgentpaneApi({ fetch: loopback });
 
 const render = await loadRenderer();

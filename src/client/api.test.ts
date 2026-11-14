@@ -8,6 +8,7 @@ import type {
 import {
 	ApiClientError,
 	createAgentpaneApi,
+	type AgentpaneApi,
 	type EventConnection,
 	type EventHandlers,
 } from "./api.ts";
@@ -323,6 +324,98 @@ describe("agentpane API", () => {
 		);
 		expect(onMalformed).not.toHaveBeenCalled();
 		vi.unstubAllGlobals();
+	});
+});
+
+/**
+ * One call of every method that makes a request: all of `AgentpaneApi` but
+ * `connect`, which opens the event stream and no `fetch`. Typed so that a
+ * method added to the interface and missing here fails the typecheck, and
+ * checked against the built object at runtime so it fails the run as well.
+ */
+const everyRequest: Record<Exclude<keyof AgentpaneApi, "connect">, (api: AgentpaneApi) => Promise<unknown>> = {
+	listSessions: (api) => api.listSessions(),
+	createSession: (api) => api.createSession({ cwd: "/work", backend: "pi" }),
+	attach: (api) => api.attach(ref),
+	preview: (api) => api.preview(ref),
+	prompt: (api) => api.prompt(ref, { text: "hello" }),
+	editDraft: (api) => api.editDraft({ text: "draft" }),
+	abort: (api) => api.abort(ref),
+	compact: (api) => api.compact(ref),
+	close: (api) => api.close(ref),
+	listModels: (api) => api.listModels("pi"),
+	setModel: (api) => api.setModel(ref, "opaque/id"),
+	setEffort: (api) => api.setEffort(ref, "high"),
+	setName: (api) => api.setName(ref, "a name"),
+	forkPoints: (api) => api.forkPoints(ref),
+	fork: (api) => api.fork(ref, { entryId: "entry-1" }),
+	dismissError: (api) => api.dismissError(ref, "e1"),
+};
+
+/** A fetch answering every call with a fresh `status` response, recording what each was sent. */
+function answeringFetch(status: number) {
+	const fetch = vi.fn<(...args: Parameters<typeof globalThis.fetch>) => Promise<Response>>(async () => response({ error: "unauthorized" }, status));
+	return fetch;
+}
+
+function authorizationOf(init: RequestInit | undefined): string | null {
+	return new Headers(init?.headers).get("authorization");
+}
+
+describe("agentpane API token", () => {
+	it("has a table entry for every method but connect", () => {
+		const api = createAgentpaneApi({ fetch: fetchRecorder() });
+		expect(Object.keys(everyRequest).sort()).toEqual(Object.keys(api).filter((name) => name !== "connect").sort());
+	});
+
+	it.each(Object.entries(everyRequest))("%s sends the stored token as its bearer", async (_name, call) => {
+		const fetch = answeringFetch(200);
+		const api = createAgentpaneApi({ fetch: fetch as unknown as typeof globalThis.fetch, token: () => "s3cret" });
+
+		await call(api);
+		expect(fetch).toHaveBeenCalledOnce();
+		expect(authorizationOf(fetch.mock.calls[0]![1])).toBe("Bearer s3cret");
+	});
+
+	it.each(Object.entries(everyRequest))("%s sends no authorization header while no token is stored", async (_name, call) => {
+		const fetch = answeringFetch(200);
+		const api = createAgentpaneApi({ fetch: fetch as unknown as typeof globalThis.fetch, token: () => null });
+
+		await call(api);
+		expect(fetch).toHaveBeenCalledOnce();
+		expect(authorizationOf(fetch.mock.calls[0]![1])).toBeNull();
+	});
+
+	it.each(Object.entries(everyRequest))("%s surfaces a 401 as an ApiClientError and reports it", async (_name, call) => {
+		const fetch = answeringFetch(401);
+		const onUnauthorized = vi.fn();
+		const api = createAgentpaneApi({ fetch: fetch as unknown as typeof globalThis.fetch, token: () => "stale", onUnauthorized });
+
+		const error = await call(api).catch((reason: unknown) => reason);
+		expect(error).toBeInstanceOf(ApiClientError);
+		expect(error).toMatchObject({ status: 401 });
+		expect(onUnauthorized).toHaveBeenCalledOnce();
+	});
+
+	it("keeps a request's own headers beside the token", async () => {
+		const fetch = answeringFetch(200);
+		const api = createAgentpaneApi({ fetch: fetch as unknown as typeof globalThis.fetch, token: () => "s3cret" });
+
+		await api.setName(ref, "a name");
+		const headers = new Headers(fetch.mock.calls[0]![1]?.headers);
+		expect(headers.get("content-type")).toBe("application/json");
+		expect(headers.get("authorization")).toBe("Bearer s3cret");
+	});
+
+	it("reads the token at each request, so a token stored later is sent", async () => {
+		const fetch = answeringFetch(200);
+		let stored: string | null = null;
+		const api = createAgentpaneApi({ fetch: fetch as unknown as typeof globalThis.fetch, token: () => stored });
+
+		await api.listSessions();
+		stored = "pasted";
+		await api.listSessions();
+		expect(fetch.mock.calls.map(([, init]) => authorizationOf(init))).toEqual([null, "Bearer pasted"]);
 	});
 });
 

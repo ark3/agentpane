@@ -61,6 +61,8 @@ CODEX_HOME="$CODEX_SMOKE_HOME" PORT="$SMOKE_PORT" \
 SERVER_PID=$!
 ```
 
+The calls below read the API token from `~/.ssh/agentpane-token`, which is the server's own token only when the server runs outside `sbox`, since a server started inside it creates a throwaway token in its own tmpfs `~/.ssh`.
+
 Once the server reports that it is listening, confirm the built SPA is being
 served as a browser navigation:
 
@@ -74,19 +76,20 @@ curl --fail --silent --show-error \
 Open one SSE stream before creating a session and retain it across the turn:
 
 ```bash
+AUTH="Authorization: Bearer $(cat ~/.ssh/agentpane-token)"
 SSE_LOG="$(mktemp /var/tmp/agentpane-live-sse-XXXXXX.log)"
-curl --no-buffer --silent --show-error \
+curl --no-buffer --silent --show-error -H "$AUTH" \
   "http://127.0.0.1:$SMOKE_PORT/api/events" >"$SSE_LOG" &
 SSE_PID=$!
 
-CREATE_RESPONSE="$(curl --fail --silent --show-error \
+CREATE_RESPONSE="$(curl --fail --silent --show-error -H "$AUTH" \
   -H 'content-type: application/json' \
   -d "{\"cwd\":\"$WORKSPACE\",\"backend\":\"codex\"}" \
   "http://127.0.0.1:$SMOKE_PORT/api/sessions")"
 VIRTUAL_ID="$(jq -r '.ref.id' <<<"$CREATE_RESPONSE")"
 ENCODED_VIRTUAL_ID="$(jq -rn --arg value "$VIRTUAL_ID" '$value|@uri')"
 
-ATTACH_RESPONSE="$(curl --fail --silent --show-error \
+ATTACH_RESPONSE="$(curl --fail --silent --show-error -H "$AUTH" \
   "http://127.0.0.1:$SMOKE_PORT/api/sessions/codex/$ENCODED_VIRTUAL_ID")"
 CODEX_ID="$(jq -r '.session.ref.id' <<<"$ATTACH_RESPONSE")"
 ENCODED_CODEX_ID="$(jq -rn --arg value "$CODEX_ID" '$value|@uri')"
@@ -98,7 +101,7 @@ on live model wording: look for multiple `upsert` events and a lifecycle
 `snapshot` or `status` whose `isStreaming` value returns to `false`.
 
 ```bash
-curl --fail --silent --show-error \
+curl --fail --silent --show-error -H "$AUTH" \
   -H 'content-type: application/json' \
   -d '{"text":"Do not use tools. Write one sentence of at least 120 words explaining why deterministic tests are useful."}' \
   "$SESSION_URL/prompt"
@@ -118,7 +121,7 @@ wait "$SSE_PID" 2>/dev/null || true
 pstree -ap "$SERVER_PID"
 
 SSE_LOG_2="$(mktemp /var/tmp/agentpane-live-sse-reconnect-XXXXXX.log)"
-curl --no-buffer --silent --show-error \
+curl --no-buffer --silent --show-error -H "$AUTH" \
   "http://127.0.0.1:$SMOKE_PORT/api/events" >"$SSE_LOG_2" &
 SSE_PID_2=$!
 ```
@@ -128,12 +131,12 @@ For abort, submit work deliberately long enough to remain active, wait for
 `false`:
 
 ```bash
-curl --fail --silent --show-error \
+curl --fail --silent --show-error -H "$AUTH" \
   -H 'content-type: application/json' \
   -d '{"text":"Do not use tools. Write a long, detailed handbook on growing vegetables in a home garden. Write twenty chapters, each under its own title and each at least 400 words long, covering in order: planning the plot, soil testing, soil preparation, raised beds, choosing varieties, starting seeds indoors, transplanting, direct sowing, watering, mulching, sunlight and siting, fertilising, composting, companion planting, pest control, disease control, weeding, crop rotation, harvesting, and storing the harvest. Write every chapter in full and do not summarise or abbreviate any of them."}' \
   "$SESSION_URL/prompt"
 
-curl --fail --silent --show-error -X POST "$SESSION_URL/abort"
+curl --fail --silent --show-error -H "$AUTH" -X POST "$SESSION_URL/abort"
 ```
 
 This is the prompt `LONG_PROMPT` in `resources/probes/agentpane_live_support.py` holds; the integers 1 through 10000 this step asked for until OW-sofige drew a turn that ended on its own holding 76 characters of reply on `codex-cli 0.157.1` with `gpt-5.6-luna`, which is not long enough to remain active.
@@ -248,6 +251,7 @@ Reproduce, with the server already listening:
 
 ```bash
 curl -s -o /tmp/sessions.json \
+  -H "Authorization: Bearer $(cat ~/.ssh/agentpane-token)" \
   -w '%{time_total}s %{size_download}B\n' \
   http://127.0.0.1:4173/api/sessions
 jq '.sessions | length' /tmp/sessions.json
@@ -3762,7 +3766,7 @@ Over two such runs the first round trip, which started the helper, took 1450ms a
 What `agentpane--refetch-sessions` does with the reply after, folding it into the finished-turn marks and filtering it to a picker's one row, took 0.24ms more, byte-compiled, with no session held.
 So an unfiltered listing costs Emacs about a millisecond per picker per `sessions/changed`, two of which each turn sends, and the picker keeps asking for every session.
 
-To re-run, start a server as above, then from the checkout root run `emacs --batch -l /tmp/listing-size/e2e.el` on the file below, and `curl -s -o /dev/null -w '%{size_download} %{time_total}\n' http://127.0.0.1:4999/api/sessions` for the server alone.
+To re-run, start a server as above, then from the checkout root run `emacs --batch -l /tmp/listing-size/e2e.el` on the file below, and `curl -s -o /dev/null -H "Authorization: Bearer $(cat ~/.ssh/agentpane-token)" -w '%{size_download} %{time_total}\n' http://127.0.0.1:4999/api/sessions` for the server alone.
 
 ```elisp
 ;;; -*- lexical-binding: t; -*-
@@ -4944,3 +4948,85 @@ The doc's "`abort` continues queued messages when they remain in the session" ho
 An abort during the model's thinking before any text, during a `bash` call the user ran through `!`, or during a compaction or retry, none of which was held.
 A batch of several calls, and a sequential batch.
 Whether agentpane renders the tool hold's errored assistant message, or the text hold's two user messages, any differently from what Pi stored; this run was Pi alone, with no server.
+
+## The loopback API refuses a process without its token and a page naming another host
+
+Run on the home server (`may`) on 2026-11-13, local time `-05:00`, on `bun 1.4.0`, `pi 1.5.2` and `codex-cli 0.169.0`, with the `sbox` checkout at `4c19fad` (2026-10-28), from the `fix/loopback-api-token` branch as each commit named below left it.
+Every run but the owner's trial took place inside an agent session's own `sbox` (bwrap), whose tmpfs `~/.ssh` held a throwaway `agentpane-token` that a server started there created; none of those read or wrote the real `~/.ssh`.
+The owner's trial, the paragraph "The owner's trial, outside any sandbox", ran outside any sandbox against the real `~/.ssh`, and recorded no versions; those above are the agent session's.
+In the agent session's runs every Pi ran on a throwaway `PI_CODING_AGENT_DIR` holding copies of `auth.json`, `models-store.json` and `settings.json`, and the Codex run on a throwaway `CODEX_HOME`; neither used the session's own state directory.
+D29 in `docs/DESIGN.md` is the decision these runs check.
+
+**On `main` at `ada7204d` the exposure reproduced.**
+`python3 resources/probes/loopback_token_repro_probe.py --skip-build`, in its default mode, against a server from the branch's first commit (`961a4065`, which changed no server code), sent no `Authorization`, `Origin` or `Sec-Fetch-Site`.
+Its create (`POST /api/sessions`, a Pi session in a fresh `/var/tmp` directory) answered 201 and its attach (`GET` of the session route) answered 200, and it printed "fails: the exposure reproduced" and exited 1.
+The attach spawned one Pi; the probe's `DELETE` on the attach's own ref answered 204, and no Pi pid outlived it.
+Two more runs, one of them `--base-url` against a server started by hand, read the same 201, 200 and 204.
+The probe never prompts, so no model turn ran.
+
+**The `Host` allowlist, live** (`293e3a95`).
+Against `PORT=40411 bun run start`, curl to `/api/sessions` with `Host: evil.example:40411` and with `Host: 127.0.0.1.evil.example:40411` answered 403 `forbidden_host`, as did `/api/events` and `/` with the evil `Host`, and an `--http1.0` request with an empty `Host`.
+`localhost:40411`, `[::1]:40411` and `127.9.9.9:1` answered 200 with the session list.
+
+**The token file, created and refused** (`77551194`).
+With `HOME` pointed at a fresh temp directory and `PORT=50891 bun run start`, and an empty `.ssh` at `700`, the server listened and created `.ssh/agentpane-token` at `600`, owned by the running user, 43 bytes, and `GET /api/sessions` answered 401 without the token and 200 with it.
+After `chmod 644` on the file it exited 1 printing `agentpane: permissions 0644 for <home>/.ssh/agentpane-token are too open; it must be readable by its owner only. Run: chmod 600 <home>/.ssh/agentpane-token`.
+With `.ssh` removed it exited 1 naming `<home>/.ssh` as missing and saying agentpane does not create it, and the temp home still had no `.ssh` afterwards.
+
+**The Emacs helper with no token file** (`a5f71372`).
+`python3 resources/probes/emacs_helper_no_server_probe.py`, in a sandbox whose `~/.ssh` held no `agentpane-token`, printed ANSWERED 3 of 3 and exited 0: with no file and no server, the unreachable-server errors are unchanged.
+Later (`5d63384b`), `src/emacs/dump-nodes.ts` run against a branch server threw the 401 before it sent the token and printed the nodes after.
+
+**The probes, with the token** (`4fab083f`).
+Each probe below was run twice by the implementer, at 15:51 and 15:52, and once more at review.
+`python3 loopback_token_repro_probe.py` from `resources/probes/` (review run at 15:53:40) exited 0, its create and attach both answered 401 `{"error":"unauthorized","detail":"this API needs its bearer token"}`, verdict "passes: both refused", with no orphaned worker.
+`python3 agentpane_pi_smoke.py --skip-build --tool-check --model openrouter/deepseek/deepseek-v4.1-flash:high` (review run at 15:53:49) exited 0 with every check passing (startup with create 201 and attach 200, text stream, idle, rename, model, tool output, abort at about 20000 assistant characters, shutdown, cleanup), which shows the token was sent.
+`agentpane_prompt_events_live.ts` was not run, since it costs Claude turns; `bun build --target bun` bundles it.
+
+**The Codex smoke recipe above, with the token** (`baee0a40`).
+Against a branch server started inside `sbox` (`PORT=44173 bun run start`, throwaway `CODEX_HOME`), the recipe's create and attach calls answered 401 as they stood before that commit; with `-H "$AUTH"` the create answered 201 and the attach 200, resolving a Codex thread id.
+They stopped before the prompt step, so no model turn ran.
+At review, on port 44291, the create answered 401 without the header and 201 with it, and the listing 200 with it.
+
+**The finished branch, end to end** (`baee0a40`, about 17:25 local).
+`bun run build`, then `PORT=49777 bun run start`, whose `~/.ssh/agentpane-token` was the sandbox's throwaway, at `-rw-------`.
+With no token, curl got 401 `unauthorized` with `WWW-Authenticate: Bearer` from every route family `handle` in `src/server/http/app.ts` dispatches: `POST /api/events`, `GET /api/models` with and without `?backend=pi`, `POST /api/edit-draft`, `GET` and `POST /api/sessions`, a session's `GET` and `DELETE`, its `preview`, `prompt`, `abort`, `compact`, `error`, `fork`, `fork-points`, `model`, `name` and `effort` routes, an unknown backend and an unknown `/api` path.
+A wrong bearer answered 401 and the right one 200.
+`GET /api/events` with no token answered 200 `text/event-stream` and sent `retry: 500`.
+`Host: evil.example:49777` answered 403 `forbidden_host` on `/`, `/api/events` and `/api/sessions`, with and without `Origin: http://127.0.0.1:49777` and `Sec-Fetch-Site: same-origin`, and each time with a valid token.
+`Host` values `localhost:1`, `localhost:8022`, `127.9.9.9:5173` and `[::1]:41730` passed on `/api/sessions` (200 with the token) and on `/` (200 `text/html` with `Accept: text/html`); `/` with curl's default `Accept: */*` answered 404, as the static handler serves `index.html` only to navigations.
+With `HOME` pointed at a temp directory the server created `.ssh/agentpane-token` at `600` holding 43 characters and nothing else in `.ssh`, refused the file at `644` naming the path and `chmod 600`, and refused a missing `.ssh` naming it, without creating it.
+`python3 resources/probes/loopback_token_repro_probe.py --base-url http://127.0.0.1:49777` exited 0 at 17:25:03, its create and attach both 401; the same command through a nested `sbox --profile none --` exited 0 at 17:25:59, which shows only that the command line works, since a nested `sbox` adds no confinement the session's own did not.
+`python3 resources/probes/sbox_token_mask_probe.py` refused to run, `REFUSED: already inside sbox (SBOX=1 is set)`, exit 3, as it must in a sandbox.
+
+**The owner's trial, outside any sandbox** (`eb6917fb`).
+On 2026-11-13 the owner ran the branch's worktree at `eb6917fb` on the home server, outside any sandbox and against the real `~/.ssh`, with the server started by `bun run start` outside a sandbox.
+The versions of `bun`, `sbox` and the backends were not recorded.
+`ls -l ~/.ssh/agentpane-token` showed `-rw-------`.
+The browser asked for the token, the paste worked, and the sessions appeared.
+The owner's verdict on the prompt: the dialog is fine, but the field must show what was pasted, so the change that added this paragraph made it a text field instead of a password field.
+Emacs listed sessions with no paste.
+Rotation, by deleting the file and restarting the server: the browser asked again, and Emacs worked once its helper restarted.
+The owner was at first surprised that rotation needs a server restart, and on reflection found it sensible; rotation is unchanged.
+`python3 resources/probes/sbox_token_mask_probe.py`, with `sbox` at `/home/ark3/.local/bin/sbox`, printed, apart from `sbox`'s usual "Common mount path not found" warnings:
+
+```
+cat: /home/ark3/.ssh/agentpane-token: No such file or directory
+PASS: the sandboxed command ran, and the read failed (exit 1); it did not return the token in /home/ark3/.ssh/agentpane-token.
+```
+
+That shows that inside `sbox` the real `~/.ssh` is replaced by a tmpfs, so the token file is absent there rather than unreadable.
+`sbox --profile none -- python3 resources/probes/loopback_token_repro_probe.py --base-url http://127.0.0.1:4173`, run from the checkout against that server, printed `create: HTTP 401; attach: HTTP 401; passes: both refused`.
+
+**The finished branch, end to end, after the visible field** (`73ef10a2`, about 19:10 local).
+Inside the agent session's `sbox` again, with the same throwaway token as "The finished branch, end to end" above.
+`bun run check` passed, svelte-check clean and 1822 tests in 62 files, and `bun run test:browser` passed 29 of 29.
+With the token check in `handle` disabled, `src/server/http/app.test.ts` and `src/emacs/token.test.ts` run together failed exactly the four `token` refusal tests (4 of 110); with the `Host` check disabled instead, exactly the three `host` refusal tests (3 of 110); the file was restored each time.
+Against `bun run build` and `PORT=56599 bun run start`, the same curl sweep as above came out the same, every route family 401 with `WWW-Authenticate: Bearer` and the evil `Host` 403 in all twelve combinations, and it added `HEAD /api/events`, 401 without the token, and `Host: LOCALHOST:3`, which passed.
+`python3 resources/probes/loopback_token_repro_probe.py --base-url http://127.0.0.1:56599` exited 0 at 19:13:31, create and attach both 401, as did the same command through a nested `sbox --profile none --`; the mask probe again refused with exit 3.
+With `HOME` pointed at a temp directory, the token file was created at `600`, refused at `644` and refused with no `.ssh`, with the same messages as above.
+
+**Not yet run.**
+Everything on the work laptop and on macOS, which the owner does in one visit after the fix is merged and pushed: the mask probe, and the reproduction probe run through `sbox` against a server started outside it; the browser's paste prompt and the Emacs helper against the owner's own server, including after a rotation; and seatbelt's read denial under `~/.ssh` for this file and `link(2)` creating it, neither of which these runs have exercised.
+Nobody has yet looked at the token field now that it shows what was pasted; the owner's look at it is still to come.
+The owner's outputs from those steps are to be added to this section.

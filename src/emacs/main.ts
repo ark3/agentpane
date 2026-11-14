@@ -14,9 +14,10 @@
  * Everything with behaviour lives in `helper.ts` behind injectable streams
  * and is tested there in node; this file only decides what they are wired
  * to. The api client hands its `fetch` and `openEvents` relative routes, so
- * the base URL is prefixed inside the one fetch both are built on. The
- * event stream is the hand-rolled reader in `sse.ts`: `EventSource` is not a
- * global under `bun 1.4.0` (measured 2026-09-22; see that file). Loading
+ * the base URL is prefixed, and the API token added (`token.ts`), inside the
+ * one fetch both are built on. The event stream is the hand-rolled reader in
+ * `sse.ts`: `EventSource` is not a global under `bun 1.4.0` (measured
+ * 2026-09-22; see that file). Loading
  * the markdown renderer takes about a second, so it happens before the
  * first frame is read rather than at the first text part.
  */
@@ -25,11 +26,12 @@ import { DEFAULT_PORT } from "$shared/protocol.ts";
 import { runHelper } from "./helper.ts";
 import { loadRenderer } from "./render.ts";
 import { sseOpenEvents } from "./sse.ts";
+import { withApiToken } from "./token.ts";
 
 const base = (process.argv[2] ?? `http://127.0.0.1:${DEFAULT_PORT}`).replace(/\/$/, "");
 // Only ever called, never asked for Bun's `preconnect`, so the cast is safe.
-const loopback = ((input: RequestInfo | URL, init?: RequestInit) =>
-	fetch(`${base}${String(input)}`, init)) as typeof fetch;
+const loopback = withApiToken(((input: RequestInfo | URL, init?: RequestInit) =>
+	fetch(`${base}${String(input)}`, init)) as typeof fetch);
 
 const render = await loadRenderer();
 await runHelper({

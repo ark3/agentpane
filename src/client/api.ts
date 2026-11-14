@@ -46,6 +46,15 @@ export interface EventHandlers {
 export interface ApiOptions {
 	fetch?: typeof globalThis.fetch;
 	openEvents?: (url: string, handlers: EventHandlers) => EventConnection;
+	/**
+	 * The API token, read at each request and sent as its bearer; while it
+	 * answers null no `authorization` header is sent. Every request carries it
+	 * but the event stream's: an `EventSource` cannot set a header, and the
+	 * server exempts that route.
+	 */
+	token?: () => string | null;
+	/** Told of every 401 an API request is answered with, before that request rejects with it. */
+	onUnauthorized?: () => void;
 }
 
 export class ApiClientError extends Error {
@@ -128,15 +137,30 @@ export interface AgentpaneApi {
 export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 	const fetchImpl = options.fetch ?? globalThis.fetch;
 	const openEvents = options.openEvents ?? defaultOpenEvents;
+	const token = options.token ?? (() => null);
+	const onUnauthorized = options.onUnauthorized ?? (() => {});
+
+	/** Every request this module makes goes through here, so none goes out without the token. */
+	async function send(url: string, init: RequestInit): Promise<Response> {
+		const bearer = token();
+		const response = await fetchImpl(
+			url,
+			bearer === null
+				? init
+				: { ...init, headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${bearer}` } },
+		);
+		if (response.status === 401) onUnauthorized();
+		return response;
+	}
 
 	async function request<T>(url: string, init: RequestInit, decode: (body: unknown) => T): Promise<T> {
-		const response = await fetchImpl(url, init);
+		const response = await send(url, init);
 		if (!isSuccessful(response.status)) throw await toApiClientError(response);
 		return decode(await response.json());
 	}
 
 	async function requestNoContent(url: string, init: RequestInit): Promise<void> {
-		const response = await fetchImpl(url, init);
+		const response = await send(url, init);
 		if (!isSuccessful(response.status)) throw await toApiClientError(response);
 	}
 
@@ -163,7 +187,7 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 			return request(ROUTES.preview(ref), { method: "GET", signal }, (body) => body as SessionPreviewResponse);
 		},
 		async prompt(ref, body) {
-			const response = await fetchImpl(ROUTES.prompt(ref), jsonRequest(body));
+			const response = await send(ROUTES.prompt(ref), jsonRequest(body));
 			if (!isSuccessful(response.status)) throw await toApiClientError(response);
 			// The route answers a started prompt 202 with no body, and only a
 			// handled one 200 with a `PromptResponse`.
@@ -173,7 +197,7 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 			return request(ROUTES.editDraft, jsonRequest(body), (response) => response as EditDraftResponse);
 		},
 		async abort(ref) {
-			const response = await fetchImpl(ROUTES.abort(ref), { method: "POST" });
+			const response = await send(ROUTES.abort(ref), { method: "POST" });
 			if (!isSuccessful(response.status)) throw await toApiClientError(response);
 			// The route answers a stop that took nothing out 204 with no body, and
 			// one that did 200 with an `AbortResponse`.

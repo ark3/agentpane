@@ -544,7 +544,7 @@ export interface ApiError {
 
 /**
  * Single source of truth for paths, so client and server cannot drift.
- * Loopback only, no auth layer (D8).
+ * Loopback only (D8), and every route but `GET events` needs the bearer token.
  */
 export const ROUTES = {
 	events: "/api/events",

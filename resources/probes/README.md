@@ -177,11 +177,52 @@ Costs tokens: two long turns cut a few hundred characters in, and three one-word
 
 Verified with: `pi` 1.2.0 on the home server, 2026-10-14, two runs, in `docs/MANUAL_TESTING.md`, "A Pi session's file appears at its first user message, and a fork at that message has none when `fork` returns (OW-tigaye)".
 
+## `loopback_token_repro_probe.py`
+
+Proves: **a separate process holding no token can create a Pi session in a directory nobody gave it, and attach to it, which spawns the agent there**.
+It sends neither `Authorization` nor `Origin` nor `Sec-Fetch-Site`, as any local non-browser process can; its `Http` client is built with `send_token=False`, so it never picks up the token the other probes send.
+Its passing condition is refusal: it passes (exit 0) only when both the create and the attach are answered 401 or 403, fails (exit 1) when either is answered 2xx, and is inconclusive (exit 2) on anything else; exit 3 means it could not close what it attached or clean up.
+
+```bash
+python3 loopback_token_repro_probe.py                                   # starts its own server on a free port
+python3 loopback_token_repro_probe.py --skip-build                      # reuse dist/client
+python3 loopback_token_repro_probe.py --base-url http://127.0.0.1:PORT  # target a running server, e.g. from inside sbox
+```
+
+By default it builds and starts the production server, as `agentpane_pi_smoke.py` does, with Pi on a throwaway `PI_CODING_AGENT_DIR`; with `--base-url` it starts nothing.
+The session's `cwd` is a fresh `/var/tmp` directory holding only `.sandbox-workspace`, so `sbox` accepts it and a server outside the probe's sandbox sees it too.
+The create carries the pinned `--model`; nothing is prompted, so no model is charged.
+An attached session is closed through the ref the attach answered, and in its own-server mode the probe also records the Pi pids the attach spawned and that none outlived the close.
+
+Verified with: `pi` 1.5.2 on the home server, 2026-11-13, against the server at `ada7204d`, where it reproduced the exposure; the run is recorded in the message of the commit that added this probe.
+
+## `sbox_token_mask_probe.py`
+
+Proves: **a command run through `sbox` cannot read `~/.ssh/agentpane-token`**.
+The server keeps its API token there because `sbox` masks `~/.ssh` from every agent -- a tmpfs holding a seeded `config` under bwrap, a read deny under seatbelt -- and that is a side effect of `sbox`'s ssh mask rather than anything agentpane controls, so this probe says when it stops holding.
+
+```bash
+python3 sbox_token_mask_probe.py                    # outside any sandbox; uses sbox on PATH
+python3 sbox_token_mask_probe.py --sbox PATH/sbox   # a specific sbox
+```
+
+Run it outside any sandbox: it refuses (exit 3) when `SBOX=1` is set or, on Linux, when `~/.ssh` is a mount point in `/proc/self/mountinfo`, as bwrap's tmpfs makes it, since the `~/.ssh` it would check is then the sandbox's.
+It ensures the token file exists, creating it as `loadApiToken` in `src/server/api-token.ts` does when absent and never altering an existing one, and refuses (exit 3) a file that loader would refuse.
+It then runs `sbox --profile none --workspace <fresh temp dir> -- sh -c ...`, which prints a per-run sentinel and `cat`s the path expanded outside the sandbox.
+It passes (exit 0) when the sentinel arrives and the token does not follow it, fails (exit 1) when it does, naming `sbox --ssh` and `sbox --rw ~/.ssh` as what exposes the file, and is inconclusive (exit 2) when no sentinel arrives, since `sbox` then never ran the command -- it exits 1 before starting a sandbox on a missing profile or workspace, which would otherwise read as a refused read.
+It never prints the token.
+
 ## `agentpane_live_support.py`
 
 Not a probe. The machinery both smoke checks share: the HTTP/SSE client, the
 process-tree walk, the temporary state dir, and the cleanup criteria. It exists
 because the two harnesses differ only in which backend they drive.
+
+Every Python probe that calls agentpane's API goes through its `Http` client, which sends `Authorization: Bearer <token>` on every request, reading the token from `~/.ssh/agentpane-token` -- the file the server reads or creates on startup -- at the moment each request is sent.
+Read then rather than when the client is built, because the probe's own server creates the file on its first start; until it exists requests go out without the header.
+The token reaches a probe only through that file, never through an environment variable, because every agent is a child of the server and inherits its environment.
+A probe run inside `sbox` sees the sandbox's tmpfs `~/.ssh`, so the server it starts there creates and reads a throwaway token in it, and a server running outside the sandbox refuses it.
+`SseReader` sends it too, read when the stream opens, though the event stream is the one `/api` route the server exempts.
 
 ## `capture_fixtures.py`
 
@@ -454,6 +495,7 @@ What it showed is the same `docs/MANUAL_TESTING.md` section.
 
 Proves: **what agentpane's event stream carries for a prompt to an attached Claude Code session**, event by event, and how many snapshots each prompt drew between its send and its turn's end (OW-yirosu).
 It starts the server of the checkout `--root` names on a free loopback port, so pointing it at a checkout before a change and after it shows both.
+Once that server is listening it reads the API token from `~/.ssh/agentpane-token`, through `apiTokenPath` in `src/server/api-token.ts`, and sends it on every `/api` request; a `--root` from before the token creates no file, and the probe then sends no header.
 Without `--workspace` it makes a `git init`ed scratch directory, since the home server's `claude` wrapper refuses a directory with no workspace marker.
 
 ```bash

@@ -63,6 +63,14 @@ export const emptySessionIndex: SessionIndex = {
 export interface AppDeps {
 	index: SessionIndex;
 	/**
+	 * The secret every `/api` request but `GET /api/events` must carry as
+	 * `Authorization: Bearer <token>`. Required, so a composition that forgets
+	 * it does not typecheck: the loopback bind and the Host and Origin checks
+	 * stop a browser, and only this stops a local process, which can forge every
+	 * header but cannot read the token.
+	 */
+	apiToken: string;
+	/**
 	 * One factory per backend. Partial because a deployment may be missing one
 	 * (or a test may only care about one); requests for an absent backend get a
 	 * clean 501 rather than a crash.

@@ -13,6 +13,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { timingSafeEqual } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -67,8 +68,15 @@ export function createApp(deps: AppDeps): App {
 	const broadcaster = new Broadcaster(deps.heartbeatMs ?? 0);
 	const sessions = new SessionManager(deps, broadcaster);
 	const logError = deps.logError ?? ((message: string) => console.error(message));
+	const apiToken = Buffer.from(deps.apiToken, "utf8");
 
 	async function handle(request: Request): Promise<Response> {
+		// Before anything parses `request.url`, which Bun leaves relative for an
+		// HTTP/1.0 request that names no host.
+		if (!isLoopbackHost(request)) {
+			return error(403, "forbidden_host", "this server answers only to a loopback name");
+		}
+
 		const url = new URL(request.url);
 		const segments = url.pathname.split("/").filter((s) => s.length > 0).map(decodeSegment);
 
@@ -79,6 +87,17 @@ export function createApp(deps: AppDeps): App {
 
 		if (!isTrustedRequestMetadata(request.headers)) {
 			return error(403, "forbidden_origin", "this API is reachable only from a local page");
+		}
+
+		// Last, so a browser's forged request still reads as the 403 it is. The
+		// one exemption is the event stream's GET, by method and path and nothing
+		// wider: `EventSource` cannot set a header, and the stream is read-only
+		// and starts nothing. The attach GET spawns an agent and stays behind it.
+		const isEventStream = request.method === "GET" && segments.length === 2 && segments[1] === "events";
+		if (!isEventStream && !hasBearerToken(request.headers, apiToken)) {
+			const response = error(401, "unauthorized", "this API needs its bearer token");
+			response.headers.set("www-authenticate", "Bearer");
+			return response;
 		}
 
 		// /api/events
@@ -577,18 +596,19 @@ function sessionRefFromRequest(request: Request): SessionRef | undefined {
  * behind here spawns sandboxed agents with write access to the user's
  * repositories, which makes a blind write plenty.
  *
- * D8's reasoning ("no auth needs to exist once remote access is off the table")
- * is about remote *network* access and does not extend to this, so it is not
- * being overturned here. pipane has no origin check either (HANDOFF finding
- * 17), which is where the gap was inherited from.
+ * This stops a browser, not a local process, which can send any header; the
+ * bearer token below is what stops that (D29, which overturned D8's "no auth
+ * needs to exist once remote access is off the table"). pipane has no origin
+ * check either (HANDOFF finding 17), which is where the gap was inherited from.
  *
  * The Origin rule is loopback-*origin*, not same-origin: in dev the page is
  * served by Vite on another port and proxied here, so an exact match would
  * reject the only client we have. Browsers can omit Origin on cross-site
  * no-CORS GETs, so Sec-Fetch-Site closes that gap: when present it must say
- * `same-origin` or `none`. Header absence remains valid for non-browser clients
- * such as curl, while the production and proxied development clients are
- * same-origin and send `same-origin`.
+ * `same-origin` or `none`. Header absence passes this check for non-browser
+ * clients such as curl, which still need the bearer token and a loopback `Host`
+ * (D29), while the production and proxied development clients are same-origin
+ * and send `same-origin`.
  */
 function isTrustedRequestMetadata(headers: Headers): boolean {
 	const site = headers.get("sec-fetch-site");
@@ -606,9 +626,64 @@ function isLoopbackOrigin(origin: string | null): boolean {
 		// iframe or a `data:` document. Not a URL, and never ours.
 		return false;
 	}
+	return isLoopbackHostname(hostname);
+}
+
+/**
+ * DNS rebinding gets past the Origin check above: a page whose own name has
+ * been pointed at 127.0.0.1 is same-origin with us as far as the browser can
+ * tell, so it sends `Sec-Fetch-Site: same-origin` and an Origin naming itself
+ * only on the requests that carry one. What it cannot hide is that name, in the
+ * `Host` header, so every request -- the static bundle included -- must name
+ * loopback there. Any port: an `ssh -L` forward may pick its own local port,
+ * and the Vite dev proxy forwards with `changeOrigin: false`, so we see its.
+ *
+ * The header is read directly rather than through `request.url`. As of
+ * `bun 1.4.0` `Bun.serve` builds the URL from it anyway, but a `Request` built
+ * in-process keeps its own URL beside whatever header it was given. With no
+ * header the URL is all there is: in-process it is the test's own, and from
+ * Bun it is relative -- an HTTP/1.0 request that names no host -- which does
+ * not parse and is refused. (HTTP/1.1 without one Bun answers 400 itself.)
+ *
+ * This stops a browser, not a local process, which can send any header.
+ */
+function isLoopbackHost(request: Request): boolean {
+	const host = request.headers.get("host");
+	if (host === null) {
+		try {
+			return isLoopbackHostname(new URL(request.url).hostname);
+		} catch {
+			return false;
+		}
+	}
+	// `uri-host [ ":" port ]` taken apart by hand: `new URL` would read
+	// `evil.example@127.0.0.1` as userinfo and hand back a loopback hostname.
+	const match = /^(\[[^\]]*\]|[^:]*)(?::\d*)?$/.exec(host);
+	return match !== null && isLoopbackHostname((match[1] as string).toLowerCase());
+}
+
+/**
+ * The loopback bind and the checks above stop a browser; a local process can
+ * send any header, so what stops it is a secret it cannot read. Only from the
+ * `Authorization` header, never a cookie, which a browser attaches on its own,
+ * or a query parameter, which lands in logs and history.
+ *
+ * Constant-time over equal lengths. A length mismatch still runs the same
+ * comparison, of the token against itself, so the time spent says nothing
+ * about how much of a guess was right.
+ */
+function hasBearerToken(headers: Headers, expected: Buffer): boolean {
+	const match = /^Bearer +(\S+)$/i.exec(headers.get("authorization") ?? "");
+	if (match === null) return false;
+	const given = Buffer.from(match[1] as string, "utf8");
+	const sameLength = given.length === expected.length;
+	return timingSafeEqual(sameLength ? given : expected, expected) && sameLength;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
 	// Anchored, because `127.0.0.0/8` is all loopback but `startsWith("127.")`
 	// also accepts `127.0.0.1.evil.example`, which is a name someone else owns.
-	// Caught by the test above, not by reading this back.
+	// Caught by the tests in `app.test.ts`, not by reading this back.
 	return (
 		hostname === "localhost" ||
 		hostname === "[::1]" ||

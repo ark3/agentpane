@@ -13,16 +13,29 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_PORT } from "../shared/protocol.ts";
+import { loadApiToken } from "./api-token.ts";
 import { createProductionDeps } from "./composition.ts";
 import { createApp } from "./http/app.ts";
 import { createStaticHandler } from "./http/static.ts";
 
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
+
+// Held only here and handed to `createApp`, never put in `process.env`, where
+// every agent this server spawns would inherit it.
+let apiToken: string;
+try {
+	apiToken = loadApiToken();
+} catch (err) {
+	console.error(err instanceof Error ? err.message : err);
+	process.exit(1);
+}
+
 const clientDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../dist/client");
 const productionDeps = createProductionDeps();
 
 const app = createApp({
 	...productionDeps,
+	apiToken,
 	// Comfortably inside Bun's idle timeout below, and enough to notice a dead
 	// stream without generating noticeable traffic.
 	heartbeatMs: 15_000,
@@ -34,8 +47,8 @@ const app = createApp({
 	}),
 });
 
-// Loopback only (D8). No auth token, no cookie, no localhost bypass -- none of
-// it needs to exist once remote access is off the table.
+// Loopback only (D8), which keeps the network out; the token above is what
+// keeps out a local process that shares this loopback.
 const server = Bun.serve({
 	hostname: "127.0.0.1",
 	port,

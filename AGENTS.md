@@ -1,6 +1,6 @@
 # agentpane
 
-Decisions D1–D28 in `docs/DESIGN.md`, the evidence behind the work in `docs/HANDOFF.md`.
+Decisions D1–D29 in `docs/DESIGN.md`, the evidence behind the work in `docs/HANDOFF.md`.
 Outstanding work is tracked in GitHub issues; see "Issues and cards" below.
 
 ## Commands
