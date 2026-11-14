@@ -4953,7 +4953,7 @@ Whether agentpane renders the tool hold's errored assistant message, or the text
 
 Run on the home server (`may`) on 2026-11-13, local time `-05:00`, on `bun 1.4.0`, `pi 1.5.2` and `codex-cli 0.169.0`, with the `sbox` checkout at `4c19fad` (2026-10-28), from the `fix/loopback-api-token` branch as each commit named below left it.
 Every run but the owner's trial took place inside an agent session's own `sbox` (bwrap), whose tmpfs `~/.ssh` held a throwaway `agentpane-token` that a server started there created; none of those read or wrote the real `~/.ssh`.
-The owner's trial, the last paragraph before "Not yet run", ran outside any sandbox against the real `~/.ssh`, and recorded no versions; those above are the agent session's.
+The owner's trial, the paragraph "The owner's trial, outside any sandbox", ran outside any sandbox against the real `~/.ssh`, and recorded no versions; those above are the agent session's.
 In the agent session's runs every Pi ran on a throwaway `PI_CODING_AGENT_DIR` holding copies of `auth.json`, `models-store.json` and `settings.json`, and the Codex run on a throwaway `CODEX_HOME`; neither used the session's own state directory.
 D29 in `docs/DESIGN.md` is the decision these runs check.
 
@@ -5017,6 +5017,14 @@ PASS: the sandboxed command ran, and the read failed (exit 1); it did not return
 
 That shows that inside `sbox` the real `~/.ssh` is replaced by a tmpfs, so the token file is absent there rather than unreadable.
 `sbox --profile none -- python3 resources/probes/loopback_token_repro_probe.py --base-url http://127.0.0.1:4173`, run from the checkout against that server, printed `create: HTTP 401; attach: HTTP 401; passes: both refused`.
+
+**The finished branch, end to end, after the visible field** (`73ef10a2`, about 19:10 local).
+Inside the agent session's `sbox` again, with the same throwaway token as "The finished branch, end to end" above.
+`bun run check` passed, svelte-check clean and 1822 tests in 62 files, and `bun run test:browser` passed 29 of 29.
+With the token check in `handle` disabled, `src/server/http/app.test.ts` and `src/emacs/token.test.ts` run together failed exactly the four `token` refusal tests (4 of 110); with the `Host` check disabled instead, exactly the three `host` refusal tests (3 of 110); the file was restored each time.
+Against `bun run build` and `PORT=56599 bun run start`, the same curl sweep as above came out the same, every route family 401 with `WWW-Authenticate: Bearer` and the evil `Host` 403 in all twelve combinations, and it added `HEAD /api/events`, 401 without the token, and `Host: LOCALHOST:3`, which passed.
+`python3 resources/probes/loopback_token_repro_probe.py --base-url http://127.0.0.1:56599` exited 0 at 19:13:31, create and attach both 401, as did the same command through a nested `sbox --profile none --`; the mask probe again refused with exit 3.
+With `HOME` pointed at a temp directory, the token file was created at `600`, refused at `644` and refused with no `.ssh`, with the same messages as above.
 
 **Not yet run.**
 Everything on the work laptop and on macOS, which the owner does in one visit after the fix is merged and pushed: the mask probe, and the reproduction probe run through `sbox` against a server started outside it; the browser's paste prompt and the Emacs helper against the owner's own server, including after a rotation; and seatbelt's read denial under `~/.ssh` for this file and `link(2)` creating it, neither of which these runs have exercised.
