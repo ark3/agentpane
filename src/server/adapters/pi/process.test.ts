@@ -818,7 +818,7 @@ describe("PiAdapter stdout framing", () => {
 		const h = makeHarness();
 		await startAdapter(h);
 
-		// The node:readline trap docs/ENVIRONMENT.md warns about. Written as an escape here so
+		// The node:readline trap docs/BACKENDS.md warns about. Written as an escape here so
 		// it survives editors, diffs and terminals, but it reaches the wire as a
 		// literal character: JSON.stringify does not escape U+2028, so Pi really
 		// can put one inside a string. readline would tear this line in half and

@@ -3,7 +3,7 @@
  *
  * Two things drive this rather than `node:readline`:
  *
- * 1. LF-only framing. `docs/ENVIRONMENT.md`'s "Pi RPC framing is LF-only" gotcha is about
+ * 1. LF-only framing. `docs/BACKENDS.md`'s "Pi RPC framing is LF-only" is about
  *    stdio framing, but the same hazard applies here: these files hold
  *    arbitrary agent/tool text inside JSON string values, which can legally
  *    contain U+2028/U+2029. `readline`'s default line splitting treats those

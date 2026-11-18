@@ -64,9 +64,6 @@ Live backend evidence, the probes and the Emacs client's tests are produced here
   `direnv exec /tmp/ow-resume-probe sbox --dry-run -- pi --version` failed with `Could not detect workspace`, listing the three things it tries in order: the `--workspace` flag, then the marker files `.sandbox-workspace`, `.sandbox-root`, `.sandboxrc`, `.workspace-root` and `WORKSPACE`, then a git root.
   `touch /tmp/<dir>/.sandbox-workspace` is enough and the spawn then works, nested inside the session's own sandbox, `pi --version` answering `0.85.1` through it.
   The repo's own tree never hits this because it is a git root, so a live run pointed anywhere else is where it surfaces -- and it surfaces before the backend is reached at all, so the error names sbox and says nothing about the agent.
-- **Pi RPC framing is LF-only.**
-  Split on `\n` only; do not use Node `readline` (it also splits on U+2028/U+2029, which are valid inside JSON strings).
-  See Pi's `docs/rpc.md` "Framing".
 
 ## Work laptop
 
