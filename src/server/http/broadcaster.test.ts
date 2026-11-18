@@ -21,7 +21,7 @@ describe("framing", () => {
 		// A transcript is full of newlines, and SSE splits records on them. JSON
 		// escapes those; U+2028/U+2029 it does not escape, but SSE does not treat
 		// them as line terminators either (unlike node:readline, which is why
-		// Pi's own framing is LF-only -- HANDOFF's environment gotchas).
+		// Pi's own framing is LF-only -- `docs/ENVIRONMENT.md`'s home-server gotchas).
 		const text = "line one\nline two\r\nthree four five";
 		const frame = formatSseFrame({
 			type: "upsert",

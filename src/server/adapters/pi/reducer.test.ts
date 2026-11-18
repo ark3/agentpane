@@ -2,7 +2,7 @@
  * Feeds real recorded Pi RPC turns (resources/fixtures/pi/) through the pure
  * reducer and asserts on structure -- event sequence, message roles,
  * content-block kinds, tool call/result pairing, stopReason -- never on
- * exact model wording (WORKSTREAMS.md, HANDOFF.md: fixture text varies per
+ * exact model wording (AGENTS.md: fixture text varies per
  * capture). See resources/fixtures/README.md for what each scenario covers.
  */
 

@@ -9,7 +9,7 @@ five cells against the live CLIs on this machine, prints a record for each
 captures a forked-or-branched session fixture per backend so the mapping work
 can proceed on a machine that cannot run either CLI.
 
-The cells (see OW-mewiga, docs/HANDOFF.md findings 7/18/19/21/30, and
+The cells (see OW-mewiga, HANDOFF findings 7/18/19/21/30, and
 OW-gojado for the fifth):
 
   Pi, rewind        -> RPC `fork` (entryId). On 0.84.2 this is COPY-ON-WRITE,

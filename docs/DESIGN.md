@@ -2,7 +2,7 @@
 
 agentpane is a local web UI for coding agents.
 This document describes the intended shape and the reasoning behind it.
-It is intent, not orders: where it names a specific file or type, that is verified ground truth (see `HANDOFF.md`); where it describes structure, prefer clarity and good factoring over literal adherence.
+It is intent, not orders: where it names a specific file or type, that is verified ground truth (see `docs/MANUAL_TESTING.md`); where it describes structure, prefer clarity and good factoring over literal adherence.
 
 ## Goals
 
@@ -26,7 +26,7 @@ It is intent, not orders: where it names a specific file or type, that is verifi
 - **Not** using Pi's `RpcClient` helper: it hardcodes its own `spawn("node", [cliPath])` with no executable override, so it cannot be wrapped in sbox.
   We own the spawn and speak the protocol ourselves (importing Pi's *types* is fine).
 - **Not** building on `pi-web-ui` / `mini-lit`.
-  See D5 — this reverses the original plan, and the evidence is in `HANDOFF.md`.
+  See D5 — this reverses the original plan, and the evidence is HANDOFF findings 9–15 in `docs/MANUAL_TESTING.md`.
 - **Not** remotely accessible.
   Loopback only; see D8.
 - Not a general chat client; the backends are coding agents with a workspace.

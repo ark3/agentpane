@@ -1,7 +1,7 @@
 # Probes — reproducible validation evidence
 
-These scripts are the *executable proof* behind the claims in
-`docs/HANDOFF.md`. They were run during design validation and can be re-run
+These scripts are the *executable proof* behind the findings in
+`docs/MANUAL_TESTING.md` ("HANDOFF findings 1–49" and later runs). They were run during design validation and can be re-run
 any time to re-confirm the agent protocols on the current CLI versions.
 
 ## `pi_rpc_probe.sh`

@@ -10,7 +10,7 @@ view), but multi-backend and with its own client stack.
 ## Start here
 
 1. **`docs/DESIGN.md`** — read first: goals/non-goals, architecture, the settled decisions and their reasoning, the backend adapter contract, the Codex→`AgentMessage` mapping, and the test strategy.
-2. **`docs/HANDOFF.md`** — the evidence behind those decisions, with re-runnable probes, reference material by absolute path, and the environment gotchas.
+2. **`docs/MANUAL_TESTING.md`** — the evidence behind those decisions, and **`docs/ENVIRONMENT.md`** — the machines agentpane runs on and their gotchas.
 3. **`resources/`** — validated Codex protocol bindings, reproducible probe
    scripts, and captured protocol fixtures for offline adapter tests.
 

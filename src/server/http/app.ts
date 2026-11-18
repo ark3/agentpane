@@ -381,7 +381,7 @@ export function createApp(deps: AppDeps): App {
 				if (!sessions.isAttached(ref)) return notAttached(ref);
 				const forked = await sessions.fork(ref, body.value.entryId);
 				// The backends' forks are asymmetric, settled live (see
-				// docs/HANDOFF.md and docs/MANUAL_TESTING.md, OW-pifowo/OW-22 for Pi
+				// docs/MANUAL_TESTING.md, HANDOFF findings 43-46, OW-pifowo/OW-22 for Pi
 				// and Codex, OW-yilabe/OW-mayuza for Claude Code):
 				//   * Pi's `fork` is copy-on-write. The same process's active
 				//     `sessionFile` MOVES to a new file (the old branch survives on

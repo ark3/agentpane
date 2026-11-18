@@ -1,6 +1,6 @@
 # agentpane
 
-Decisions D1–D29 in `docs/DESIGN.md`, the evidence behind the work in `docs/HANDOFF.md`.
+Decisions D1–D29 in `docs/DESIGN.md`, the evidence behind the work in `docs/MANUAL_TESTING.md`, and the machines in `docs/ENVIRONMENT.md`.
 Outstanding work is tracked in GitHub issues; see "Issues and cards" below.
 
 ## Commands
@@ -60,14 +60,14 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
 - **Do not assume how your session was launched.**
   A card may be executed by Claude Code, Codex or Pi, by hand or as a `card` role session, under whatever sandbox that launch builds, and what is writable differs between them: on 2026-10-14 a `card run` session, started as plain `sbox claude`, found `~/.pi/agent` read-only, while an interactive session on the same machine could write it (OW-robozi).
   Driving a backend CLI directly against its own state directory is fine for development on the home server, and is the first thing to try.
-  When the state directory is not writable, the CLI says so, if quietly: Pi refuses a prompt with `EROFS ... auth.json.lock` or answers `get_state` with model `"id": "unknown"`, and Codex fails with `failed to initialize sqlite state runtime` (`docs/HANDOFF.md`, "Each backend needs a writable state directory").
+  When the state directory is not writable, the CLI says so, if quietly: Pi refuses a prompt with `EROFS ... auth.json.lock` or answers `get_state` with model `"id": "unknown"`, and Codex fails with `failed to initialize sqlite state runtime` (`docs/ENVIRONMENT.md`, "Each backend needs a writable state directory").
   Then give that run a throwaway state directory, as every probe in `resources/probes/` already does: `PI_CODING_AGENT_DIR` or `CODEX_HOME` pointed at a fresh private temp directory holding the credential and settings files copied in by name, and removed when the run ends (`make_state_home` in `resources/probes/capture_fixtures.py`).
   A nested `sbox` cannot make writable what the session's own sandbox mounted read-only, so a run through agentpane's own spawn chain needs the variable in the server's environment, as `resources/probes/agentpane_pi_smoke.py` passes it.
   Say which of the two a run used beside the evidence it produced.
   `agentpane_pi_smoke.py` passed with `--tool-check` in a `card run` session whose `~/.pi/agent` refused a `touch`, on `pi 1.2.0` on 2026-10-14 (`docs/MANUAL_TESTING.md`, OW-fitopi).
 - **What is still confined to the work laptop is that machine itself.**
   Live Pi evidence was, until 2026-09-13, the main reason to go there; it no longer is, and an issue asking for one belongs wherever the session is.
-  What remains is that clone's own provisioning, as in OW-gabemi, the reference material `docs/HANDOFF.md` addresses there by absolute path under "Reference material on the work laptop", and that machine's own session stores, where the owner uses agentpane daily and which therefore hold the most real use (OW-furivo).
+  What remains is that clone's own provisioning, as in OW-gabemi, the reference material `docs/ENVIRONMENT.md` addresses there by absolute path under "Reference material", and that machine's own session stores, where the owner uses agentpane daily and which therefore hold the most real use (OW-furivo).
   Such an issue's title opens `Work laptop:`.
   Since 2026-10-14 no agent session develops agentpane on the work laptop: work is planned and executed on the home server, and a work-laptop item is one the owner carries out by hand, so its body names the exact commands to run and what to bring back, and anything that needs an agent — writing a probe, filing issues from the result — happens on the home server before or after the visit.
   The owner updates every CLI to its latest release on both machines each morning, so as of 2026-10-14 a version measured on the home server is the version the work laptop runs that day.
@@ -126,7 +126,7 @@ One that lands it in neither carries the capability onto both wires -- the HTTP 
 
 ## Worktrees
 
-On the home server the repo tree is the only path mounted read-write, so a worktree must sit under `.worktrees/` inside it; anywhere else fails with `Read-only file system` (`docs/HANDOFF.md`, "Environment gotchas").
+On the home server the repo tree is the only path mounted read-write, so a worktree must sit under `.worktrees/` inside it; anywhere else fails with `Read-only file system` (`docs/ENVIRONMENT.md`, "Home server").
 `card` puts its plan worktree there by construction.
 
 A fresh worktree needs `bun install` before any `src/` work.
