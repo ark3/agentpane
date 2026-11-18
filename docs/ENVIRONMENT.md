@@ -44,6 +44,10 @@ Live backend evidence, the probes and the Emacs client's tests are produced here
   Keep it for anything that must not touch the real session corpus or credentials — `fork_probe.py` uses it for that reason, not for this one.
   A failure of this kind is quiet and looks like success: the turn "completes" in under a second with `stopReason: "error"` and empty content, which is what to suspect first if a backend regresses here.
   It is how `resources/probes/agentpane_codex_smoke.py` drove a real Codex through the built server, and how finding 34 was settled.
+- **Pi's default model.**
+  Pi reads its own default from `~/.pi/agent/settings.json`, which the owner may edit at any time — measured there on 2026-09-13, after the sandbox was widened to mount that directory read-write, `get_state` reported `deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"` both directly and through `sbox` (`docs/MANUAL_TESTING.md`, "Pi arrives on the home server").
+  Earlier that same day the directory was read-only, and Pi — unable to take the lock it needs merely to *read* that file — resolved no model at all, answering `get_state` with `"id": "unknown"`.
+  That is the failure `AGENTS.md`'s model flag exists to make impossible, and it is why the flag stays mandatory even where the file is readable.
 - **`direnv` is the first link in every spawn, and the home server did not have it until 2026-09-13.**
   All three backends spawn as `direnv exec <cwd> sbox -- <agent>` (D7, and `src/server/adapters/types.ts` states it as the contract), so without `direnv` on `PATH` the first prompt fails with HTTP 500 and `Failed to spawn <backend> (direnv): Executable not found in $PATH: "direnv"` -- every backend, not one.
   The home server now has the real thing, `direnv 2.37.1` at `/sbin/direnv`, installed by the owner on 2026-09-13 (OW-naribu).
@@ -67,7 +71,14 @@ Live backend evidence, the probes and the Emacs client's tests are produced here
 
 ## Work laptop
 
-agentpane is used most on the work laptop, with Pi and Codex, and no agent session develops it there (`AGENTS.md`, "Machines").
+agentpane is used most on the work laptop, with Pi and Codex.
+Since 2026-10-14 no agent session develops it there: work is planned and executed on the home server, and a work-laptop item is one the owner carries out by hand (`AGENTS.md`, "Evidence").
+
+- **What still takes a visit is that machine itself.**
+  Live Pi evidence was, until 2026-09-13, the main reason to go there; it no longer is, and an issue asking for one belongs wherever the session is.
+  What remains is that clone's own provisioning, as in OW-gabemi, the reference material below, and that machine's own session stores, where the owner uses agentpane daily and which therefore hold the most real use (OW-furivo).
+- **Its CLIs match the home server's.**
+  The owner updates every CLI to its latest release on both machines each morning, so as of 2026-10-14 a version measured on the home server is the version the work laptop runs that day.
 
 ### Reference material
 

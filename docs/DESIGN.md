@@ -346,9 +346,8 @@ All three backends' children run in one shell, `ChildProcessShell` in `src/serve
 
 ## Remaining open questions
 
-Open questions are cards; `card list --open --label question` is their only current list.
-They carry ids and sit beside everything else outstanding because keeping a second list here is what previously let this document drift out of step with the deck.
-A question that settles comes back here as a decision, with its reasoning — that is what this document is for, and it is why the one below stayed.
+Open questions are GitHub issues on `ark3/agentpane`, beside everything else outstanding, because keeping a second list here is what previously let this document drift out of step with the tracker.
+A question that settles comes back as a decision under `docs/decisions/`, with its reasoning — that is what this document is for, and it is why the one below stayed.
 
 - ~~**Whether killing the spawned process actually stops the agent.**~~
   **Settled, for Pi and Codex.**
