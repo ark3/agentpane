@@ -71,7 +71,7 @@ Live backend evidence, the probes and the Emacs client's tests are produced here
 ## Work laptop
 
 agentpane is used most on the work laptop, with Pi and Codex.
-Since 2026-10-14 no agent session develops it there: work is planned and executed on the home server, and a work-laptop item is one the owner carries out by hand (`AGENTS.md`, "Evidence").
+Since 2026-10-14 no agent session develops it there: work is planned and executed on the home server, and a work-laptop item is one the owner carries out by hand (`AGENTS.md`, "Machines").
 
 - **What still takes a visit is that machine itself.**
   Live Pi evidence was, until 2026-09-13, the main reason to go there; it no longer is, and an issue asking for one belongs wherever the session is.

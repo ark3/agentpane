@@ -15,7 +15,8 @@ This file holds rules and pointers; everything else is read on demand.
 ## Machines
 
 - **Work laptop:** where agentpane is *used* most, with Pi and Codex.
-  No agent session develops it there; a `Work laptop:` issue is one the owner carries out by hand (see "Evidence").
+  No agent session develops it there, so a `Work laptop:` issue is carried out by the owner by hand: its body names the exact commands to run and what to bring back, and anything that needs an agent, such as writing a probe or filing issues from the result, happens on the home server before or after the visit.
+  Such an issue does all of its work in one visit: trips are the scarce resource, so never rank its contents by urgency or mark the half that matters most.
 - **Home server:** where agentpane is *developed* most, by Claude Code.
   Claude Code, Codex and Pi are all installed, each pinned to one model (see "Evidence"); live backend evidence, the probes and the Emacs client's tests are produced here.
 - **claude.ai cloud containers:** also used for development.
@@ -29,16 +30,14 @@ Name the machine rather than writing "here": this file is checked in and read fr
 `bun install` first.
 Runtime is Bun, tests are vitest.
 `bun run check` (svelte-check, which also typechecks the plain `.ts` files, plus all tests) must pass before any commit touching `src/`; say so explicitly when a commit is docs only.
-It is kept fast enough to run before every commit -- about 40s on the home server's 4 cores as of 2026-09-11 -- and a run that drifts well past that is a defect to profile, not a reason to skip it.
-The `test` script pins `TZ=Asia/Kolkata`, a half-hour-offset zone that makes both the clock and the offset arithmetic visible in time assertions (OW-70); running `vitest` directly, without the pin, fails those tests.
+It took about 40s on the home server as of 2026-09-11; a run that drifts well past that is a defect to profile, not a reason to skip it.
+Run tests through the `test` script, which pins `TZ=Asia/Kolkata`; plain `vitest` fails the time assertions.
 
-`bun run test:browser` runs the Playwright vehicle in `e2e/` (~30s, headless Chromium).
-It is **not** part of `bun run check`, which stays fast and browser-free (OW-49); `.github/workflows/ci.yml` runs it instead as a sibling job on every push to `main` and every pull request targeting it.
-That job is a backstop after the push, never a substitute for the local run: run it by hand before committing when you touch follow-mode scrolling in `App.svelte`, `.conversation` or the `.shell` grid in `app.css`, the composer's action row, the message footer rows in `src/client/render/`, or anything under `public/`; jsdom cannot see layout, scroll anchoring, real scroll-event timing, or the Popover API, none of which it implements, and nothing in the module graph imports the favicons at all.
+`bun run test:browser` runs the Playwright suite in `e2e/` (~30s, headless Chromium).
+It is not part of `bun run check`, and CI runs it only after the push, so run it by hand before committing when you touch follow-mode scrolling in `App.svelte`, `.conversation` or the `.shell` grid in `app.css`, the composer's action row, the message footer rows in `src/client/render/`, or anything under `public/`: jsdom sees no layout, no real scrolling and no Popover API.
+In a claude.ai cloud container it needs an uncommitted config to find the browser (`docs/ENVIRONMENT.md`, "Cloud containers").
 
-That vehicle cannot report a page as unfocused: it drives `chromium-headless-shell`, which answers `document.hasFocus() === true` everywhere.
-`e2e/harness.ts` stubs `document.hasFocus` for that reason, and `docs/MANUAL_TESTING.md` records the levers that were probed and failed.
-In a claude.ai cloud container the suite needs an uncommitted config to find the container's browser (`docs/ENVIRONMENT.md`, "Cloud containers").
+Never run `/code-review ultra` in a session doing the work: it has cost a full budget window.
 
 ## Code
 
@@ -46,56 +45,39 @@ In a claude.ai cloud container the suite needs an uncommitted config to find the
   Imports carry `.ts`.
 - Two test projects: `src/server/**` and `src/shared/**` run in node, `src/client/**` in jsdom.
   Put the file in the right place instead of writing a per-file environment docblock.
-- `src/emacs/**` runs in node too and imports client modules by design: the projection in `src/emacs/nodes.ts` reuses `$client/render/` and `$client/preview.ts`, which are plain TypeScript with no DOM dependency, and vitest picks the environment by the test file's path, not by what it imports.
-  The one exception is `$client/render/markdown.ts`, whose DOMPurify needs a window: `src/emacs/render.ts` puts a jsdom one on the global and loads that module by dynamic import after it, and its docblock says why the load goes through `process.getBuiltinModule`.
-- The `@earendil-works/pi-*` packages are types-only (D10).
-  `import type` only; `src/import-boundaries.test.ts` fails the build and names your file.
+- `src/emacs/**` runs in node too and imports client modules by design; vitest picks the environment by the test file's path, not by what it imports.
+- The `@earendil-works/pi-*` packages are types-only (D10): `import type` only.
 - Assert on structure, never on model wording — fixture text varies per capture.
 - `resources/codex-protocol/` is generated by `codex app-server generate-ts` and is the source of truth for Codex types; regenerate it, never hand-write them.
-- `src/client/App.svelte` has three seams it does not yet use: the scroll, follow and nav-rail engine, the session list, and the composer.
-  Split them out when a change touches two of them at once, never as a drive-by, and keep `$state.raw` on `view` confining re-parsing to the tail block (D5), which `App.streaming-cost.test.ts` and `App.sort-cost.test.ts` measure (OW-hipote, declined as a card 2026-10-31).
 
 ## Documentation
 
 Markdown prose uses one sentence per line and never wraps at a column count.
-Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md` written before 2026-08-27, and `resources/fixtures/README.md` and `resources/probes/README.md` may remain wrapped; new prose and any paragraph substantively edited follow the current rule.
+Some older files are still hard-wrapped and may stay so; a paragraph you substantively edit follows the rule.
+
+State the why only where there is a body behind it, an incident that happened or a default the reader would otherwise follow, and keep it to a clause; the incident itself belongs in the commit message.
+Refuting something nobody would have tried costs twice: it argues with no one, and it plants the bad move next to the instruction.
 
 ## Evidence
 
 - Verify at the source.
   Where a claim about a CLI, a protocol, or a runtime is load-bearing, reproduce it and record how.
 - **A claim about backend behaviour names the version it was measured on.**
-  Pi, Codex and Claude Code move forward constantly and this project never rolls back, so present tense without a version is the defect: it reads as current forever and nothing marks the day it stopped being true.
-  Write "as of `codex-cli 0.147.0`, app-server defaulted each thread to `read-only`", not "app-server defaults each thread to `read-only`" -- that exact sentence sat three lines from a 0.154.0 measurement in `docs/DESIGN.md` and still read as present fact.
-  This is not an obligation to keep claims current.
-  D18 sorts backend facts by what their going stale costs and defends only the ones that license code nobody wrote; the rest are allowed to age and are corrected when someone trips on them.
-- **All three CLIs run on the home server, each pinned to one model.**
-  Claude Code on Haiku (OW-yilabe, OW-beripo), Codex on Luna, and — since the owner installed `pi 0.85.1` there on 2026-09-13 — Pi on DeepSeek V4.1 Flash.
-  Do not trust the machine's defaults to enforce it: as of 2026-09-09 the home server's `~/.claude/settings.json` selects `sonnet` and its `~/.codex/config.toml` happens to select `gpt-5.6-luna`, and either can change — so the flag is the whole of the constraint and is never optional: `claude --model haiku`, `codex -m gpt-5.6-luna`, `pi --model openrouter/deepseek/deepseek-v4.1-flash:high`.
-  Pi otherwise reads its default from `~/.pi/agent/settings.json`, and when it cannot read that file it resolves no model at all (`docs/ENVIRONMENT.md`, "Pi's default model"); the flag makes that failure impossible.
-  The pin binds the turns an agent session drives while coding, debugging, or testing, because that work belongs on inexpensive models; it says nothing about agentpane's users, and the owner driving agentpane on the home server may choose any model.
-  A reader on 2026-09-08 took it as a property of the machine and proposed restricting the model picker to enforce it; that was never the intent.
+  The CLIs move forward and this project never rolls back, so present tense without a version reads as current forever.
+  Write "as of `codex-cli 0.147.0`, app-server defaulted each thread to `read-only`", not "app-server defaults each thread to `read-only`".
+  This is not an obligation to keep claims current: D18 says which stale facts are worth defending.
+- **On the home server, an agent session drives each backend CLI on one model, by flag:** `claude --model haiku`, `codex -m gpt-5.6-luna`, `pi --model openrouter/deepseek/deepseek-v4.1-flash:high`.
+  The flag is never optional: the machine's own defaults can change at any time, and Pi resolves no model at all when it cannot read its settings (`docs/ENVIRONMENT.md`, "Pi's default model").
+  The pin binds the turns an agent drives while coding, debugging or testing, so that work stays on inexpensive models; it is not a property of the machine or of agentpane, and the owner driving agentpane may choose any model.
 - **Do not assume how your session was launched.**
   On the home server, driving a backend CLI against its own state directory is the first thing to try.
   But sessions run under different sandboxes, and whether that directory is writable differs between them; `docs/ENVIRONMENT.md`, "Each backend needs a writable state directory", lists the quiet ways each CLI fails when it is not.
   If it is not, give the run a throwaway state directory, as the probes do (`make_state_home` in `resources/probes/capture_fixtures.py`); a run through agentpane's own spawn chain needs the variable in the server's environment, as `resources/probes/agentpane_pi_smoke.py` passes it.
   Say which of the two a run used beside the evidence it produced.
-- **A work-laptop item is carried out by the owner, by hand.**
-  Its title opens `Work laptop:`, and its body names the exact commands to run and what to bring back.
-  Anything that needs an agent, such as writing a probe or filing issues from the result, happens on the home server before or after the visit.
-  What still takes a visit is that machine itself: its clone's provisioning, the reference material `docs/ENVIRONMENT.md` addresses there by absolute path, and its own session stores (`docs/ENVIRONMENT.md`, "Work laptop").
-- **A work-laptop item does all of its work in one visit.**
-  The scarce resource is trips, not minutes once you are there, so never rank such an item's contents by urgency or name the half that matters most: that is an excuse to do part of it and come back, and the second question usually costs almost nothing while the CLI is already running.
-  The triage hint that would help on any other item is a defect on this one.
-  Proposed for OW-yudoni on 2026-08-19 and declined by the owner for exactly this reason.
 - A test that has never failed has not been shown to test anything.
   For a fix, break it again and watch it go red first.
 - When a run overturns a fact the repo already recorded, the same change retires **every** copy of it.
-  Grep the flag name or the phrase; the copies are not all in docs.
-  On 2026-08-20 a run flipped `moved_file_on_disk_at_fork` and left the old answer standing in `docs/MANUAL_TESTING.md`, in the conclusion that section had drawn from it, and in the `pi/process.ts` docblock a reader meets at the code (034d7dd).
-  A correction filed one section below the claim it corrects reaches nobody who was not already reading it.
-- State the why only where there is a body behind it: an incident that happened or a default the reader will actually follow.
-  Refuting something nobody would have tried costs the budget twice — it argues with no one, and it plants the bad move next to the instruction.
+  Grep the flag name or the phrase: copies sit in code docblocks as well as docs, and a correction filed below the claim it corrects reaches nobody who was not already reading it.
 
 ## Landing work
 
@@ -113,6 +95,12 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   A fact about a machine: `docs/ENVIRONMENT.md`.
   Live-run evidence: `docs/MANUAL_TESTING.md`.
 
+## Both clients
+
+The Emacs client is first-class and stays at feature parity with the browser; set by the owner on 2026-09-23.
+A change that adds or changes a user-facing capability lands it in both clients or in neither.
+One that lands it in neither carries the capability onto both wires -- the HTTP API and the Emacs helper's JSON-RPC in `src/emacs/protocol.ts` -- and each client gets its own issue.
+
 ## Issues
 
 Outstanding work is tracked in GitHub issues on `ark3/agentpane`.
@@ -120,16 +108,7 @@ Issues say what is to be done; they are not the record of what was decided, whic
 `card` is one way to work an issue as a plan, when that suits it; it carries its own instructions.
 `OW-` ids name legacy cards, retired on 2026-11-13; `docs/work/README.md` says how to read them.
 
-### Both clients
-
-The Emacs client is first-class and stays at feature parity with the browser; set by the owner on 2026-09-23.
-A change that adds or changes a user-facing capability lands it in both clients or in neither.
-One that lands it in neither carries the capability onto both wires -- the HTTP API and the Emacs helper's JSON-RPC in `src/emacs/protocol.ts` -- and each client gets its own issue.
-
 ## Worktrees
 
 On the home server the repo tree is the only path mounted read-write, so a worktree must sit under `.worktrees/` inside it; anywhere else fails with `Read-only file system` (`docs/ENVIRONMENT.md`, "Home server").
-
-A fresh worktree needs `bun install` before any `src/` work.
-
-Never `/code-review ultra` in a session doing the work -- it has cost a full budget window.
+A fresh worktree needs its own `bun install` before any `src/` work.
