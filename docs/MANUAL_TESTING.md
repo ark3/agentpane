@@ -3,8 +3,7 @@
 ## What this document is
 
 **The evidence behind the live runs**, and the instructions for reproducing
-them. It does not state project status — `WORKSTREAMS.md`'s Status table does
-that, and GitHub issues hold what is still outstanding.
+them. It does not state project status; GitHub issues hold what is still outstanding.
 Record a run's results here; record what the run left undone as a GitHub issue.
 `OW-` ids below name the legacy cards retired on 2026-11-13 into `docs/work/closed/` (`docs/work/README.md`).
 

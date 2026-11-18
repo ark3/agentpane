@@ -95,8 +95,6 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   A doc defect: fix the doc in the same change.
   A fact you verified: the commit message, or `docs/DESIGN.md` if it changes a decision.
   Live-run evidence: `docs/MANUAL_TESTING.md`.
-- Build-slice status lives in the Status table at the top of `docs/WORKSTREAMS.md` and nowhere else.
-  That table tracks slices, not issues.
 
 ## Issues and cards
 
