@@ -8,7 +8,7 @@ That triage closed every open card, promoting what still wanted doing to GitHub 
 The triage's own record, `TRIAGE.md`, was deleted on 2026-11-18 (#40) and is in git history; the declines it summarised are in the closed cards' own notes.
 
 An `OW-` id anywhere in the repo, in code comments and documents alike, names the file `closed/<id>.md`, such as `closed/OW-hutaki.md`; a card's id is its filename and not part of its text, so grepping `closed/` for an id finds the cards that cite it.
-Work is now run through `card` on an ephemeral deck under `.git`, whose ids carry a different prefix, so an `OW-` id always means a legacy card.
+A `card` deck, when one is used, is ephemeral and its ids carry a different prefix, so an `OW-` id always means a legacy card.
 
 The cards cite documents that #40 retired on 2026-11-18.
 `docs/HANDOFF.md`'s numbered findings are now "HANDOFF findings 1–49" at the end of `docs/MANUAL_TESTING.md`, and its environment sections are in `docs/ENVIRONMENT.md`.

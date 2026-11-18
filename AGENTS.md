@@ -9,7 +9,7 @@ This file holds rules and pointers; everything else is read on demand.
 - `docs/MANUAL_TESTING.md`: the evidence behind live runs, searched rather than read; "HANDOFF finding N" names a row at its end.
 - `resources/probes/README.md` and `resources/fixtures/README.md`: the probes and the captured fixtures.
 - `docs/work/`: the legacy cards, read-only (`docs/work/README.md`).
-- GitHub issues on `ark3/agentpane`: outstanding work; see "Issues and cards" below.
+- GitHub issues on `ark3/agentpane`: outstanding work; see "Issues" below.
 - `README.md`: for people visiting the repository.
 
 ## Machines
@@ -76,13 +76,9 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   The pin binds the turns an agent session drives while coding, debugging, or testing, because that work belongs on inexpensive models; it says nothing about agentpane's users, and the owner driving agentpane on the home server may choose any model.
   A reader on 2026-09-08 took it as a property of the machine and proposed restricting the model picker to enforce it; that was never the intent.
 - **Do not assume how your session was launched.**
-  A card may be executed by Claude Code, Codex or Pi, by hand or as a `card` role session, under whatever sandbox that launch builds, and what is writable differs between them: on 2026-10-14 a `card run` session, started as plain `sbox claude`, found `~/.pi/agent` read-only, while an interactive session on the same machine could write it (OW-robozi).
-  Driving a backend CLI directly against its own state directory is fine for development on the home server, and is the first thing to try.
-  When the state directory is not writable, the CLI says so, if quietly: Pi refuses a prompt with `EROFS ... auth.json.lock` or answers `get_state` with model `"id": "unknown"`, and Codex fails with `failed to initialize sqlite state runtime` (`docs/ENVIRONMENT.md`, "Each backend needs a writable state directory").
-  Then give that run a throwaway state directory, as every probe in `resources/probes/` already does: `PI_CODING_AGENT_DIR` or `CODEX_HOME` pointed at a fresh private temp directory holding the credential and settings files copied in by name, and removed when the run ends (`make_state_home` in `resources/probes/capture_fixtures.py`).
-  A nested `sbox` cannot make writable what the session's own sandbox mounted read-only, so a run through agentpane's own spawn chain needs the variable in the server's environment, as `resources/probes/agentpane_pi_smoke.py` passes it.
+  Sessions run under different sandboxes, and whether a backend's state directory is writable differs between them; `docs/ENVIRONMENT.md`, "Each backend needs a writable state directory", lists the quiet ways each CLI fails when it is not.
+  Then give the run a throwaway state directory, as the probes do (`make_state_home` in `resources/probes/capture_fixtures.py`); a run through agentpane's own spawn chain needs the variable in the server's environment, as `resources/probes/agentpane_pi_smoke.py` passes it.
   Say which of the two a run used beside the evidence it produced.
-  `agentpane_pi_smoke.py` passed with `--tool-check` in a `card run` session whose `~/.pi/agent` refused a `touch`, on `pi 1.2.0` on 2026-10-14 (`docs/MANUAL_TESTING.md`, OW-fitopi).
 - **A work-laptop item is carried out by the owner, by hand.**
   Its title opens `Work laptop:`, and its body names the exact commands to run and what to bring back.
   Anything that needs an agent, such as writing a probe or filing issues from the result, happens on the home server before or after the visit.
@@ -116,12 +112,11 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   A fact about a machine: `docs/ENVIRONMENT.md`.
   Live-run evidence: `docs/MANUAL_TESTING.md`.
 
-## Issues and cards
+## Issues
 
 Outstanding work is tracked in GitHub issues on `ark3/agentpane`.
 Issues say what is to be done; they are not the record of what was decided, which lives in the repo's documents -- decisions in `docs/decisions/`, live-run evidence in `docs/MANUAL_TESTING.md`.
-An issue is worked as a plan through `card`, whose deck is ephemeral and lives under `.git`; `card` delivers its own procedure, and `deck agent-help` gives the deck's conventions.
-A claude.ai cloud container starts without `card` (`docs/ENVIRONMENT.md`, "Cloud containers").
+`card` is one way to work an issue as a plan, when that suits it; it carries its own instructions.
 `OW-` ids name legacy cards, retired on 2026-11-13; `docs/work/README.md` says how to read them.
 
 ### Both clients
@@ -133,8 +128,7 @@ One that lands it in neither carries the capability onto both wires -- the HTTP 
 ## Worktrees
 
 On the home server the repo tree is the only path mounted read-write, so a worktree must sit under `.worktrees/` inside it; anywhere else fails with `Read-only file system` (`docs/ENVIRONMENT.md`, "Home server").
-`card` puts its plan worktree there by construction.
 
 A fresh worktree needs `bun install` before any `src/` work.
 
-Never `/code-review ultra` in an execution session -- it has cost a full budget window.
+Never `/code-review ultra` in a session doing the work -- it has cost a full budget window.
