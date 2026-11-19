@@ -1,12 +1,13 @@
-"""Does the Emacs helper answer a request waiting on its first stream open,
-when no server is listening, before it exits? (OW-pezelo)
+"""Does the Emacs helper answer a request waiting on its socket's first open,
+when no server is listening, before it exits? (OW-pezelo, D31)
 
 Runs the real helper, `bun run src/emacs/main.ts`, against a loopback port
 nothing listens on, with its stdin held open as Emacs holds it, and sends a
-`sessions/list` and a `sessions/attach`, the two requests that open the
-stream. Each run prints the helper's exit and every reply it wrote; the probe
+`sessions/list` and a `sessions/attach`; the first request read opens the
+socket. Each run prints the helper's exit and every reply it wrote; the probe
 passes only when, in every run, both replies are errors saying the server
-could not be reached, with no `data`, and the helper exited.
+could not be reached, whose `data.error` is `unreachable`, and the helper
+exited. Until D31 the replies carried no `data`.
 
     python3 resources/probes/emacs_helper_no_server_probe.py
 
@@ -65,7 +66,10 @@ def run():
     ok = (
         exited == 0
         and sorted(r["id"] for r in got) == [1, 2]
-        and all("result" not in r and "reach" in r["error"]["message"] and "data" not in r["error"] for r in got)
+        and all(
+            "result" not in r and "reach" in r["error"]["message"] and r["error"].get("data", {}).get("error") == "unreachable"
+            for r in got
+        )
     )
     print(f"exit {exited} after {time.monotonic() - sent:.2f}s, {'ok' if ok else 'FAILED'}")
     for r in got:

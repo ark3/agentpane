@@ -541,8 +541,8 @@ What it showed is `docs/MANUAL_TESTING.md`, "What each backend says while a live
 
 ## `emacs_helper_drop_probe.el`
 
-Proves: **a prompt in flight when the Emacs helper's event stream drops keeps its turn-done watch for the helper's teardown**, which ends a turn seen streaming and raises the indicator (OW-zedawo, OW-hiliti).
-It drives the real `runHelper` through `emacs_helper_drop_stand_in.ts`, whose `fetch` holds every `POST` open until its signal fires and whose event stream drops 500 ms after it opens.
+Proves: **a prompt in flight when the Emacs helper's socket closes keeps its turn-done watch for the helper's teardown**, which ends a turn seen streaming and raises the indicator (OW-zedawo, OW-hiliti).
+It drives the real `runHelper` through `emacs_helper_drop_stand_in.ts`, whose socket answers the `hello` and every listing, holds every other command unanswered, and closes 500 ms after it opens; until D31 it was an event stream that dropped, beside a `fetch` that held every `POST` open.
 Its `busy` case waits without yielding until the helper has exited, so the helper's last messages, its sentinel and its teardown are all handled afterwards; its `idle` case lets Emacs handle each as it comes.
 
 ```bash
@@ -555,13 +555,14 @@ Run from the repository root; `PROBE_RUNS` sets the runs per case (3).
 Each case prints `RAISED k of n` and each run's echo-area messages, and passes only when every run raised.
 No live model calls, no network beyond the loopback pipe.
 
-Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30.
-What it showed is `docs/MANUAL_TESTING.md`, "A request the helper's teardown aborts gets no reply, and only a refusal abandons a prompt's watch (OW-hiliti)".
+Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19.
+What it showed is `docs/MANUAL_TESTING.md`, "A request the helper's teardown aborts gets no reply, and only a refusal abandons a prompt's watch (OW-hiliti)", and "The Emacs helper over the socket (ark3/agentpane#53)".
 
 ## `emacs_helper_server_death_probe.el`
 
-Proves: **a prompt in flight when the agentpane server is killed keeps its turn-done watch for the helper's teardown** (OW-hiliti), though the helper, `bun run src/emacs/main.ts`, may answer the prompt first with the socket's error, a `-32603` carrying no `data`.
-The server is `emacs_helper_server_death_server.ts`, a stand-in on a free loopback port that holds the prompt's `POST` open and is SIGKILLed 0.3 s after the prompt goes out.
+Proves: **a prompt in flight when the agentpane server is killed keeps its turn-done watch for the helper's teardown** (OW-hiliti).
+Until D31 the helper, `bun run src/emacs/main.ts`, could answer the prompt first with its HTTP request's error, a `-32603` carrying no `data`; over the socket it writes no reply for it.
+The server is `emacs_helper_server_death_server.ts`, a stand-in socket on a free loopback port that answers the `hello` and every listing, holds the prompt unanswered, and is SIGKILLed 0.3 s after the prompt goes out.
 
 ```bash
 emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
@@ -572,8 +573,8 @@ emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 Run from the repository root; `PROBE_RUNS` sets the runs (8).
 It prints `RAISED k of n`, with each run's result and the prompt's failure message, and passes only when every run raised.
 
-Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30.
-What it showed is the same `docs/MANUAL_TESTING.md` section.
+Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19.
+What it showed is in the same `docs/MANUAL_TESTING.md` sections.
 
 ## Why these live here
 
@@ -583,10 +584,11 @@ before trusting the `AgentMessage` mapping in `docs/DESIGN.md`.
 
 ## `emacs_helper_no_server_probe.py`
 
-Proves: **with no server listening, the Emacs helper answers each `sessions/list` and `sessions/attach` waiting on its first stream open that the server could not be reached, with no `data`, before it exits** (OW-pezelo).
+Proves: **with no server listening, the Emacs helper answers each `sessions/list` and `sessions/attach` waiting on its socket's first open that the server could not be reached, its `data.error` `unreachable`, before it exits** (OW-pezelo, D31).
+Until D31 the replies carried no `data`, and the requests waited on an event stream's open.
 It runs the real helper, `bun run src/emacs/main.ts`, against `http://127.0.0.1:1` with its stdin held open, as Emacs holds it.
-The vitest case in `src/emacs/helper.test.ts` holds the helper's rejection but not its race with the input's cancel: under node the replies win that race, and under Bun they lose it to the teardown's abort.
-Since OW-nuzoto they are written anyway, the helper being silent only for a failure its abort caused, and the input is cancelled at once, where until then a timer held the cancel back so that the replies won; this probe is the only check that they are still written under Bun.
+The vitest case in `src/emacs/helper.test.ts` holds the helper's rejection but not its race with the input's cancel: under node the replies win that race, and under Bun they once lost it to the teardown's abort.
+Since OW-nuzoto they are written anyway, the helper being silent only for the connection lost, and the input is cancelled at once; this probe is the only check that they are still written under Bun.
 
 ```bash
 python3 resources/probes/emacs_helper_no_server_probe.py
@@ -596,7 +598,7 @@ Run from the repository root; `PROBE_RUNS` sets the runs (3).
 Each run prints the helper's exit and its replies, and the probe prints `ANSWERED k of n` and passes only when every run answered both.
 No live model calls, no network beyond loopback.
 
-Verified with: `bun 1.4.0` on the home server, 2026-09-29; again without the timer, 2026-09-30.
+Verified with: `bun 1.4.0` on the home server, 2026-09-29; again without the timer, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19.
 What it showed is the `docs/MANUAL_TESTING.md` sections on OW-pezelo and OW-nuzoto.
 
 ## `pi_store_survey.ts`

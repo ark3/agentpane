@@ -31,6 +31,12 @@ const forkAndPromptUnused = async (): Promise<never> => {
 /** What the server's fork-points answer says of a fork stopping a running turn, as of ark3/agentpane#47: Pi alone. */
 const serverForkStopsTurn = (ref: SessionRef): boolean => ref.backend === "pi";
 
+/** The ref the controller holds under `handle`, which is how a server's fork-points answer knows the session it names. */
+function refUnder(controller: AgentpaneController, handle: string): SessionRef {
+	const { state } = controller.getView();
+	return state.sessions[handle]?.ref ?? state.summaries.find((summary) => summary.handle === handle)!.ref;
+}
+
 function summary(
 	ref: SessionRef,
 	preview: string | null = null,
@@ -288,6 +294,8 @@ class FakeController implements AgentpaneController {
 		this.refreshCalls += 1;
 	}
 
+	reconnect() {}
+
 	async refreshPreview() {
 		this.previewRefreshes += 1;
 	}
@@ -517,7 +525,7 @@ describe("App", () => {
 				effortSets.push(effort);
 			},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			forkAndPrompt: forkAndPromptUnused,
 			fork: async () => piSession,
 			dismissError: async () => {},
@@ -952,7 +960,7 @@ describe("App", () => {
 	/** Driven by the real controller, so what is under test reaches the API's `setName`. */
 	it("renames the selection through the API with the name typed, and sends nothing on Cancel or a blank name (OW-bumonu)", async () => {
 		let emit: (event: ServerEvent) => void = () => {};
-		const named: Array<{ ref: SessionRef; name: string }> = [];
+		const named: Array<{ handle: string; name: string }> = [];
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession, "P")],
 			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
@@ -966,10 +974,10 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
-			setName: async (ref, name) => {
-				named.push({ ref, name });
+			setName: async (handle, name) => {
+				named.push({ handle, name });
 			},
-			forkPoints: async (ref) => ({ points: [], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			forkAndPrompt: forkAndPromptUnused,
 			fork: async () => piSession,
 			dismissError: async () => {},
@@ -999,7 +1007,7 @@ describe("App", () => {
 			window.prompt = prompt;
 		}
 
-		expect(named).toEqual([{ ref: piSession, name: "Release notes" }]);
+		expect(named).toEqual([{ handle: "h-1", name: "Release notes" }]);
 	});
 
 	it("previews a stored session on row selection instead of attaching, labelling it by backend and id", async () => {
@@ -2395,7 +2403,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async () => ({ points: [], forkStopsTurn: serverForkStopsTurn(piSession) }),
 			forkAndPrompt: forkAndPromptUnused,
 			fork: async () => piSession,
 			dismissError: async () => {},
@@ -2834,7 +2842,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			forkAndPrompt: forkAndPromptUnused,
 			fork: async () => piSession,
 			dismissError: async () => {},
@@ -3452,7 +3460,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			forkAndPrompt: async () => {
 				forks += 1;
 				if (forks > 1) throw new Error("fork refused");
@@ -3538,9 +3546,9 @@ describe("App", () => {
 			setName: async () => {},
 			// The fork's own answer never comes, so no publish of it refreshes the
 			// watch: what the reply arms from is all that badges.
-			forkPoints: (ref) => ref.id === forkRef.id
+			forkPoints: (handle) => refUnder(controller, handle).id === forkRef.id
 				? new Promise<never>(() => {})
-				: Promise.resolve({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+				: Promise.resolve({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			// The server's order: the fork attached, its turn started under its own
 			// handle, and only then the reply.
 			forkAndPrompt: async () => {
@@ -3626,7 +3634,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			forkAndPrompt: async () => {
 				await new Promise<void>((resolve) => {
 					answer = resolve;
@@ -3724,7 +3732,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			forkAndPrompt: async () => {
 				await new Promise<void>((resolve) => {
 					answer = resolve;
@@ -3810,11 +3818,11 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			// The fork is created and attached, and its prompt refused (D30).
 			forkAndPrompt: async () => {
 				emit(snapshot(forkRef, "h-fork"));
-				throw new ApiClientError(400, "backend_refused", "prompt refused", { ref: forkRef, handle: "h-fork" });
+				throw new ApiClientError("backend_refused", "prompt refused", { ref: forkRef, handle: "h-fork" });
 			},
 			fork: async () => forkRef,
 			dismissError: async () => {},
@@ -3880,7 +3888,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			forkAndPrompt: async () => {
 				// A Pi fork at a user message keeps nothing from that message on.
 				emit(snapshot(forkRef, "h-fork", 1, [], false));
@@ -4099,7 +4107,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			forkAndPrompt: async () => {
 				await new Promise<void>((resolve) => {
 					answer = resolve;
@@ -4184,7 +4192,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			// The request stays out until the test lets it go.
 			forkAndPrompt: async () => {
 				await new Promise<void>((resolve) => {
@@ -4329,13 +4337,13 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			forkAndPrompt: (_ref, body) => {
 				prompts.push(body.text);
 				emit(snapshot(forkRef, "h-fork", false));
 				return new Promise((resolve, reject) => {
 					land = () => resolve({ session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" });
-					refuse = () => reject(new ApiClientError(400, "backend_refused", "prompt refused", { ref: forkRef, handle: "h-fork" }));
+					refuse = () => reject(new ApiClientError("backend_refused", "prompt refused", { ref: forkRef, handle: "h-fork" }));
 				});
 			},
 			fork: async () => forkRef,
@@ -4849,7 +4857,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async (ref) => ({ points: [], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkPoints: async (handle) => ({ points: [], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
 			forkAndPrompt: forkAndPromptUnused,
 			fork: async () => piSession,
 			dismissError: async () => {},

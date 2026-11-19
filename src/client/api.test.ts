@@ -1,17 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { ROUTES } from "$shared/protocol.ts";
-import type {
-	ServerEvent,
-	SessionRef,
-	SessionSummary,
-} from "$shared/protocol.ts";
-import {
-	ApiClientError,
-	createAgentpaneApi,
-	type AgentpaneApi,
-	type EventConnection,
-	type EventHandlers,
-} from "./api.ts";
+import { MAX_SOCKET_FRAME_BYTES, ROUTES, SOCKET_CLOSE } from "$shared/protocol.ts";
+import type { ServerEvent, SessionRef, SessionSummary } from "$shared/protocol.ts";
+import { ApiClientError, ConnectionLostError, createAgentpaneApi, type EventHandlers } from "./api.ts";
+import { FakeSocket } from "./test-support.ts";
 
 const ref: SessionRef = { backend: "pi", id: "/tmp/a session.jsonl" };
 const summary: SessionSummary = {
@@ -25,499 +16,279 @@ const summary: SessionSummary = {
 	name: null,
 	onDisk: true,
 };
+const live = { ...summary, status: "attached" as const, handle: "h1" };
 
-function response(body: unknown, status = 200): Response {
-	return new Response(JSON.stringify(body), {
-		status,
-		headers: { "content-type": "application/json" },
-	});
+function handlers(): EventHandlers & { log: string[] } {
+	const log: string[] = [];
+	return {
+		log,
+		onEvent: vi.fn((event: ServerEvent) => void log.push(`event:${event.type}`)),
+		onOpen: vi.fn(() => void log.push("open")),
+		onDisconnect: vi.fn(() => void log.push("disconnect")),
+		onMalformed: vi.fn(() => void log.push("malformed")),
+	};
 }
 
-function fetchRecorder(...responses: Response[]) {
-	const fetch = vi.fn<typeof globalThis.fetch>();
-	for (const item of responses) fetch.mockResolvedValueOnce(item);
-	// Bun's Fetch has a browser-only `preconnect` property that Vitest's mock
-	// does not model, but the callable part is exactly what the API consumes.
-	return fetch as unknown as typeof globalThis.fetch;
+function setup(options: { token?: () => string | null; onUnauthorized?: () => void } = {}) {
+	const sockets: FakeSocket[] = [];
+	const api = createAgentpaneApi({
+		...options,
+		openSocket: (path) => {
+			const socket = new FakeSocket(path);
+			sockets.push(socket);
+			return socket;
+		},
+	});
+	const events = handlers();
+	const connection = api.connect(events);
+	const socket = sockets.at(-1)!;
+	return { api, sockets, socket, events, connection };
 }
 
-describe("agentpane API", () => {
-	it("lists sessions with an optional cwd query and unwraps the response", async () => {
-		const fetch = fetchRecorder(response({ sessions: [summary] }));
-		const api = createAgentpaneApi({ fetch });
+/** Answer the latest command frame on `socket`. */
+function reply(socket: FakeSocket, result: unknown): void {
+	socket.deliver({ type: "reply", id: socket.sent.at(-1)!["id"] as string, ok: true, result: result as null });
+}
 
-		expect(await api.listSessions("/work/a b")).toEqual([summary]);
-		expect(fetch).toHaveBeenCalledWith(`${ROUTES.sessions}?cwd=%2Fwork%2Fa%20b`, { method: "GET" });
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("agentpane API over the socket", () => {
+	it("opens the socket at its route and sends the token as the first frame", () => {
+		const { socket } = setup({ token: () => "secret" });
+		expect(socket.path).toBe(ROUTES.socket);
+		expect(socket.sent).toEqual([]);
+		socket.open();
+		expect(socket.sent).toEqual([{ id: expect.any(String), cmd: "hello", token: "secret" }]);
 	});
 
-	it("lists all sessions without adding a query when cwd is omitted", async () => {
-		const fetch = fetchRecorder(response({ sessions: [] }));
-		const api = createAgentpaneApi({ fetch });
-
-		expect(await api.listSessions()).toEqual([]);
-		expect(fetch).toHaveBeenCalledWith(ROUTES.sessions, { method: "GET" });
+	it("sends an empty token while none is stored, for the server to refuse", () => {
+		const { socket } = setup();
+		socket.open();
+		expect(socket.sent[0]).toMatchObject({ cmd: "hello", token: "" });
 	});
 
-	it("creates a session with a JSON body and unwraps its live summary (D30)", async () => {
-		const session = { ...summary, status: "attached" as const, handle: "h1" };
-		const fetch = fetchRecorder(response({ session }, 201));
-		const api = createAgentpaneApi({ fetch });
-		const body = { cwd: "/work", backend: "pi" as const };
-
-		expect(await api.createSession(body)).toEqual(session);
-		expect(fetch).toHaveBeenCalledWith(ROUTES.sessions, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(body),
-		});
+	it("holds a request made while the socket opens, and sends it behind the hello", async () => {
+		const { api, socket } = setup({ token: () => "t" });
+		const listing = api.listSessions("/work");
+		expect(socket.sent).toEqual([]);
+		socket.open();
+		expect(socket.sent.map((frame) => frame["cmd"])).toEqual(["hello", "sessions/list"]);
+		expect(socket.sent[1]).toEqual({ id: expect.any(String), cmd: "sessions/list", cwd: "/work" });
+		reply(socket, { sessions: [summary] });
+		expect(await listing).toEqual([summary]);
 	});
 
-	it("attaches a session and unwraps its summary", async () => {
-		const fetch = fetchRecorder(response({ session: summary }));
-		const api = createAgentpaneApi({ fetch });
-
-		expect(await api.attach(ref)).toEqual(summary);
-		expect(fetch).toHaveBeenCalledWith(ROUTES.session(ref), {
-			method: "GET",
-		});
+	it("reports the open at the hello's reply, after the opening snapshots", () => {
+		const { socket, events } = setup();
+		socket.open();
+		socket.emit({ type: "sessions-changed" });
+		socket.deliver({ type: "reply", id: socket.sent[0]!["id"] as string, ok: true, result: null });
+		expect(events.log).toEqual(["event:sessions-changed", "open"]);
 	});
 
-	it("closes a session with a DELETE and resolves on no content", async () => {
-		const fetch = fetchRecorder(new Response(null, { status: 204 }));
-		const api = createAgentpaneApi({ fetch });
-
-		await expect(api.close(ref)).resolves.toBeUndefined();
-		expect(fetch).toHaveBeenCalledWith(ROUTES.session(ref), {
-			method: "DELETE",
-		});
+	it("sends each method as its command, naming a handle or a ref as D31 point 9 has it, and unwraps the result", async () => {
+		const { api, socket } = setup();
+		socket.open();
+		const fork = { ref: { backend: "pi" as const, id: "/tmp/fork.jsonl" }, handle: null };
+		const cases: [() => Promise<unknown>, Record<string, unknown>, unknown, unknown][] = [
+			[() => api.listSessions(), { cmd: "sessions/list" }, { sessions: [summary] }, [summary]],
+			[() => api.createSession({ cwd: "/work", backend: "pi" }), { cmd: "sessions/create", cwd: "/work", backend: "pi" }, { session: live }, live],
+			[() => api.attach(ref), { cmd: "sessions/attach", ref }, { session: live }, live],
+			[() => api.preview(ref), { cmd: "sessions/preview", ref }, { ref, turns: [] }, { ref, turns: [] }],
+			[() => api.editDraft({ text: "draft" }), { cmd: "draft/edit", text: "draft" }, { text: "edited" }, { text: "edited" }],
+			[() => api.abort("h1"), { cmd: "sessions/abort", handle: "h1" }, { queued: ["steer"] }, { queued: ["steer"] }],
+			[() => api.compact("h1"), { cmd: "sessions/compact", handle: "h1" }, null, undefined],
+			[() => api.close(ref), { cmd: "sessions/close", ref }, null, undefined],
+			[() => api.listModels("pi"), { cmd: "models/list", backend: "pi" }, { models: [] }, []],
+			[() => api.setModel("h1", "m"), { cmd: "sessions/setModel", handle: "h1", model: "m" }, null, undefined],
+			[() => api.setEffort("h1", "low"), { cmd: "sessions/setEffort", handle: "h1", effort: "low" }, null, undefined],
+			[() => api.setName("h1", "Bug hunt"), { cmd: "sessions/setName", handle: "h1", name: "Bug hunt" }, null, undefined],
+			[
+				() => api.forkPoints("h1"),
+				{ cmd: "sessions/forkPoints", handle: "h1" },
+				{ points: [], forkStopsTurn: true },
+				{ points: [], forkStopsTurn: true },
+			],
+			[() => api.fork("h1", { entryId: "e1" }), { cmd: "sessions/fork", handle: "h1", entryId: "e1" }, { ref: fork.ref }, fork.ref],
+			[
+				() => api.forkAndPrompt("h1", { index: 2, text: "again" }),
+				{ cmd: "sessions/forkAndPrompt", handle: "h1", index: 2, text: "again" },
+				{ session: live, disposition: "started" },
+				{ session: live, disposition: "started" },
+			],
+			[() => api.dismissError("h1", "e3"), { cmd: "sessions/dismissError", handle: "h1", errorId: "e3" }, null, undefined],
+		];
+		for (const [call, frame, result, expected] of cases) {
+			const answered = call();
+			expect(socket.sent.at(-1)).toEqual({ id: expect.any(String), ...frame });
+			reply(socket, result);
+			expect(await answered).toEqual(expected);
+		}
 	});
 
-	it("fetches a read-only preview by ref without a request body", async () => {
-		const preview = { ref, turns: [{ role: "user" as const, content: "hi" }] };
-		const fetch = fetchRecorder(response(preview));
-		const api = createAgentpaneApi({ fetch });
-
-		expect(await api.preview(ref)).toEqual(preview);
-		expect(fetch).toHaveBeenCalledWith(ROUTES.preview(ref), { method: "GET" });
-	});
-
-	// The controller bounds its background read by aborting it (OW-bilogo).
-	it("hands a preview's abort signal to the fetch", async () => {
-		const fetch = fetchRecorder(response({ ref, turns: [] }));
-		const api = createAgentpaneApi({ fetch });
-		const signal = new AbortController().signal;
-
-		await api.preview(ref, signal);
-		expect(fetch).toHaveBeenCalledWith(ROUTES.preview(ref), { method: "GET", signal });
-	});
-
-	it("prompts a session with a JSON body", async () => {
-		const fetch = fetchRecorder(new Response(null, { status: 202 }));
-		const api = createAgentpaneApi({ fetch });
-		const body = { text: "hello" };
-
-		await expect(api.prompt(ref, body)).resolves.toBeUndefined();
-		expect(fetch).toHaveBeenCalledWith(ROUTES.prompt(ref), {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(body),
-		});
-	});
-
-	it("answers a started prompt that named no handle with the session it attached (D30)", async () => {
-		const live = { ...summary, status: "attached" as const, handle: "h1" };
-		const fetch = fetchRecorder(response({ disposition: "started", session: live }, 202));
-		const api = createAgentpaneApi({ fetch });
-
-		expect(await api.prompt(ref, { text: "hello" })).toEqual({ disposition: "started", session: live });
-	});
-
-	it("names the session on the error a prompt refused after its attach answers with (D30)", async () => {
-		const attached = { ref, handle: "h1" };
-		const fetch = fetchRecorder(response({ error: "backend_refused", detail: "no", attached }, 400));
-		const api = createAgentpaneApi({ fetch });
-
-		const error = await api.prompt(ref, { text: "hello" }).catch((e: unknown) => e);
-
-		expect(error).toBeInstanceOf(ApiClientError);
-		expect(error).toMatchObject({ status: 400, code: "backend_refused", detail: "no", attached });
-	});
-
-	it("round-trips a draft through the external editor", async () => {
-		const fetch = fetchRecorder(response({ text: "edited" }));
-		const api = createAgentpaneApi({ fetch });
-
-		expect(await api.editDraft({ text: "original" })).toEqual({ text: "edited" });
-		expect(fetch).toHaveBeenCalledWith(ROUTES.editDraft, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ text: "original" }),
-		});
-	});
-
-	it("aborts a session without a request body or content type", async () => {
-		const fetch = fetchRecorder(new Response(null, { status: 204 }));
-		const api = createAgentpaneApi({ fetch });
-
-		await expect(api.abort(ref)).resolves.toBeUndefined();
-		expect(fetch).toHaveBeenCalledWith(ROUTES.abort(ref), {
-			method: "POST",
-		});
-	});
-
-	it("hands back the prompts a stop took out of the queue (OW-wisifo)", async () => {
-		const fetch = fetchRecorder(response({ queued: ["first steer", "second steer"] }));
-		const api = createAgentpaneApi({ fetch });
-
-		await expect(api.abort(ref)).resolves.toEqual({ queued: ["first steer", "second steer"] });
-	});
-
-	it("lists models for one backend and unwraps the response", async () => {
-		const models = [{ id: "opaque/id", label: "One" }];
-		const fetch = fetchRecorder(response({ models }));
-		const api = createAgentpaneApi({ fetch });
-
-		expect(await api.listModels("pi")).toEqual(models);
-		expect(fetch).toHaveBeenCalledWith(`${ROUTES.models}?backend=pi`, { method: "GET" });
-	});
-
-	it("sets a session model with a JSON body", async () => {
-		const fetch = fetchRecorder(new Response(null, { status: 204 }));
-		const api = createAgentpaneApi({ fetch });
-
-		await api.setModel(ref, "opaque/id");
-		expect(fetch).toHaveBeenCalledWith(ROUTES.model(ref), {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ model: "opaque/id" }),
-		});
-	});
-
-	it("lists a session's fork points, with whether a fork stops a running turn (OW-hezidi, D30)", async () => {
-		const points = [{ id: "entry-1", text: "first", index: 0 }, { id: "entry-2", text: "second", index: 2 }];
-		const fetch = fetchRecorder(response({ points, forkStopsTurn: true }));
-		const api = createAgentpaneApi({ fetch });
-
-		expect(await api.forkPoints(ref)).toEqual({ points, forkStopsTurn: true });
-		expect(fetch).toHaveBeenCalledWith(ROUTES.forkPoints(ref), { method: "GET" });
-	});
-
-	it("forks a session with a JSON body and unwraps the new conversation's ref (OW-hezidi)", async () => {
-		const forked: SessionRef = { backend: "codex", id: "thread-2" };
-		const fetch = fetchRecorder(response({ ref: forked }, 201));
-		const api = createAgentpaneApi({ fetch });
-		const body = { entryId: "entry-2" };
-
-		expect(await api.fork(ref, body)).toEqual(forked);
-		expect(fetch).toHaveBeenCalledWith(ROUTES.fork(ref), {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(body),
-		});
-	});
-
-	it("forks and prompts in one request, answering the fork's summary and the prompt's disposition (D30)", async () => {
-		const fork = { ...summary, ref: { backend: "pi" as const, id: "fork-1" }, handle: "h2" };
-		const fetch = fetchRecorder(response({ session: fork, disposition: "started" }, 201));
-		const api = createAgentpaneApi({ fetch });
-		const body = { index: 2, text: "again", images: [{ mimeType: "image/png", base64: "AAAA" }] };
-
-		expect(await api.forkAndPrompt(ref, body)).toEqual({ session: fork, disposition: "started" });
-		expect(fetch).toHaveBeenCalledWith(ROUTES.forkAndPrompt(ref), {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(body),
-		});
-	});
-
-	it("names the fork on the error a fork-and-prompt refused after forking answers with (D30)", async () => {
-		const fork = { ref: { backend: "pi" as const, id: "fork-1" }, handle: "h2" };
-		const fetch = fetchRecorder(response({ error: "backend_refused", detail: "no", fork }, 400));
-		const api = createAgentpaneApi({ fetch });
-
-		const error = await api.forkAndPrompt(ref, { index: 0, text: "again" }).catch((e: unknown) => e);
-		expect(error).toBeInstanceOf(ApiClientError);
-		expect(error).toMatchObject({ status: 400, code: "backend_refused", detail: "no", fork });
-	});
-
-	it("dismisses a session's error by DELETE, naming the error it dismisses (OW-bipume)", async () => {
-		const fetch = fetchRecorder(new Response(null, { status: 204 }));
-		const api = createAgentpaneApi({ fetch });
-		const ref = { backend: "pi", id: "/a b.jsonl" } as const;
-
-		await expect(api.dismissError(ref, "e3")).resolves.toBeUndefined();
-		expect(fetch).toHaveBeenCalledWith(ROUTES.error(ref), {
-			method: "DELETE",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ errorId: "e3" }),
-		});
-	});
-
-	it("turns a JSON API error into an ApiClientError", async () => {
-		const fetch = fetchRecorder(response({ error: "not_found", detail: "missing session" }, 404));
-		const api = createAgentpaneApi({ fetch });
-
-		const error = await api.listSessions().catch((reason: unknown) => reason);
-		expect(error).toBeInstanceOf(ApiClientError);
-		expect(error).toMatchObject({
-			status: 404,
-			code: "not_found",
-			detail: "missing session",
-		});
-	});
-
-	it("retains the HTTP status for a non-JSON API error", async () => {
-		const fetch = fetchRecorder(new Response("upstream unavailable", { status: 502 }));
-		const api = createAgentpaneApi({ fetch });
-
-		const error = await api.listSessions().catch((reason: unknown) => reason);
-		expect(error).toBeInstanceOf(ApiClientError);
-		expect(error).toMatchObject({ status: 502 });
-		expect((error as Error).message).toContain("502");
-	});
-
-	it("routes valid SSE messages and lifecycle callbacks", () => {
-		let connection: FakeEventConnection | undefined;
-		const openEvents = vi.fn((url: string, handlers: EventHandlers) => {
-			connection = new FakeEventConnection(url, handlers);
-			return connection;
-		});
-		const api = createAgentpaneApi({ fetch: fetchRecorder(), openEvents });
-		const handlers: EventHandlers = {
-			onEvent: vi.fn(),
-			onOpen: vi.fn(),
-			onDisconnect: vi.fn(),
-			onMalformed: vi.fn(),
-		};
-
-		const returned = api.connect(handlers);
-		const event: ServerEvent = { type: "sessions-changed" };
-		connection?.emitMessage(JSON.stringify(event));
-		connection?.emitOpen();
-		connection?.emitError();
-
-		expect(openEvents).toHaveBeenCalledWith(ROUTES.events, handlers);
-		expect(handlers.onEvent).toHaveBeenCalledWith(event);
-		expect(handlers.onOpen).toHaveBeenCalledOnce();
-		expect(handlers.onDisconnect).toHaveBeenCalledOnce();
-		expect(returned).toBe(connection);
-	});
-
-	it("maps native EventSource lifecycle callbacks and closes the source", () => {
-		vi.stubGlobal("EventSource", FakeNativeEventSource);
-		const api = createAgentpaneApi({ fetch: fetchRecorder() });
-		const onOpen = vi.fn();
-		const onDisconnect = vi.fn();
-		const onMalformed = vi.fn();
-		const connection = api.connect({
-			onEvent: vi.fn(),
-			onOpen,
-			onDisconnect,
-			onMalformed,
-		});
-
-		FakeNativeEventSource.instance?.emitOpen();
-		FakeNativeEventSource.instance?.emitError();
-		FakeNativeEventSource.instance?.emitMessage("{oops");
-		connection.close();
-
-		expect(onOpen).toHaveBeenCalledOnce();
-		expect(onDisconnect).toHaveBeenCalledOnce();
-		expect(onMalformed).toHaveBeenCalledWith(expect.any(Error));
-		expect(FakeNativeEventSource.instance?.closed).toBe(true);
-		vi.unstubAllGlobals();
-	});
-
-	// Measured in Chromium 151.0.7922.34 on 2026-09-16 (`e2e/event-stream.spec.ts`):
-	// a drop the browser is already retrying reports `readyState === CONNECTING`,
-	// while a 404 or a wrong content type leaves the source at `CLOSED`, where no
-	// `onopen` will ever follow. The controller rebuilds on the second and waits
-	// on the first, so the flag carried here is the whole of what it can tell
-	// them apart by (OW-dekuri).
-	it("reports whether the native source is fatally closed at the disconnect", () => {
-		vi.stubGlobal("EventSource", FakeNativeEventSource);
-		const api = createAgentpaneApi({ fetch: fetchRecorder() });
-		const onDisconnect = vi.fn();
-		api.connect({ onEvent: vi.fn(), onOpen: vi.fn(), onDisconnect, onMalformed: vi.fn() });
-
-		FakeNativeEventSource.instance?.emitError(FakeNativeEventSource.CONNECTING);
-		expect(onDisconnect).toHaveBeenLastCalledWith(false);
-
-		FakeNativeEventSource.instance?.emitError(FakeNativeEventSource.CLOSED);
-		expect(onDisconnect).toHaveBeenLastCalledWith(true);
-		vi.unstubAllGlobals();
-	});
-
-	it("does not report an onEvent exception as malformed JSON", () => {
-		vi.stubGlobal("EventSource", FakeNativeEventSource);
-		const api = createAgentpaneApi({ fetch: fetchRecorder() });
-		const consumerError = new Error("render failed");
-		const onEvent = vi.fn(() => {
-			throw consumerError;
-		});
-		const onMalformed = vi.fn();
-		api.connect({
-			onEvent,
-			onOpen: vi.fn(),
-			onDisconnect: vi.fn(),
-			onMalformed,
-		});
-
-		expect(() => FakeNativeEventSource.instance?.emitMessage('{"type":"sessions-changed"}')).toThrow(
-			consumerError,
+	it("covers every method of the api but connect", () => {
+		const methods = Object.keys(createAgentpaneApi({ openSocket: (path) => new FakeSocket(path) })).sort();
+		expect(methods).toEqual(
+			[
+				"abort", "attach", "close", "compact", "connect", "createSession", "dismissError", "editDraft", "fork",
+				"forkAndPrompt", "forkPoints", "listModels", "listSessions", "preview", "prompt", "setEffort", "setModel", "setName",
+			].sort(),
 		);
-		expect(onMalformed).not.toHaveBeenCalled();
-		vi.unstubAllGlobals();
-	});
-});
-
-/**
- * One call of every method that makes a request: all of `AgentpaneApi` but
- * `connect`, which opens the event stream and no `fetch`. Typed so that a
- * method added to the interface and missing here fails the typecheck, and
- * checked against the built object at runtime so it fails the run as well.
- */
-const everyRequest: Record<Exclude<keyof AgentpaneApi, "connect">, (api: AgentpaneApi) => Promise<unknown>> = {
-	listSessions: (api) => api.listSessions(),
-	createSession: (api) => api.createSession({ cwd: "/work", backend: "pi" }),
-	attach: (api) => api.attach(ref),
-	preview: (api) => api.preview(ref),
-	prompt: (api) => api.prompt(ref, { text: "hello" }),
-	editDraft: (api) => api.editDraft({ text: "draft" }),
-	abort: (api) => api.abort(ref),
-	compact: (api) => api.compact(ref),
-	close: (api) => api.close(ref),
-	listModels: (api) => api.listModels("pi"),
-	setModel: (api) => api.setModel(ref, "opaque/id"),
-	setEffort: (api) => api.setEffort(ref, "high"),
-	setName: (api) => api.setName(ref, "a name"),
-	forkPoints: (api) => api.forkPoints(ref),
-	fork: (api) => api.fork(ref, { entryId: "entry-1" }),
-	forkAndPrompt: (api) => api.forkAndPrompt(ref, { index: 0, text: "again" }),
-	dismissError: (api) => api.dismissError(ref, "e1"),
-};
-
-/** A fetch answering every call with a fresh `status` response, recording what each was sent. */
-function answeringFetch(status: number) {
-	const fetch = vi.fn<(...args: Parameters<typeof globalThis.fetch>) => Promise<Response>>(async () => response({ error: "unauthorized" }, status));
-	return fetch;
-}
-
-function authorizationOf(init: RequestInit | undefined): string | null {
-	return new Headers(init?.headers).get("authorization");
-}
-
-describe("agentpane API token", () => {
-	it("has a table entry for every method but connect", () => {
-		const api = createAgentpaneApi({ fetch: fetchRecorder() });
-		expect(Object.keys(everyRequest).sort()).toEqual(Object.keys(api).filter((name) => name !== "connect").sort());
 	});
 
-	it.each(Object.entries(everyRequest))("%s sends the stored token as its bearer", async (_name, call) => {
-		const fetch = answeringFetch(200);
-		const api = createAgentpaneApi({ fetch: fetch as unknown as typeof globalThis.fetch, token: () => "s3cret" });
+	it("prompts by the handle where the body names one, and by the ref only where it does not (D30)", async () => {
+		const { api, socket } = setup();
+		socket.open();
+		const byHandle = api.prompt(ref, { text: "hi", priorErrorId: null, handle: "h1" });
+		expect(socket.sent.at(-1)).toEqual({ id: expect.any(String), cmd: "sessions/prompt", text: "hi", priorErrorId: null, handle: "h1" });
+		reply(socket, { disposition: "started" });
+		expect(await byHandle).toEqual({ disposition: "started" });
 
-		await call(api);
-		expect(fetch).toHaveBeenCalledOnce();
-		expect(authorizationOf(fetch.mock.calls[0]![1])).toBe("Bearer s3cret");
+		const byRef = api.prompt(ref, { text: "hi" });
+		expect(socket.sent.at(-1)).toEqual({ id: expect.any(String), cmd: "sessions/prompt", text: "hi", ref });
+		reply(socket, { disposition: "started", session: live });
+		expect(await byRef).toEqual({ disposition: "started", session: live });
 	});
 
-	it.each(Object.entries(everyRequest))("%s sends no authorization header while no token is stored", async (_name, call) => {
-		const fetch = answeringFetch(200);
-		const api = createAgentpaneApi({ fetch: fetch as unknown as typeof globalThis.fetch, token: () => null });
-
-		await call(api);
-		expect(fetch).toHaveBeenCalledOnce();
-		expect(authorizationOf(fetch.mock.calls[0]![1])).toBeNull();
-	});
-
-	it.each(Object.entries(everyRequest))("%s surfaces a 401 as an ApiClientError and reports it", async (_name, call) => {
-		const fetch = answeringFetch(401);
-		const onUnauthorized = vi.fn();
-		const api = createAgentpaneApi({ fetch: fetch as unknown as typeof globalThis.fetch, token: () => "stale", onUnauthorized });
-
-		const error = await call(api).catch((reason: unknown) => reason);
+	it("rejects a refusal with its code, detail, fork and attached", async () => {
+		const { api, socket } = setup();
+		socket.open();
+		const fork = { ref: { backend: "pi" as const, id: "/tmp/fork.jsonl" }, handle: "h2" };
+		const refused = api.forkAndPrompt("h1", { index: 0, text: "x" });
+		socket.deliver({ type: "reply", id: socket.sent.at(-1)!["id"] as string, ok: false, code: "backend_refused", detail: "no", fork });
+		const error = await refused.catch((thrown: unknown) => thrown);
 		expect(error).toBeInstanceOf(ApiClientError);
-		expect(error).toMatchObject({ status: 401 });
+		expect(error).toMatchObject({ code: "backend_refused", detail: "no", message: "no", fork, attached: undefined });
+	});
+
+	it("settles replies by id, whatever order they come in", async () => {
+		const { api, socket } = setup();
+		socket.open();
+		const first = api.listModels("pi");
+		const firstId = socket.sent.at(-1)!["id"] as string;
+		const second = api.listModels("codex");
+		const secondId = socket.sent.at(-1)!["id"] as string;
+		socket.deliver({ type: "reply", id: secondId, ok: true, result: { models: [{ id: "b", label: "B", efforts: [], defaultEffort: null }] } });
+		socket.deliver({ type: "reply", id: firstId, ok: true, result: { models: [] } });
+		expect(await first).toEqual([]);
+		expect((await second).map((model) => model.id)).toEqual(["b"]);
+	});
+
+	it("hands each event to onEvent as it arrives, ahead of a reply's continuation", async () => {
+		const { api, socket, events } = setup();
+		socket.open();
+		const attaching = api.attach(ref).then(() => events.log.push("attached"));
+		socket.emit({ type: "sessions-changed" });
+		reply(socket, { session: live });
+		await attaching;
+		expect(events.log).toEqual(["event:sessions-changed", "attached"]);
+	});
+
+	it("reports a frame that is not one the server writes as malformed, and goes on", async () => {
+		const { api, socket, events } = setup();
+		socket.open();
+		socket.deliver("not json");
+		socket.deliver(JSON.stringify({ type: "something" }));
+		const listing = api.listSessions();
+		reply(socket, { sessions: [] });
+		expect(await listing).toEqual([]);
+		expect(events.onMalformed).toHaveBeenCalledTimes(2);
+	});
+
+	it("settles a request written before a close as the connection lost, then reports the disconnect (D31 point 6)", async () => {
+		const { api, socket, events } = setup();
+		socket.open();
+		const prompt = api.prompt(ref, { text: "hi", handle: "h1" });
+		const outcome = prompt.catch((thrown: unknown) => {
+			events.log.push("rejected");
+			return thrown;
+		});
+		socket.drop(1006);
+		expect(await outcome).toBeInstanceOf(ConnectionLostError);
+		expect(events.log).toEqual(["disconnect", "rejected"]);
+		expect(events.onDisconnect).toHaveBeenCalledOnce();
+	});
+
+	it("refuses a request held for a socket that never opened as unreachable, since it was never written", async () => {
+		const { api, socket, events } = setup();
+		const listing = api.listSessions();
+		socket.drop(1006);
+		const error = await listing.catch((thrown: unknown) => thrown);
+		expect(error).toBeInstanceOf(ApiClientError);
+		expect(error).toMatchObject({ code: "unreachable" });
+		expect(events.onDisconnect).toHaveBeenCalledOnce();
+		expect(events.onOpen).not.toHaveBeenCalled();
+	});
+
+	it("refuses a request made with no socket up as unreachable, and sends nothing", async () => {
+		const sockets: FakeSocket[] = [];
+		const api = createAgentpaneApi({ openSocket: (path) => sockets[sockets.push(new FakeSocket(path)) - 1]! });
+		await expect(api.listSessions()).rejects.toMatchObject({ code: "unreachable" });
+
+		api.connect(handlers());
+		sockets[0]!.open();
+		sockets[0]!.drop(1006);
+		await expect(api.listSessions()).rejects.toMatchObject({ code: "unreachable" });
+		expect(sockets[0]!.commands()).toEqual([]);
+	});
+
+	it("sends on the socket a reconnect opened, once the last has closed", async () => {
+		const { api, sockets, socket, events } = setup();
+		socket.open();
+		socket.drop(1006);
+		api.connect(events);
+		const next = sockets.at(-1)!;
+		expect(next).not.toBe(socket);
+		next.open();
+		const listing = api.listSessions();
+		expect(next.commands().map((frame) => frame["cmd"])).toEqual(["sessions/list"]);
+		reply(next, { sessions: [] });
+		expect(await listing).toEqual([]);
+	});
+
+	it("at a close for a refused token, tells onUnauthorized and refuses what it held as unauthorized", async () => {
+		const onUnauthorized = vi.fn();
+		const { api, socket, events } = setup({ onUnauthorized });
+		socket.open();
+		const listing = api.listSessions();
+		socket.drop(SOCKET_CLOSE.unauthorized, "the first frame must be a hello carrying the token");
+		await expect(listing).rejects.toMatchObject({ code: "unauthorized" });
 		expect(onUnauthorized).toHaveBeenCalledOnce();
+		expect(events.onDisconnect).toHaveBeenCalledOnce();
 	});
 
-	it("keeps a request's own headers beside the token", async () => {
-		const fetch = answeringFetch(200);
-		const api = createAgentpaneApi({ fetch: fetch as unknown as typeof globalThis.fetch, token: () => "s3cret" });
-
-		await api.setName(ref, "a name");
-		const headers = new Headers(fetch.mock.calls[0]![1]?.headers);
-		expect(headers.get("content-type")).toBe("application/json");
-		expect(headers.get("authorization")).toBe("Bearer s3cret");
+	it("refuses a frame over the server's limit before sending it (D31 point 8)", async () => {
+		const { api, socket } = setup();
+		socket.open();
+		const text = "x".repeat(MAX_SOCKET_FRAME_BYTES);
+		await expect(api.prompt(ref, { text, handle: "h1" })).rejects.toMatchObject({ code: "frame_too_large" });
+		expect(socket.commands()).toEqual([]);
+		// Three bytes a unit, under the limit in units and over it in bytes.
+		const wide = "€".repeat(Math.ceil(MAX_SOCKET_FRAME_BYTES / 3) + 1);
+		await expect(api.prompt(ref, { text: wide, handle: "h1" })).rejects.toMatchObject({ code: "frame_too_large" });
+		expect(socket.commands()).toEqual([]);
 	});
 
-	it("reads the token at each request, so a token stored later is sent", async () => {
-		const fetch = answeringFetch(200);
-		let stored: string | null = null;
-		const api = createAgentpaneApi({ fetch: fetch as unknown as typeof globalThis.fetch, token: () => stored });
+	it("abandons a preview its signal aborts, and ignores the reply that follows", async () => {
+		const { api, socket } = setup();
+		socket.open();
+		const abort = new AbortController();
+		const preview = api.preview(ref, abort.signal);
+		const id = socket.sent.at(-1)!["id"] as string;
+		abort.abort(new Error("superseded"));
+		await expect(preview).rejects.toThrow("superseded");
+		socket.deliver({ type: "reply", id, ok: true, result: { ref, turns: [] } });
+		await flush();
+	});
 
-		await api.listSessions();
-		stored = "pasted";
-		await api.listSessions();
-		expect(fetch.mock.calls.map(([, init]) => authorizationOf(init))).toEqual([null, "Bearer pasted"]);
+	it("closes from the client's end without reporting a disconnect, the requests out lost", async () => {
+		const { api, socket, events, connection } = setup();
+		socket.open();
+		const listing = api.listSessions();
+		connection.close();
+		await expect(listing).rejects.toBeInstanceOf(ConnectionLostError);
+		expect(socket.closedWith).toEqual({ code: 1000, reason: "the client is leaving" });
+		socket.drop(1000);
+		expect(events.onDisconnect).not.toHaveBeenCalled();
 	});
 });
-
-class FakeEventConnection implements EventConnection {
-	closed = false;
-
-	constructor(
-		readonly url: string,
-		private readonly handlers: EventHandlers,
-	) {}
-
-	emitMessage(data: string): void {
-		this.handlers.onEvent(JSON.parse(data) as ServerEvent);
-	}
-
-	emitOpen(): void {
-		this.handlers.onOpen();
-	}
-
-	emitError(fatal = false): void {
-		this.handlers.onDisconnect(fatal);
-	}
-
-	close(): void {
-		this.closed = true;
-	}
-}
-
-class FakeNativeEventSource {
-	static instance: FakeNativeEventSource | undefined;
-	/** The two `readyState` values an `onerror` is observed at -- see `api.ts` and OW-dekuri. */
-	static readonly CONNECTING = 0;
-	static readonly CLOSED = 2;
-	onmessage: ((event: { data: string }) => void) | null = null;
-	onopen: (() => void) | null = null;
-	onerror: (() => void) | null = null;
-	closed = false;
-	readyState: number = FakeNativeEventSource.CONNECTING;
-
-	constructor(readonly url: string) {
-		FakeNativeEventSource.instance = this;
-	}
-
-	emitMessage(data: string): void {
-		this.onmessage?.({ data });
-	}
-
-	emitOpen(): void {
-		this.onopen?.();
-	}
-
-	emitError(readyState: number = FakeNativeEventSource.CONNECTING): void {
-		this.readyState = readyState;
-		this.onerror?.();
-	}
-
-	close(): void {
-		this.closed = true;
-	}
-}

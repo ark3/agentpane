@@ -11,7 +11,7 @@
  *
  * Each event is dispatched inside `flushSync`, so the measured interval covers
  * reduce -> publish -> derive -> DOM update rather than just the reducer. In
- * the shipped client every event arrives in its own EventSource callback and
+ * the shipped client every event arrives in its own socket message handler and
  * gets its own flush, so this is the same work, merely made synchronous enough
  * to time.
  */
@@ -201,10 +201,10 @@ const api: AgentpaneApi = {
 	 * measured: `Transcript.svelte` draws an Edit control only on the indices
 	 * this set names, so an empty answer renders one button per user message
 	 * fewer than the app this harness stands for (OW-sibebe). Answered per
-	 * `ref`, because this harness drives several sessions at once.
+	 * handle, because this harness drives several sessions at once.
 	 */
-	async forkPoints(ref: SessionRef) {
-		const id = ref.id.split("/").pop()!.replace(".jsonl", "");
+	async forkPoints(handle: string) {
+		const id = handle.slice("h-".length);
 		const points: ForkPoint[] = [];
 		sessionOf(id).messages.forEach((message, index) => {
 			if (message.role === "user") points.push({ id: `entry-${index}`, text: "", index });
@@ -216,8 +216,8 @@ const api: AgentpaneApi = {
 	async forkAndPrompt(): Promise<never> {
 		throw new Error("this harness sends no edit");
 	},
-	async fork(ref: SessionRef) {
-		return ref;
+	async fork(handle: string) {
+		return refFor(handle.slice("h-".length));
 	},
 	async dismissError() {},
 	connect(next: EventHandlers): EventConnection {

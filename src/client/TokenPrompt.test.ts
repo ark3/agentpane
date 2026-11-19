@@ -1,54 +1,56 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ROUTES } from "$shared/protocol.ts";
+import { beforeEach, describe, expect, it } from "vitest";
+import { SOCKET_CLOSE } from "$shared/protocol.ts";
 import { createAgentpaneApi } from "./api.ts";
 import { createController } from "./controller.ts";
+import { FakeSocket } from "./test-support.ts";
 import TokenPrompt from "./TokenPrompt.svelte";
 import { createTokenGate, TOKEN_STORAGE_KEY } from "./token.ts";
 
-function json(body: unknown, status = 200): Response {
-	return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-}
-
-const unauthorized = () => json({ error: "unauthorized", detail: "this API needs its bearer token" }, 401);
-
 /**
- * The real api, controller and gate, wired as `main.ts` wires them, over a
- * fake `fetch` answering each listing from `answers` in turn.
+ * The real api, controller and gate, wired as `main.ts` wires them, over fake
+ * sockets that accept a `hello` carrying `accepted` and close the rest
+ * `SOCKET_CLOSE.unauthorized`, as the server does (D31 point 5).
  */
-function mountWired(answers: Array<() => Response>) {
-	const fetch = vi.fn<(...args: Parameters<typeof globalThis.fetch>) => Promise<Response>>(async () => {
-		const next = answers.shift();
-		if (!next) throw new Error("unexpected request");
-		return next();
-	});
+function mountWired(accepted: { token: string }) {
+	const sockets: FakeSocket[] = [];
 	const gate = createTokenGate(localStorage);
 	const api = createAgentpaneApi({
-		fetch: fetch as unknown as typeof globalThis.fetch,
-		openEvents: () => ({ close() {} }),
+		openSocket: (path) => {
+			const socket = new FakeSocket(path, (from, frame) => {
+				if (frame["cmd"] === "hello") {
+					if (frame["token"] === accepted.token) from.deliver({ type: "reply", id: frame["id"] as string, ok: true, result: null });
+					else from.drop(SOCKET_CLOSE.unauthorized, "the first frame must be a hello carrying the token");
+				} else if (frame["cmd"] === "sessions/list") {
+					from.deliver({ type: "reply", id: frame["id"] as string, ok: true, result: { sessions: [] } });
+				}
+			});
+			sockets.push(socket);
+			queueMicrotask(() => socket.open());
+			return socket;
+		},
 		token: gate.token,
 		onUnauthorized: gate.unauthorized,
 	});
 	const controller = createController(api);
-	render(TokenPrompt, { gate, onStored: () => void controller.refreshSessions() });
-	return { fetch, controller };
+	render(TokenPrompt, { gate, onStored: () => controller.reconnect() });
+	return { sockets, controller };
 }
 
-function authorizationOf(init: RequestInit | undefined): string | null {
-	return new Headers(init?.headers).get("authorization");
-}
+const hellos = (sockets: FakeSocket[]) => sockets.map((socket) => socket.sent.find((frame) => frame["cmd"] === "hello")?.["token"]);
 
 describe("TokenPrompt", () => {
 	beforeEach(() => localStorage.clear());
 
-	it("asks for the token on a 401, stores the paste, retries the listing with it, and asks again on a later 401", async () => {
-		const { fetch, controller } = mountWired([unauthorized, () => json({ sessions: [] }), unauthorized]);
+	it("asks for the token when the server refuses the hello, stores the paste, connects with it at once, and asks again on a later refusal", async () => {
+		const accepted = { token: "pasted-token" };
+		const { sockets, controller } = mountWired(accepted);
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
 		await controller.start();
 		const dialog = await screen.findByRole("dialog");
 		expect(dialog).toHaveTextContent("~/.ssh/agentpane-token");
-		expect(authorizationOf(fetch.mock.calls[0]![1])).toBeNull();
+		expect(hellos(sockets)).toEqual([""]);
 		// A text field, so the owner sees what they pasted.
 		expect(screen.getByLabelText("API token")).toHaveAttribute("type", "text");
 
@@ -56,15 +58,16 @@ describe("TokenPrompt", () => {
 		await fireEvent.click(screen.getByRole("button", { name: "Save token" }));
 
 		expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe("pasted-token");
-		await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-		expect(fetch.mock.calls[1]![0]).toBe(ROUTES.sessions);
-		expect(authorizationOf(fetch.mock.calls[1]![1])).toBe("Bearer pasted-token");
+		await waitFor(() => expect(controller.getView().connection).toBe("connected"));
+		expect(hellos(sockets)).toEqual(["", "pasted-token"]);
 		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
-		// The token was rotated on the server: the stored one is refused.
-		await controller.refreshSessions();
-		expect(authorizationOf(fetch.mock.calls[2]![1])).toBe("Bearer pasted-token");
+		// The token was rotated on the server and the server restarted: the stored one is refused.
+		accepted.token = "rotated";
+		sockets.at(-1)!.drop(1006);
+		controller.reconnect();
 		await screen.findByRole("dialog");
+		expect(hellos(sockets)).toEqual(["", "pasted-token", "pasted-token"]);
 		// Asked again with an empty field: the stored token is never shown.
 		expect(screen.getByLabelText("API token")).toHaveValue("");
 		expect(document.body).not.toHaveTextContent("pasted-token");
@@ -72,7 +75,7 @@ describe("TokenPrompt", () => {
 	});
 
 	it("stores nothing for a blank paste", async () => {
-		const { controller } = mountWired([unauthorized]);
+		const { controller } = mountWired({ token: "pasted-token" });
 		await controller.start();
 		await screen.findByRole("dialog");
 

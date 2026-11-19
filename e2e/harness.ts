@@ -8,9 +8,9 @@
  * API, and those are what the specs beside this file are claims about.
  *
  * The synthetic backend implements the `AgentpaneApi` port directly rather
- * than mocking `fetch`/`EventSource`. That layer is already covered by
+ * than mocking the socket. That layer is already covered by
  * `api.test.ts` and is not what any of these specs are about; what matters is
- * that the *controller* sees a real SSE-shaped event sequence in real time,
+ * that the *controller* sees a real event sequence in real time,
  * which it does. The event ordering below (echoed user message, assistant
  * placeholder, only then `status:true`) is the ordering a live Pi turn was
  * observed to produce -- see OW-27's close note.
@@ -20,7 +20,7 @@
  * This is the harness under the browser UI suite -- follow mode, the nav rail,
  * the composer's action row, the assistant footer row, the edit-and-fork
  * chrome, and the turn-done favicon badge -- but it has no server: no backend,
- * no subprocess, and no production HTTP/SSE path. Crossing that boundary is
+ * no subprocess, and no production socket. Crossing that boundary is
  * OW-24's job. Run `bunx playwright test --list` for what the specs beside it
  * cover.
  */

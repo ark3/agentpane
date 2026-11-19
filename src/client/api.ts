@@ -1,27 +1,51 @@
+/**
+ * The client's one connection to the server: a WebSocket that carries every
+ * command and query in, and their replies and every event out, in the order
+ * the server wrote them (D31). The browser and the Emacs helper both talk to
+ * the server through the `AgentpaneApi` this builds, each adding only its own
+ * edge: the browser its reconnect and its token prompt, the helper its exit.
+ *
+ * One function handles what arrives, an event or a reply, in arrival order,
+ * and does a frame's work before it returns (D31 point 4): an event reaches
+ * `onEvent` there, and the `hello`'s reply `onOpen`. Settling a request's
+ * promise is the one thing it defers, and needs nothing more: a reply's
+ * handler writes no session state (D28), and may take the state it reads to
+ * be at least as new as the reply (D31 point 3), which a later event handled
+ * before the continuation only makes truer.
+ *
+ * How a request ends, beside its reply:
+ *
+ * - Never written, so it ran nothing: one made with no socket up, or still
+ *   waiting for the socket to open when it closed, rejects with
+ *   `ApiClientError` code `unreachable`; one whose frame is over the server's
+ *   limit, which would have cost the whole socket (D31 point 8), with
+ *   `frame_too_large`.
+ * - Written and unanswered when the socket closed: `ConnectionLostError`,
+ *   its outcome unknown (D31 point 6). At a close for a refused token the
+ *   server ran nothing (D31 point 5), so each rejects with `unauthorized`
+ *   instead.
+ */
+
 import {
+	MAX_SOCKET_FRAME_BYTES,
 	ROUTES,
+	SOCKET_CLOSE,
 	type AbortResponse,
 	type ApiError,
-	type AttachSessionResponse,
+	type CommandName,
+	type Commands,
 	type CreateSessionRequest,
-	type CreateSessionResponse,
-	type DismissErrorRequest,
 	type EditDraftRequest,
 	type EditDraftResponse,
 	type ForkAndPromptRequest,
 	type ForkAndPromptResponse,
 	type ForkPointsResponse,
 	type ForkRequest,
-	type ForkResponse,
-	type ListSessionsResponse,
 	type ModelInfo,
-	type ModelsResponse,
 	type PromptRequest,
 	type PromptResponse,
 	type ServerEvent,
-	type SetEffortRequest,
-	type SetModelRequest,
-	type SetNameRequest,
+	type ServerFrame,
 	type SessionPreviewResponse,
 	type SessionRef,
 	type LiveSessionSummary,
@@ -29,48 +53,62 @@ import {
 } from "$shared/protocol.ts";
 
 export interface EventConnection {
+	/**
+	 * Close the socket from this end. Every request still out on it rejects as
+	 * the connection lost, and `onDisconnect` does not fire: the caller is the
+	 * one leaving.
+	 */
 	close(): void;
 }
 
 export interface EventHandlers {
 	onEvent(event: ServerEvent): void;
+	/** The `hello` was answered: the opening snapshots have been handled, and the socket is up. */
 	onOpen(): void;
 	/**
-	 * `fatal` is the source having reached `CLOSED`, where the browser has given
-	 * up and no `onopen` can follow; an ordinary drop reports `CONNECTING`,
-	 * the browser's own retry already under way (OW-dekuri).
+	 * The socket closed, from the server's end or for want of one, or failed
+	 * to open. Every request still out on it has been settled first (D31
+	 * point 6); nothing reconnects but the caller.
 	 */
-	onDisconnect(fatal: boolean): void;
+	onDisconnect(): void;
 	onMalformed(error: Error): void;
 }
 
+/** The part of a `WebSocket` this module uses, so a test can pass its own. */
+export interface SocketLike {
+	send(data: string): void;
+	close(code?: number, reason?: string): void;
+	onopen: (() => void) | null;
+	onmessage: ((event: { data: unknown }) => void) | null;
+	onclose: ((event: { code: number; reason: string }) => void) | null;
+	onerror: (() => void) | null;
+}
+
 export interface ApiOptions {
-	fetch?: typeof globalThis.fetch;
-	openEvents?: (url: string, handlers: EventHandlers) => EventConnection;
+	/** Open a socket on the server's `path`; the default is the browser's `WebSocket` on its page's origin. */
+	openSocket?: (path: string) => SocketLike;
 	/**
-	 * The API token, read at each request and sent as its bearer; while it
-	 * answers null no `authorization` header is sent. Every request carries it
-	 * but the event stream's: an `EventSource` cannot set a header, and the
-	 * server exempts that route.
+	 * The API token, read at each connect and carried by its `hello`, the
+	 * socket's first frame (D31 point 5). While it answers null an empty one
+	 * is sent, which the server refuses.
 	 */
 	token?: () => string | null;
-	/** Told of every 401 an API request is answered with, before that request rejects with it. */
+	/** Told of a socket closed for a refused token, before its requests reject. */
 	onUnauthorized?: () => void;
 }
 
+/** The server refused a request, or this module refused to send it; either way it ran nothing. */
 export class ApiClientError extends Error {
-	readonly status: number;
-	readonly code: string | undefined;
+	readonly code: string;
 	readonly detail: string | undefined;
 	/** The fork a fork-and-prompt created before it failed (`ApiError.fork`, D30). */
 	readonly fork: ApiError["fork"];
 	/** The session a prompt naming no handle attached before it was refused (`ApiError.attached`, D30). */
 	readonly attached: ApiError["attached"];
 
-	constructor(status: number, code?: string, detail?: string, fork?: ApiError["fork"], attached?: ApiError["attached"]) {
-		super(detail ?? code ?? `HTTP ${status}`);
+	constructor(code: string, detail?: string, fork?: ApiError["fork"], attached?: ApiError["attached"]) {
+		super(detail ?? code);
 		this.name = "ApiClientError";
-		this.status = status;
 		this.code = code;
 		this.detail = detail;
 		this.fork = fork;
@@ -78,48 +116,63 @@ export class ApiClientError extends Error {
 	}
 }
 
+/** A request was written and the socket closed before its reply: whether the server acted on it is unknown (D31 point 6). */
+export class ConnectionLostError extends Error {
+	constructor() {
+		super("the connection to the agentpane server was lost");
+		this.name = "ConnectionLostError";
+	}
+}
+
+/**
+ * Every command on a live session names the handle the client holds for it,
+ * and is refused `not_attached` once that handle has ended (D31 point 9).
+ * Attach, preview, create, close and the listing name a ref.
+ */
 export interface AgentpaneApi {
 	listSessions(cwd?: string): Promise<SessionSummary[]>;
 	createSession(body: CreateSessionRequest): Promise<LiveSessionSummary>;
 	attach(ref: SessionRef): Promise<LiveSessionSummary>;
 	/**
 	 * Read-only, non-attaching transcript preview (OW-38): spawns nothing.
-	 * `signal` aborts the read, which then rejects (OW-bilogo).
+	 * `signal` abandons the read, which then rejects with its reason, and
+	 * whose reply is ignored (OW-bilogo).
 	 */
 	preview(ref: SessionRef, signal?: AbortSignal): Promise<SessionPreviewResponse>;
 	/**
-	 * Resolves with nothing for a prompt that started a turn, or joined one,
-	 * as it did before the outcome existed, so a caller or fake that ignores
-	 * it is unchanged; with the body for one the backend handled without
-	 * starting a turn for it, though an extension's own work may still arrive
-	 * on the stream (`PromptDisposition`, OW-dulipe). One that named no
-	 * handle always resolves with the body, naming the session it attached
+	 * Names `body.handle` where given, and `ref` only where it is not (D30).
+	 * Resolves with the body, which a fake may leave out for a prompt that
+	 * started a turn, as the HTTP route once answered one; the body says a
+	 * backend handled the prompt without starting a turn for it, though an
+	 * extension's own work may still arrive on the stream (`PromptDisposition`,
+	 * OW-dulipe). One that named no handle names the session it attached
 	 * (`PromptRequest.handle`, D30); a refusal after that attach rejects with
 	 * an `ApiClientError` whose `attached` names it.
 	 */
 	prompt(ref: SessionRef, body: PromptRequest): Promise<PromptResponse | void>;
 	editDraft(body: EditDraftRequest): Promise<EditDraftResponse>;
 	/**
-	 * Resolves with nothing for a stop that took nothing out of the backend's
-	 * queue, as it did before there was anything to return, so a caller or fake
-	 * that ignores it is unchanged; with the body for one that took out
-	 * prompts steered into the turn and not yet delivered (D16, OW-wisifo).
+	 * Resolves with the prompts the stop took out of the backend's queue,
+	 * steered into the turn and not yet delivered (D16, OW-wisifo); a fake
+	 * may resolve with nothing for a stop that took none.
 	 */
-	abort(ref: SessionRef): Promise<AbortResponse | void>;
-	compact(ref: SessionRef): Promise<void>;
+	abort(handle: string): Promise<AbortResponse | void>;
+	compact(handle: string): Promise<void>;
 	/**
 	 * Kill this session's subprocess and drop it from the server's table
 	 * (OW-tewave). The on-disk transcript survives, so the session comes back as
 	 * `detached` in the next listing -- unless nothing had reached disk, as for
 	 * a session created or forked here before its first turn, which leaves the
-	 * listing altogether (`SessionSummary.onDisk`).
+	 * listing altogether (`SessionSummary.onDisk`). Names a ref, since a close
+	 * can arrive while an attach is starting, before any handle exists
+	 * (ark3/agentpane#27).
 	 */
 	close(ref: SessionRef): Promise<void>;
 	listModels(backend: SessionRef["backend"]): Promise<ModelInfo[]>;
-	setModel(ref: SessionRef, model: string): Promise<void>;
-	setEffort(ref: SessionRef, effort: string): Promise<void>;
+	setModel(handle: string, model: string): Promise<void>;
+	setEffort(handle: string, effort: string): Promise<void>;
 	/** Name an attached session, written through to its backend (D27); the name returns in the listing. */
-	setName(ref: SessionRef, name: string): Promise<void>;
+	setName(handle: string, name: string): Promise<void>;
 	/**
 	 * The points a session can be forked at (OW-hezidi), each naming the
 	 * transcript index of the user message it forks at (OW-roveze).
@@ -133,185 +186,233 @@ export interface AgentpaneApi {
 	 * `PaneMessage` carries none of them, which is why the index exists.
 	 * Beside them, whether a fork of the session stops a running turn (D30).
 	 */
-	forkPoints(ref: SessionRef): Promise<ForkPointsResponse>;
+	forkPoints(handle: string): Promise<ForkPointsResponse>;
 	/** Fork at `entryId`; the ref it answers with is the new conversation, and the original survives. */
-	fork(ref: SessionRef, body: ForkRequest): Promise<SessionRef>;
+	fork(handle: string, body: ForkRequest): Promise<SessionRef>;
 	/**
 	 * Fork at the user message `body.index` names, attach the fork and prompt
 	 * it, as one server operation (D30). A refusal after the fork exists
 	 * rejects with an `ApiClientError` whose `fork` names it.
 	 */
-	forkAndPrompt(ref: SessionRef, body: ForkAndPromptRequest): Promise<ForkAndPromptResponse>;
+	forkAndPrompt(handle: string, body: ForkAndPromptRequest): Promise<ForkAndPromptResponse>;
 	/**
 	 * Dismiss the session's turn error on the server, so no later snapshot
 	 * brings it back (OW-bipume). `errorId` names the error dismissed, as the
 	 * wire named the one shown; the server keeps a newer one (OW-jokoto).
 	 */
-	dismissError(ref: SessionRef, errorId: string): Promise<void>;
+	dismissError(handle: string, errorId: string): Promise<void>;
+	/**
+	 * Open a socket, which every request goes on from here; a request made
+	 * while it is opening waits for it. Called again once the last has closed,
+	 * which is the caller's reconnect.
+	 */
 	connect(handlers: EventHandlers): EventConnection;
 }
 
+type Params<K extends CommandName> = Commands[K]["params"];
+type Result<K extends CommandName> = Commands[K]["result"];
+
+interface Pending {
+	resolve(result: unknown): void;
+	reject(error: Error): void;
+}
+
+/** One socket, from its open to its close. */
+interface Connection {
+	socket: SocketLike;
+	/** Frames written before the socket opened, sent behind the `hello` once it does. */
+	queued: { id: string; text: string }[];
+	opened: boolean;
+	closed: boolean;
+	pending: Map<string, Pending>;
+}
+
+const UNREACHABLE = "could not reach the agentpane server";
+
 export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
-	const fetchImpl = options.fetch ?? globalThis.fetch;
-	const openEvents = options.openEvents ?? defaultOpenEvents;
+	const openSocket = options.openSocket ?? defaultOpenSocket;
 	const token = options.token ?? (() => null);
 	const onUnauthorized = options.onUnauthorized ?? (() => {});
+	let current: Connection | null = null;
+	let lastId = 0;
 
-	/** Every request this module makes goes through here, so none goes out without the token. */
-	async function send(url: string, init: RequestInit): Promise<Response> {
-		const bearer = token();
-		const response = await fetchImpl(
-			url,
-			bearer === null
-				? init
-				: { ...init, headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${bearer}` } },
-		);
-		if (response.status === 401) onUnauthorized();
-		return response;
+	function request<K extends CommandName>(cmd: K, params: Params<K>, signal?: AbortSignal): Promise<Result<K>> {
+		const id = String(++lastId);
+		const text = JSON.stringify({ id, cmd, ...params });
+		const connection = current;
+		if (!connection || connection.closed) {
+			return Promise.reject(new ApiClientError("unreachable", UNREACHABLE));
+		}
+		if (tooLarge(text)) {
+			return Promise.reject(
+				new ApiClientError("frame_too_large", `the request is over the server's limit of ${MAX_SOCKET_FRAME_BYTES / (1024 * 1024)} MB`),
+			);
+		}
+		return new Promise<Result<K>>((resolve, reject) => {
+			if (signal?.aborted) {
+				reject(signal.reason);
+				return;
+			}
+			connection.pending.set(id, { resolve: resolve as (result: unknown) => void, reject });
+			signal?.addEventListener("abort", () => {
+				if (connection.pending.delete(id)) reject(signal.reason);
+			});
+			if (connection.opened) connection.socket.send(text);
+			else connection.queued.push({ id, text });
+		});
 	}
 
-	async function request<T>(url: string, init: RequestInit, decode: (body: unknown) => T): Promise<T> {
-		const response = await send(url, init);
-		if (!isSuccessful(response.status)) throw await toApiClientError(response);
-		return decode(await response.json());
-	}
+	function connect(handlers: EventHandlers): EventConnection {
+		const socket = openSocket(ROUTES.socket);
+		const connection: Connection = { socket, queued: [], opened: false, closed: false, pending: new Map() };
+		current = connection;
+		const helloId = String(++lastId);
 
-	async function requestNoContent(url: string, init: RequestInit): Promise<void> {
-		const response = await send(url, init);
-		if (!isSuccessful(response.status)) throw await toApiClientError(response);
+		/** Settle everything still out as `closedBy` says, and forget the socket. */
+		function settle(closedBy: "client" | "server", code?: number): void {
+			if (connection.closed) return;
+			connection.closed = true;
+			if (current === connection) current = null;
+			socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
+			const unauthorized = code === SOCKET_CLOSE.unauthorized;
+			if (unauthorized) onUnauthorized();
+			const unsent = new Set(connection.queued.map((frame) => frame.id));
+			for (const [id, pending] of connection.pending) {
+				pending.reject(
+					unauthorized
+						? new ApiClientError("unauthorized", "the server refused the API token")
+						: unsent.has(id)
+							? new ApiClientError("unreachable", UNREACHABLE)
+							: new ConnectionLostError(),
+				);
+			}
+			connection.pending.clear();
+			connection.queued = [];
+			if (closedBy === "server") handlers.onDisconnect();
+		}
+
+		socket.onopen = () => {
+			connection.opened = true;
+			socket.send(JSON.stringify({ id: helloId, cmd: "hello", token: token() ?? "" } satisfies { id: string; cmd: "hello" } & Params<"hello">));
+			for (const frame of connection.queued) socket.send(frame.text);
+			connection.queued = [];
+		};
+		socket.onmessage = ({ data }) => {
+			const frame = parseServerFrame(data);
+			if (!frame) {
+				handlers.onMalformed(new Error(`a malformed frame from the server: ${String(data).slice(0, 200)}`));
+				return;
+			}
+			if (frame.type === "event") {
+				handlers.onEvent(frame.event);
+				return;
+			}
+			if (frame.id === helloId) {
+				handlers.onOpen();
+				return;
+			}
+			const pending = connection.pending.get(frame.id);
+			if (!pending) return; // Abandoned by its signal.
+			connection.pending.delete(frame.id);
+			if (frame.ok) pending.resolve(frame.result);
+			else pending.reject(new ApiClientError(frame.code, frame.detail, frame.fork, frame.attached));
+		};
+		socket.onclose = ({ code }) => settle("server", code);
+		// An error is followed by a close, which settles; nothing to do here.
+		socket.onerror = () => {};
+
+		return {
+			close() {
+				settle("client");
+				socket.close(1000, "the client is leaving");
+			},
+		};
 	}
 
 	return {
-		listSessions(cwd) {
-			const query = cwd === undefined ? "" : `?cwd=${encodeURIComponent(cwd)}`;
-			return request(`${ROUTES.sessions}${query}`, { method: "GET" }, (body) => {
-				return (body as ListSessionsResponse).sessions;
-			});
+		async listSessions(cwd) {
+			return (await request("sessions/list", cwd === undefined ? {} : { cwd })).sessions;
 		},
-		createSession(body) {
-			return request(
-				ROUTES.sessions,
-				jsonRequest(body),
-				(response) => (response as CreateSessionResponse).session,
-			);
+		async createSession(body) {
+			return (await request("sessions/create", body)).session;
 		},
-		attach(ref) {
-			return request(ROUTES.session(ref), { method: "GET" }, (body) => {
-				return (body as AttachSessionResponse).session;
-			});
+		async attach(ref) {
+			return (await request("sessions/attach", { ref })).session;
 		},
 		preview(ref, signal) {
-			return request(ROUTES.preview(ref), { method: "GET", signal }, (body) => body as SessionPreviewResponse);
+			return request("sessions/preview", { ref }, signal);
 		},
-		async prompt(ref, body) {
-			const response = await send(ROUTES.prompt(ref), jsonRequest(body));
-			if (!isSuccessful(response.status)) throw await toApiClientError(response);
-			// The route answers a started prompt that named its handle 202 with no
-			// body, and a handled one, or any that named none, with a `PromptResponse`.
-			const text = await response.text();
-			if (text) return JSON.parse(text) as PromptResponse;
+		prompt(ref, { handle, ...body }) {
+			return request("sessions/prompt", handle === undefined ? { ...body, ref } : { ...body, handle });
 		},
 		editDraft(body) {
-			return request(ROUTES.editDraft, jsonRequest(body), (response) => response as EditDraftResponse);
+			return request("draft/edit", body);
 		},
-		async abort(ref) {
-			const response = await send(ROUTES.abort(ref), { method: "POST" });
-			if (!isSuccessful(response.status)) throw await toApiClientError(response);
-			// The route answers a stop that took nothing out 204 with no body, and
-			// one that did 200 with an `AbortResponse`.
-			if (response.status === 200) return (await response.json()) as AbortResponse;
+		abort(handle) {
+			return request("sessions/abort", { handle });
 		},
-		compact(ref) {
-			return requestNoContent(ROUTES.compact(ref), { method: "POST" });
+		async compact(handle) {
+			await request("sessions/compact", { handle });
 		},
-		close(ref) {
-			return requestNoContent(ROUTES.session(ref), { method: "DELETE" });
+		async close(ref) {
+			await request("sessions/close", { ref });
 		},
-		listModels(backend) {
-			return request(`${ROUTES.models}?backend=${encodeURIComponent(backend)}`, { method: "GET" }, (body) => {
-				return (body as ModelsResponse).models;
-			});
+		async listModels(backend) {
+			return (await request("models/list", { backend })).models;
 		},
-		setModel(ref, model) {
-			const body: SetModelRequest = { model };
-			return requestNoContent(ROUTES.model(ref), jsonRequest(body));
+		async setModel(handle, model) {
+			await request("sessions/setModel", { handle, model });
 		},
-		setEffort(ref, effort) {
-			const body: SetEffortRequest = { effort };
-			return requestNoContent(ROUTES.effort(ref), jsonRequest(body));
+		async setEffort(handle, effort) {
+			await request("sessions/setEffort", { handle, effort });
 		},
-		setName(ref, name) {
-			const body: SetNameRequest = { name };
-			return requestNoContent(ROUTES.name(ref), jsonRequest(body));
+		async setName(handle, name) {
+			await request("sessions/setName", { handle, name });
 		},
-		forkPoints(ref) {
-			return request(ROUTES.forkPoints(ref), { method: "GET" }, (body) => body as ForkPointsResponse);
+		forkPoints(handle) {
+			return request("sessions/forkPoints", { handle });
 		},
-		fork(ref, body) {
-			return request(ROUTES.fork(ref), jsonRequest(body), (response) => (response as ForkResponse).ref);
+		async fork(handle, body) {
+			return (await request("sessions/fork", { handle, ...body })).ref;
 		},
-		forkAndPrompt(ref, body) {
-			return request(ROUTES.forkAndPrompt(ref), jsonRequest(body), (response) => response as ForkAndPromptResponse);
+		forkAndPrompt(handle, body) {
+			return request("sessions/forkAndPrompt", { handle, ...body });
 		},
-		dismissError(ref, errorId) {
-			const body: DismissErrorRequest = { errorId };
-			return requestNoContent(ROUTES.error(ref), { ...jsonRequest(body), method: "DELETE" });
+		async dismissError(handle, errorId) {
+			await request("sessions/dismissError", { handle, errorId });
 		},
-		connect(handlers) {
-			return openEvents(ROUTES.events, handlers);
-		},
+		connect,
 	};
 }
 
-function jsonRequest(body: unknown): RequestInit {
-	return {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body),
-	};
+/**
+ * Whether `text` encodes past the server's frame limit. UTF-8 takes at most
+ * three bytes for each UTF-16 unit, so a frame under a third of the limit in
+ * units is not encoded to find out.
+ */
+function tooLarge(text: string): boolean {
+	if (text.length * 3 <= MAX_SOCKET_FRAME_BYTES) return false;
+	return new TextEncoder().encode(text).length > MAX_SOCKET_FRAME_BYTES;
 }
 
-function isSuccessful(status: number): boolean {
-	return status >= 200 && status < 300;
-}
-
-async function toApiClientError(response: Response): Promise<ApiClientError> {
-	const text = await response.text();
-	let body: unknown;
+function parseServerFrame(data: unknown): ServerFrame | null {
+	if (typeof data !== "string") return null;
+	let parsed: unknown;
 	try {
-		body = JSON.parse(text);
+		parsed = JSON.parse(data);
 	} catch {
-		return new ApiClientError(response.status);
+		return null;
 	}
-
-	if (isApiError(body)) return new ApiClientError(response.status, body.error, body.detail, body.fork, body.attached);
-	return new ApiClientError(response.status);
+	if (parsed === null || typeof parsed !== "object") return null;
+	const frame = parsed as Partial<ServerFrame>;
+	if (frame.type === "event") return "event" in frame && typeof frame.event === "object" && frame.event !== null ? (frame as ServerFrame) : null;
+	if (frame.type === "reply") return typeof frame.id === "string" && typeof frame.ok === "boolean" ? (frame as ServerFrame) : null;
+	return null;
 }
 
-function isApiError(body: unknown): body is ApiError {
-	if (body === null || typeof body !== "object") return false;
-	const candidate = body as { error?: unknown; detail?: unknown };
-	return typeof candidate.error === "string" &&
-		(candidate.detail === undefined || typeof candidate.detail === "string");
-}
-
-function defaultOpenEvents(url: string, handlers: EventHandlers): EventConnection {
-	const source = new EventSource(url);
-	source.onmessage = (event) => {
-		let parsed: ServerEvent;
-		try {
-			parsed = JSON.parse(event.data) as ServerEvent;
-		} catch (error: unknown) {
-			handlers.onMalformed(error instanceof Error ? error : new Error(String(error)));
-			return;
-		}
-		handlers.onEvent(parsed);
-	};
-	source.onopen = () => handlers.onOpen();
-	source.onerror = () => handlers.onDisconnect(source.readyState === EventSource.CLOSED);
-	return {
-		close() {
-			source.close();
-		},
-	};
+/** The browser's `WebSocket`, on the page's own origin. */
+function defaultOpenSocket(path: string): SocketLike {
+	const url = new URL(path, globalThis.location.href);
+	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+	return new WebSocket(url) as unknown as SocketLike;
 }

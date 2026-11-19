@@ -105,6 +105,7 @@ class PublishingController implements AgentpaneController {
 	async setEffort(_effort: string) {}
 	async setName(_name: string) {}
 	async refreshSessions() {}
+	reconnect() {}
 	async refreshPreview() {}
 	clearError() {}
 }

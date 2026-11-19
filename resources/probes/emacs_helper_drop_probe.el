@@ -1,13 +1,14 @@
-;;; emacs_helper_drop_probe.el --- A prompt in flight at a stream drop -*- lexical-binding: t; -*-
+;;; emacs_helper_drop_probe.el --- A prompt in flight at a socket's close -*- lexical-binding: t; -*-
 
-;; Proves (OW-hiliti): a prompt in flight when the helper's event stream
-;; drops, whose turn this Emacs saw streaming, keeps its turn-done watch
-;; for the helper's teardown, which ends the turn and raises the
-;; indicator (OW-zedawo).  Drives the real `runHelper' through
-;; `emacs_helper_drop_stand_in.ts', whose stream drops 500 ms after it
-;; opens.  `busy' waits without yielding until the helper has exited, so
-;; its last messages, its sentinel and its teardown are all handled after
-;; it; `idle' lets Emacs handle each as it comes.
+;; Proves (OW-hiliti): a prompt in flight when the helper's socket closes,
+;; whose turn this Emacs saw streaming, keeps its turn-done watch for the
+;; helper's teardown, which ends the turn and raises the indicator
+;; (OW-zedawo).  Drives the real `runHelper' through
+;; `emacs_helper_drop_stand_in.ts', whose socket closes 500 ms after it
+;; opens; until D31 it was an event stream that dropped.  `busy' waits
+;; without yielding until the helper has exited, so its last messages, its
+;; sentinel and its teardown are all handled after it; `idle' lets Emacs
+;; handle each as it comes.
 ;;
 ;; Run from the repository root; PROBE_RUNS sets the runs per case (3):
 ;;
@@ -30,7 +31,7 @@
 
 (defun agentpane-probe--drop-once (busy)
   "Send a prompt through the stand-in helper, see its turn stream, let the
-stream drop, and return whether the teardown raised the indicator, and
+socket close, and return whether the teardown raised the indicator, and
 what the echo area said, as a cons.  BUSY as in the file's commentary."
   (agentpane-test--watching
     (let ((agentpane--connection nil)
@@ -51,7 +52,7 @@ what the echo area said, as a cons.  BUSY as in the file's commentary."
               (insert "hello")
               (agentpane-send)
               ;; The server admitted the prompt and broadcast its turn
-              ;; streaming; the POST's own response has not come.
+              ;; streaming; the prompt's own reply has not come.
               (agentpane--on-notification connection 'session/status
                                           (list :session ref :handle "h1" :isStreaming t))
               (when busy
@@ -74,11 +75,11 @@ count raised and each run's messages, and return the count."
     raised))
 
 (ert-deftest agentpane-probe-drop-busy ()
-  "The stream drops while Emacs is busy; see the file's commentary."
+  "The socket closes while Emacs is busy; see the file's commentary."
   (should (= (agentpane-probe--drop t) (agentpane-probe--runs))))
 
 (ert-deftest agentpane-probe-drop-idle ()
-  "The stream drops while Emacs is idle; see the file's commentary."
+  "The socket closes while Emacs is idle; see the file's commentary."
   (should (= (agentpane-probe--drop nil) (agentpane-probe--runs))))
 
 ;;; emacs_helper_drop_probe.el ends here

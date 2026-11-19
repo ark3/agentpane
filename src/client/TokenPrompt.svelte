@@ -2,12 +2,12 @@
 	import type { TokenGate } from "./token.ts";
 
 	/**
-	 * Asks for the API token while `gate` is asking, which an API request
-	 * answered 401 starts. `onStored` follows a paste, so the page recovers with
+	 * Asks for the API token while `gate` is asking, which a socket the server
+	 * closed for a refused token starts (D31 point 5). `onStored` follows a paste, so the page recovers with
 	 * nothing more from the owner. The field is a plain text field, so the owner
 	 * sees what they pasted: they judged the prompt in use on 2026-11-13, found
 	 * the dialog fine, and asked that the field not be a password box. It is
-	 * still emptied on save, so a later 401 asks with an empty field and a
+	 * still emptied on save, so a later refusal asks with an empty field and a
 	 * stored token is never shown back.
 	 */
 	let { gate, onStored }: { gate: TokenGate; onStored: () => void } = $props();

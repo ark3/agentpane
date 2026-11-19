@@ -83,7 +83,7 @@ function snapshotOf(session: SessionRef, handle = h(session)): ServerEvent {
 
 /** What the preview route answers for a ref nobody holds and no file backs (D26 point 5). */
 function gone(): ApiClientError {
-	return new ApiClientError(404, "gone", "no such session");
+	return new ApiClientError("gone", "no such session");
 }
 
 /** Let every microtask and the timer-free tail of an in-flight refresh run out. */
@@ -109,23 +109,23 @@ class FakeApi implements AgentpaneApi {
 	);
 	readonly prompt = vi.fn(async (_session: SessionRef, _body: { text: string }): Promise<PromptResponse | void> => {});
 	readonly editDraft = vi.fn(async (_body: { text: string }) => ({ text: "edited draft" }));
-	readonly abort = vi.fn(async (_session: SessionRef): Promise<AbortResponse | void> => {});
-	readonly compact = vi.fn(async (_session: SessionRef) => {});
+	readonly abort = vi.fn(async (_handle: string): Promise<AbortResponse | void> => {});
+	readonly compact = vi.fn(async (_handle: string) => {});
 	readonly close = vi.fn(async (_session: SessionRef) => {});
 	readonly listModels = vi.fn(async (_backend: BackendId): Promise<ModelInfo[]> => []);
-	readonly setModel = vi.fn(async (_session: SessionRef, _model: string) => {});
-	readonly setEffort = vi.fn(async (_session: SessionRef, _effort: string) => {});
-	readonly setName = vi.fn(async (_session: SessionRef, _name: string) => {});
-	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPointsResponse> => ({ points: [], forkStopsTurn: false }));
-	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
+	readonly setModel = vi.fn(async (_handle: string, _model: string) => {});
+	readonly setEffort = vi.fn(async (_handle: string, _effort: string) => {});
+	readonly setName = vi.fn(async (_handle: string, _name: string) => {});
+	readonly forkPoints = vi.fn(async (_handle: string): Promise<ForkPointsResponse> => ({ points: [], forkStopsTurn: false }));
+	readonly fork = vi.fn(async (_handle: string, _body: ForkRequest) => forkedRef);
 	/** Answers as the server does once the fork's prompt is admitted: the fork, under its own handle (D30). */
 	readonly forkAndPrompt = vi.fn(
-		async (_session: SessionRef, _body: ForkAndPromptRequest): Promise<ForkAndPromptResponse> => ({
+		async (_handle: string, _body: ForkAndPromptRequest): Promise<ForkAndPromptResponse> => ({
 			session: summary(forkedRef),
 			disposition: "started",
 		}),
 	);
-	readonly dismissError = vi.fn(async (_session: SessionRef, _errorId: string) => {});
+	readonly dismissError = vi.fn(async (_handle: string, _errorId: string) => {});
 	readonly listSessions = vi.fn(async (_cwd?: string): Promise<SessionSummary[]> => [summary(ref)]);
 	readonly connection: EventConnection = { close: vi.fn() };
 	handlers: EventHandlers | undefined;
@@ -147,9 +147,9 @@ class FakeApi implements AgentpaneApi {
 		this.handlers?.onOpen();
 	}
 
-	/** `fatal` is the source having reached `CLOSED`, where no `onopen` can ever follow (OW-dekuri). */
-	drop(fatal = false): void {
-		this.handlers?.onDisconnect(fatal);
+	/** The socket closing. */
+	drop(): void {
+		this.handlers?.onDisconnect();
 	}
 }
 
@@ -294,7 +294,7 @@ describe("client controller", () => {
 		await controller.preview(ref);
 		expect(api.listModels).toHaveBeenCalledWith(ref.backend);
 		await controller.setModel("opaque/next");
-		expect(api.setModel).toHaveBeenCalledWith(ref, "opaque/next");
+		expect(api.setModel).toHaveBeenCalledWith(h(ref), "opaque/next");
 		expect(controller.getView().state.sessions[h(ref)]?.model).toBe("opaque/current");
 
 		api.emit({ type: "status", session: ref, handle: h(ref), seq: 2, isStreaming: false, compaction: null, model: "opaque/next", effort: null, unrestoredModel: null });
@@ -353,7 +353,7 @@ describe("client controller", () => {
 		await controller.preview(ref);
 
 		const choosing = controller.setEffort("high");
-		expect(api.setEffort).toHaveBeenCalledWith(ref, "high");
+		expect(api.setEffort).toHaveBeenCalledWith(h(ref), "high");
 		expect(controller.getView()).toMatchObject({ effortSetting: true, modelSetting: false });
 		await controller.setEffort("low");
 		expect(api.setEffort).toHaveBeenCalledOnce();
@@ -377,7 +377,7 @@ describe("client controller", () => {
 		expect(controller.getView().effortSetting).toBe(false);
 	});
 
-	it("connects SSE and loads summaries when started", async () => {
+	it("connects the socket and loads summaries when started", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 
@@ -996,7 +996,7 @@ describe("client controller", () => {
 
 		await controller.abort();
 
-		expect(api.abort).toHaveBeenCalledWith(attachedRef);
+		expect(api.abort).toHaveBeenCalledWith(h(attachedRef));
 	});
 
 	/**
@@ -1519,7 +1519,7 @@ describe("client controller", () => {
 	// no replay buffer, and the opening snapshots carry neither field
 	// (OW-vukoku). So the re-established stream is the whole trigger here -- no
 	// event is emitted at all.
-	it("re-lists when the event stream comes back up", async () => {
+	it("re-lists when the socket opens again", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
@@ -1536,13 +1536,12 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A fatally closed `EventSource` -- the server answered 404, or answered
-	// with the wrong content type -- never fires `onopen` again, so D21's
-	// re-list at the open cannot heal anything and the client would sit in
-	// `reconnecting` until the user pressed Refresh (OW-dekuri). Nothing here
-	// re-opens on its own: the only opens are the ones the rebuilt connections
-	// earn, and the healed sidebar at the end is the whole claim.
-	it("rebuilds a fatally closed event stream until one opens, and heals with no user gesture", async () => {
+	// A WebSocket does not retry, so without the client's own reconnect it
+	// would sit in `reconnecting` until the user pressed Refresh, as a fatally
+	// closed `EventSource` once did (OW-dekuri). Nothing here re-opens on its
+	// own: the only opens are the ones the rebuilt connections earn, and the
+	// healed sidebar at the end is the whole claim.
+	it("opens the socket again on a fixed delay after a close until one opens, and heals with no user gesture (D31 point 6)", async () => {
 		vi.useFakeTimers();
 		try {
 			const api = new FakeApi();
@@ -1554,16 +1553,15 @@ describe("client controller", () => {
 			const missed = { ...summary(ref), status: "detached" as const, updatedAt: "2026-09-16T04:00:00.000Z" };
 			api.listSessions.mockResolvedValue([missed]);
 
-			api.drop(true);
+			api.drop();
 			expect(controller.getView().connection).toBe("reconnecting");
 			await vi.advanceTimersByTimeAsync(4_999);
 			expect(api.connects).toBe(1);
 			await vi.advanceTimersByTimeAsync(1);
 			expect(api.connects).toBe(2);
-			expect(api.connection.close).toHaveBeenCalledOnce();
 
-			// Still fatal: the retry keeps going rather than stopping at one try.
-			api.drop(true);
+			// A failed open closes too: the retry keeps going rather than stopping at one try.
+			api.drop();
 			await vi.advanceTimersByTimeAsync(5_000);
 			expect(api.connects).toBe(3);
 
@@ -1573,34 +1571,10 @@ describe("client controller", () => {
 			expect(controller.getView().state.summaries).toEqual([missed]);
 
 			// A pending retry does not outlive the controller.
-			api.drop(true);
+			api.drop();
 			controller.dispose();
 			await vi.advanceTimersByTimeAsync(60_000);
 			expect(api.connects).toBe(3);
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
-	// An error at `readyState === CONNECTING` is the browser's own retry already
-	// under way, and the `onopen` it earns is what D21 heals at. Rebuilding
-	// there would race that retry and double the request rate against a server
-	// that is merely restarting (OW-dekuri).
-	it("leaves a recoverable drop to the browser's own retry", async () => {
-		vi.useFakeTimers();
-		try {
-			const api = new FakeApi();
-			const controller = createController(api);
-			await controller.start();
-			api.open();
-			await vi.advanceTimersByTimeAsync(0);
-
-			api.drop();
-			await vi.advanceTimersByTimeAsync(60_000);
-
-			expect(api.connects).toBe(1);
-			expect(api.connection.close).not.toHaveBeenCalled();
-			controller.dispose();
 		} finally {
 			vi.useRealTimers();
 		}
@@ -1619,8 +1593,8 @@ describe("client controller", () => {
 	// which a restarted server never lists for a view a rename moved (OW-fiheli).
 	// A selection with a transcript on disk stays, on the detached-loading pane,
 	// whose preview waits for a server that can answer it (OW-forinu).
-	for (const fatal of [false, true]) {
-		it(`drops every live view at once, leaving the selection detached, when the stream drops${fatal ? " fatally" : ""}`, async () => {
+	{
+		it("drops every live view at once, leaving the selection detached, when the socket closes", async () => {
 			const api = new FakeApi();
 			const streaming = { ...summary(ref), isStreaming: true };
 			const virtual = { ...summary(virtualRef), status: "virtual" as const, onDisk: false };
@@ -1639,7 +1613,7 @@ describe("client controller", () => {
 
 			api.preview.mockClear();
 
-			api.drop(fatal);
+			api.drop();
 
 			expect(controller.getView().state.sessions).toEqual({});
 			expect(controller.getView().state.selected).toEqual(attachedRef);
@@ -2248,7 +2222,7 @@ describe("client controller", () => {
 		// snapshot if it were not told (OW-bipume).
 		// It names the error it dismisses, so a newer one the server holds by
 		// then is left standing.
-		expect(api.dismissError).toHaveBeenCalledExactlyOnceWith(ref, "e1");
+		expect(api.dismissError).toHaveBeenCalledExactlyOnceWith(h(ref), "e1");
 	});
 
 	it("dismisses the error on screen by the id the wire named it by, not its text (OW-jokoto)", async () => {
@@ -2260,7 +2234,7 @@ describe("client controller", () => {
 
 		controller.clearError();
 
-		expect(api.dismissError).toHaveBeenCalledExactlyOnceWith(ref, "e7");
+		expect(api.dismissError).toHaveBeenCalledExactlyOnceWith(h(ref), "e7");
 	});
 
 	it("sends with a prompt the id of the error on screen when the user sent it (OW-jokoto)", async () => {
@@ -2317,7 +2291,7 @@ describe("client controller", () => {
 
 		const compacted = controller.compact();
 
-		expect(api.compact).toHaveBeenCalledWith(ref);
+		expect(api.compact).toHaveBeenCalledWith(h(ref));
 		expect(controller.getView().busy).toBe("compacting");
 
 		compacting.resolve();
@@ -2422,8 +2396,8 @@ describe("client controller", () => {
 
 		await controller.forkAndSubmit(2);
 
-		expect(api.forkAndPrompt).toHaveBeenCalledExactlyOnceWith(ref, { index: 2, text: "reworded" });
-		expect(api.forkPoints).not.toHaveBeenCalledWith(ref);
+		expect(api.forkAndPrompt).toHaveBeenCalledExactlyOnceWith(h(ref), { index: 2, text: "reworded" });
+		expect(api.forkPoints).not.toHaveBeenCalledWith(h(ref));
 		expect(api.abort).not.toHaveBeenCalled();
 		expect(api.fork).not.toHaveBeenCalled();
 		expect(api.attach).not.toHaveBeenCalled();
@@ -2442,7 +2416,7 @@ describe("client controller", () => {
 
 		await controller.forkAndSubmit(0, images);
 
-		expect(api.forkAndPrompt).toHaveBeenCalledExactlyOnceWith(ref, { index: 0, text: "reworded", images });
+		expect(api.forkAndPrompt).toHaveBeenCalledExactlyOnceWith(h(ref), { index: 0, text: "reworded", images });
 	});
 
 	/** The fork's prompt answers the same two ways a plain one does (OW-yobayi). */
@@ -2461,7 +2435,7 @@ describe("client controller", () => {
 		api.emit(snapshotOf(forkedRef));
 		controller.setDraft("reworded");
 		expect((await controller.forkAndSubmit(0))?.disposition).toBe("started");
-		expect(api.forkAndPrompt).toHaveBeenLastCalledWith(forkedRef, { index: 0, text: "reworded" });
+		expect(api.forkAndPrompt).toHaveBeenLastCalledWith(h(forkedRef), { index: 0, text: "reworded" });
 	});
 
 	/**
@@ -2474,7 +2448,7 @@ describe("client controller", () => {
 	 */
 	it("keeps the draft and the selection, and reports, when the server finds no fork point at that index (OW-roveze)", async () => {
 		const api = new FakeApi();
-		api.forkAndPrompt.mockRejectedValueOnce(new ApiClientError(409, "not_a_fork_point", "no fork point at index 2"));
+		api.forkAndPrompt.mockRejectedValueOnce(new ApiClientError("not_a_fork_point", "no fork point at index 2"));
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2498,7 +2472,7 @@ describe("client controller", () => {
 	it("moves to the fork a refusal names, keeping the draft, so sending again prompts the fork (D30)", async () => {
 		const api = new FakeApi();
 		api.forkAndPrompt.mockRejectedValueOnce(
-			new ApiClientError(400, "backend_refused", "the backend refused the prompt", { ref: forkedRef, handle: h(forkedRef) }),
+			new ApiClientError("backend_refused", "the backend refused the prompt", { ref: forkedRef, handle: h(forkedRef) }),
 		);
 		const controller = createController(api);
 		await controller.start();
@@ -2516,7 +2490,7 @@ describe("client controller", () => {
 		expect(paneMode(refused)).toBe("live");
 		expect(refused.draft).toBe("reworded");
 		expect(refused.error).toBe("the backend refused the prompt");
-		expect(api.forkPoints).toHaveBeenCalledWith(forkedRef);
+		expect(api.forkPoints).toHaveBeenCalledWith(h(forkedRef));
 
 		await controller.submit();
 		expect(api.prompt).toHaveBeenCalledWith(forkedRef, expect.objectContaining({ text: "reworded" }));
@@ -2528,7 +2502,7 @@ describe("client controller", () => {
 	it("moves to a fork the refusal names with no handle, on a pane that is not live (D30)", async () => {
 		const api = new FakeApi();
 		api.forkAndPrompt.mockRejectedValueOnce(
-			new ApiClientError(500, "internal_error", "spawn failed", { ref: forkedRef, handle: null }),
+			new ApiClientError("internal_error", "spawn failed", { ref: forkedRef, handle: null }),
 		);
 		const controller = createController(api);
 		await controller.start();
@@ -2561,7 +2535,7 @@ describe("client controller", () => {
 
 		const submitted = controller.forkAndSubmit(0);
 		await controller.select(other);
-		forking.reject(new ApiClientError(400, "backend_refused", "refused", { ref: forkedRef, handle: h(forkedRef) }));
+		forking.reject(new ApiClientError("backend_refused", "refused", { ref: forkedRef, handle: h(forkedRef) }));
 
 		expect(await submitted).toBeNull();
 		expect(controller.getView().state.selected).toEqual(other);
@@ -2606,7 +2580,7 @@ describe("client controller", () => {
 			expect((await controller.forkAndSubmit(0))?.session.ref).toEqual(forkedRef);
 
 			expect(api.abort).not.toHaveBeenCalled();
-			expect(api.forkAndPrompt).toHaveBeenCalledExactlyOnceWith(parent, { index: 0, text: "reworded" });
+			expect(api.forkAndPrompt).toHaveBeenCalledExactlyOnceWith(h(parent), { index: 0, text: "reworded" });
 			controller.dispose();
 		},
 	);
@@ -2647,7 +2621,7 @@ describe("client controller", () => {
 	it("keeps each session's fork-stops-turn answer under its own handle (D30)", async () => {
 		const other: SessionRef = { backend: "codex", id: "thread-other" };
 		const api = new FakeApi();
-		api.forkPoints.mockImplementation(async (session: SessionRef) => ({ points: [], forkStopsTurn: session.backend === "pi" }));
+		api.forkPoints.mockImplementation(async (handle: string) => ({ points: [], forkStopsTurn: handle === h(ref) }));
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2681,7 +2655,7 @@ describe("client controller", () => {
 
 		await controller.preview(other);
 		await settle();
-		expect(api.forkPoints).toHaveBeenCalledExactlyOnceWith(other);
+		expect(api.forkPoints).toHaveBeenCalledExactlyOnceWith(h(other));
 		expect(controller.getView().forkStopsTurn[h(other)]).toBe(true);
 
 		await controller.preview(ref);
@@ -2707,7 +2681,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		expect(api.forkPoints).toHaveBeenCalledWith(ref);
+		expect(api.forkPoints).toHaveBeenCalledWith(h(ref));
 
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 		api.emit({ type: "status", session: renamed, handle: h(ref), seq: 2, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
@@ -3249,7 +3223,7 @@ describe("client controller", () => {
 						? controller.create("/work", "pi")
 						: controller.forkAndSubmit(0);
 				await settle();
-				if (path === "forkAndSubmit") expect(api.forkAndPrompt).toHaveBeenLastCalledWith(ref, { index: 0, text: "reworded" });
+				if (path === "forkAndSubmit") expect(api.forkAndPrompt).toHaveBeenLastCalledWith(h(ref), { index: 0, text: "reworded" });
 				else if (path === "create") expect(api.createSession).toHaveBeenLastCalledWith({ cwd: "/work", backend: "pi" });
 				else expect(api.attach).toHaveBeenLastCalledWith(target);
 				api.drop();
@@ -4068,11 +4042,10 @@ describe("client controller", () => {
 			controller.dispose();
 		});
 
-		// Only `404 gone` is an answer (OW-bilogo): `not_found` is also what an
-		// unmatched route answers, and neither it nor any other status says the
-		// session is nowhere.
-		for (const [status, code] of [[404, "not_found"], [500, "gone"]] as const) {
-			it(`keeps the selection when a detached-loading pane's read fails ${status} ${code}`, async () => {
+		// Only `gone` is an answer (OW-bilogo): no other code says the session
+		// is nowhere, `not_found` included.
+		for (const code of ["not_found", "internal_error"] as const) {
+			it(`keeps the selection when a detached-loading pane's read fails ${code}`, async () => {
 				const api = new FakeApi();
 				const controller = createController(api);
 				await controller.start();
@@ -4080,7 +4053,7 @@ describe("client controller", () => {
 				await controller.select(ref);
 				api.emit(snapshotOf(ref));
 				await settle();
-				api.preview.mockRejectedValue(new ApiClientError(status, code, "not an answer"));
+				api.preview.mockRejectedValue(new ApiClientError(code, "not an answer"));
 
 				api.emit({ type: "ended", session: ref, handle: h(ref) });
 				await settle();
@@ -4091,7 +4064,7 @@ describe("client controller", () => {
 				controller.dispose();
 			});
 
-			it(`keeps the preview on screen when its poll fails ${status} ${code}`, async () => {
+			it(`keeps the preview on screen when its poll fails ${code}`, async () => {
 				vi.useFakeTimers();
 				try {
 					const api = new FakeApi();
@@ -4099,7 +4072,7 @@ describe("client controller", () => {
 					api.preview.mockResolvedValue({ ref, turns });
 					const controller = createController(api);
 					await controller.preview(ref);
-					api.preview.mockRejectedValue(new ApiClientError(status, code, "not an answer"));
+					api.preview.mockRejectedValue(new ApiClientError(code, "not an answer"));
 
 					await vi.advanceTimersByTimeAsync(16_000);
 

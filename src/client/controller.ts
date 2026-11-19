@@ -314,6 +314,11 @@ export interface AgentpaneController {
 	/** Re-list sessions from disk (dedup'd against any in-flight listing already running). */
 	refreshSessions(): Promise<void>;
 	/**
+	 * Open the socket now, where a close has scheduled its reopening, as once
+	 * a token is pasted after the server refused one; otherwise nothing.
+	 */
+	reconnect(): void;
+	/**
 	 * Re-read the previewed session's transcript now (OW-76): a no-op with
 	 * nothing previewed or with the tab hidden. Call it when the tab comes back
 	 * to the foreground; `refreshSessions` already calls it, and while a preview
@@ -325,19 +330,16 @@ export interface AgentpaneController {
 }
 
 /**
- * How long to wait before rebuilding an event stream the browser gave up on
- * (OW-dekuri).
- *
- * A fatal close means the server answered *wrongly* -- a 404, or a body that
- * was not `text/event-stream` -- rather than going quiet, so the retry is
- * aimed at a server that is restarting or half-up, and hammering it is the
- * failure mode to avoid: unlike the browser's own retry there is nothing
- * backing this one off. 5s is longer than the browser's ~3s default for the
- * drops it does handle, costs at most twelve requests a minute from a tab left
- * open against a server that never comes back, and still clears a restart
- * within one cycle of it finishing.
+ * How long to wait before opening the socket again once it has closed, or
+ * failed to open (D31 point 6). The browser's own, on a fixed delay: a
+ * WebSocket does not retry, where an `EventSource` retried forever looking
+ * healthy. Nothing backs it off, so hammering a server that is restarting is
+ * the failure mode to avoid: 5s costs at most twelve attempts a minute from a
+ * tab left open against a server that never comes back, and still clears a
+ * restart within one cycle of it finishing. It was the delay this client
+ * rebuilt an `EventSource` the browser had given up on after (OW-dekuri).
  */
-const FATAL_STREAM_RETRY_MS = 5_000;
+export const RECONNECT_MS = 5_000;
 
 /**
  * How long a preview read `loadPreview` or a click asks may run before it is
@@ -349,12 +351,11 @@ const PREVIEW_READ_TIMEOUT_MS = 10_000;
 
 /**
  * Whether a preview read failed because its session is nowhere: the route's
- * `404` with the code `gone`, for a ref nobody holds and no file backs (D26
- * point 5). Nothing else is, `not_found` included, which an unmatched route
- * also answers.
+ * code `gone`, for a ref nobody holds and no file backs (D26 point 5).
+ * Nothing else is, `not_found` included.
  */
 function isGone(error: unknown): boolean {
-	return error instanceof ApiClientError && error.status === 404 && error.code === "gone";
+	return error instanceof ApiClientError && error.code === "gone";
 }
 
 /** A preview read out -- see `loadPreview`, which says who owns its answer. */
@@ -400,8 +401,8 @@ export function createController(
 		forkStopsTurn: {},
 	};
 	let connection: EventConnection | undefined;
-	/** Pending rebuild of a fatally closed stream -- see `FATAL_STREAM_RETRY_MS`. */
-	let fatalRetryTimer: ReturnType<typeof setTimeout> | undefined;
+	/** The reconnect a close scheduled -- see `RECONNECT_MS`. */
+	let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	let disposed = false;
 	let started = false;
 	let selectionIntent = 0;
@@ -711,7 +712,7 @@ export function createController(
 		if (handle === undefined || forkPointsInFlight.has(handle)) return;
 		forkPointsInFlight.add(handle);
 		void api
-			.forkPoints(ref)
+			.forkPoints(handle)
 			.then(({ points, forkStopsTurn }) => {
 				if (disposed) return;
 				// Kept whatever is on screen now, since it describes this handle alone.
@@ -1071,13 +1072,12 @@ export function createController(
 	}
 
 	function scheduleReconnect(): void {
-		if (disposed || fatalRetryTimer !== undefined) return;
-		fatalRetryTimer = setTimeout(() => {
-			fatalRetryTimer = undefined;
+		if (disposed || reconnectTimer !== undefined) return;
+		reconnectTimer = setTimeout(() => {
+			reconnectTimer = undefined;
 			if (disposed) return;
-			connection?.close();
 			connection = api.connect(handlers);
-		}, FATAL_STREAM_RETRY_MS);
+		}, RECONNECT_MS);
 	}
 
 	const handlers: EventHandlers = {
@@ -1113,40 +1113,31 @@ export function createController(
 			if (result.refreshSessions) void refreshSessions(false);
 		},
 		/**
-		 * A re-established stream heals its transcripts and nothing else: the
-		 * opening snapshots go out only for sessions with a live adapter and carry
+		 * A reopened socket heals its transcripts and nothing else: the opening
+		 * snapshots go out only for sessions with a live adapter and carry
 		 * `{ messages, isStreaming, compaction, model }`, never `status`,
-		 * `updatedAt`, `cwd` or `preview`. There is no `Last-Event-ID` cursor and
-		 * no replay buffer either, so every `sessions-changed` that fanned out
-		 * while the socket was down is simply gone -- and `status` (the sidebar's
-		 * attached stripe, the header's Detach) and `updatedAt` (the whole sidebar
+		 * `updatedAt`, `cwd` or `preview`. There is no cursor and no replay
+		 * buffer either, so every `sessions-changed` that fanned out while the
+		 * socket was down is simply gone -- and `status` (the sidebar's attached
+		 * stripe, the header's Detach) and `updatedAt` (the whole sidebar
 		 * ordering) move for no other reason than a listing. So the reconnect asks
 		 * for one (D21, OW-vukoku), which generalises OW-lejahi's narrow fix: a
 		 * detach performed while the stream was down used to leave the row lit as
 		 * attached until the user pressed Refresh, and that was one visible case
 		 * of a general loss.
 		 *
-		 * The first open lists too (OW-dajove). `EventSource` fires `onopen` on
-		 * the initial connect as well as on every re-establish, and the startup
-		 * listing does not cover that open: `list()` in the session manager reads
-		 * the live overlay only after its index read, and a slow stream request
-		 * lets that read precede this tab's registration, so a change in between
-		 * -- another client attaching a session -- reaches the tab through
-		 * neither the listing nor a broadcast. The tab would hold a live view of
-		 * that session from the opening snapshots under a row reading
-		 * `detached`, and nothing would re-list. `openEventStream` registers the
-		 * client with `addClient` inside the stream's `start`, before the
-		 * response exists, so by the time `onopen` fires the tab is registered
-		 * and a listing asked here reads live state after it.
+		 * The first open lists too (OW-dajove), on the socket, so the listing is
+		 * ordered against the events around it (D21, D31 point 1): the server
+		 * registered this client at its `hello`, whose reply this is, so a change
+		 * after the listing's live read reaches the tab as an event.
 		 *
-		 * The cost is one more `GET /api/sessions` per page load, since
-		 * `start()` keeps its own listing to paint the sidebar without waiting
-		 * on the stream and to report a server that is away. A first open that
-		 * lands while that listing is still out costs the same one, asked after
-		 * it rather than beside it: it is owed the listing every call arriving
-		 * mid-listing is owed (OW-sabova). The same listing heals a page
-		 * whose startup listing failed, whose first `onopen` ever is the server
-		 * coming back.
+		 * The cost is one more listing per page load, since `start()` keeps its
+		 * own to paint the sidebar, which goes out behind the `hello` and, against
+		 * a server that is away, reports it. A first open that lands while that
+		 * listing is still out costs the same one, asked after it rather than
+		 * beside it: it is owed the listing every call arriving mid-listing is
+		 * owed (OW-sabova). The same listing heals a page whose startup listing
+		 * failed, whose first open ever is the server coming back.
 		 *
 		 * `false`: nobody asked for this listing, so it owns neither the status
 		 * line nor the error slot.
@@ -1160,20 +1151,20 @@ export function createController(
 			void refreshSessions(false);
 		},
 		/**
-		 * A `fatal` disconnect is a source at `CLOSED`: the browser has stopped
-		 * retrying and will never fire `onopen` again, so the re-list above -- the
-		 * only thing that moves `status` and `updatedAt` -- can never run and the
-		 * sidebar stays wrong until the user presses Refresh (OW-dekuri). So
-		 * rebuild the connection instead of waiting on an open that cannot come.
-		 * A rebuilt stream that opens fires `onOpen`, and D21's re-list there is
-		 * the healing; one that closes fatally again lands back here, which is
-		 * what keeps the retry going while the server is still answering wrongly.
+		 * The socket closed, or failed to open, and nothing reconnects it but
+		 * this client: a WebSocket has no retry of its own, where an
+		 * `EventSource` retried forever looking healthy (D31 point 6). So every
+		 * close schedules the next attempt, on a fixed delay (`RECONNECT_MS`), and
+		 * one that fails lands back here. An open heals at `onOpen`, D21's
+		 * re-list there.
 		 *
-		 * An ordinary drop reports `CONNECTING`: the browser's own retry is
-		 * already under way and rebuilding would only race it.
+		 * Every request still out has been settled by now, as the connection
+		 * lost, its outcome unknown, so each gesture in flight settles on its own
+		 * and keeps what it keeps on a failure, a prompt its draft. The intent is
+		 * not bumped: a bump would strand a gesture's `busy`.
 		 *
-		 * Either way the tab holds nothing live from here (D25): a stream drops
-		 * only when the server exits, so every view goes at once, and a drop the
+		 * The tab holds nothing live from here (D25 point 3): a socket closes
+		 * only when the server exits, so every view goes at once, and a close the
 		 * server survived gets back what it still holds from the reconnect's
 		 * opening snapshots. The selection stays, and its pane reads detached: a
 		 * preview on screen stays, and a live one becomes the detached-loading
@@ -1182,9 +1173,6 @@ export function createController(
 		 * makes live again first. That holds for a session with nothing on disk
 		 * too: whether anything is left of it is the preview's to say once a
 		 * server can answer, and `gone` clears the selection then (D26 point 6).
-		 * The intent is not bumped: a gesture still in flight settles on its
-		 * own, failing against a dead server or landing on a live one, and a bump
-		 * would strand its `busy`.
 		 *
 		 * The rows say the same, since the sidebar's stripe and streaming dot
 		 * read them until the reconnect's listing, which may be the whole outage:
@@ -1194,7 +1182,7 @@ export function createController(
 		 * snapshot with the row when a rename moved the ref during the outage
 		 * (`followRef`).
 		 */
-		onDisconnect(fatal: boolean) {
+		onDisconnect() {
 			const summaries = view.state.summaries.map((summary): SessionSummary =>
 				summary.status === "detached" ? summary : { ...summary, status: "detached", isStreaming: false },
 			);
@@ -1202,7 +1190,7 @@ export function createController(
 				connection: "reconnecting",
 				state: { summaries, sessions: {}, selected: view.state.selected },
 			});
-			if (fatal) scheduleReconnect();
+			scheduleReconnect();
 		},
 		onMalformed(error: Error) {
 			publish({ error: error.message });
@@ -1222,6 +1210,12 @@ export function createController(
 			return () => gapListeners.delete(listener);
 		},
 		refreshSessions: () => refreshSessions(true),
+		reconnect() {
+			if (disposed || reconnectTimer === undefined) return;
+			clearTimeout(reconnectTimer);
+			reconnectTimer = undefined;
+			connection = api.connect(handlers);
+		},
 		refreshPreview,
 		async start() {
 			if (disposed || started) return;
@@ -1234,7 +1228,7 @@ export function createController(
 			disposed = true;
 			stopPoll();
 			abandonPreviewLoads(true);
-			clearTimeout(fatalRetryTimer);
+			clearTimeout(reconnectTimer);
 			connection?.close();
 			listeners.clear();
 			gapListeners.clear();
@@ -1273,7 +1267,7 @@ export function createController(
 			if (!selected || handle === undefined) return;
 			publish({ error: null });
 			try {
-				await api.setName(selected, name);
+				await api.setName(handle, name);
 			} catch (error: unknown) {
 				if (!disposed && selects(handle)) publish({ error: errorMessage(error) });
 			}
@@ -1285,7 +1279,7 @@ export function createController(
 			pendingModelSets.add(handle);
 			publish({ modelSetting: true, error: null });
 			try {
-				await api.setModel(selected, model);
+				await api.setModel(handle, model);
 			} catch (error: unknown) {
 				if (!disposed && selects(handle)) publish({ error: errorMessage(error) });
 			} finally {
@@ -1300,7 +1294,7 @@ export function createController(
 			pendingEffortSets.add(handle);
 			publish({ effortSetting: true, error: null });
 			try {
-				await api.setEffort(selected, effort);
+				await api.setEffort(handle, effort);
 			} catch (error: unknown) {
 				if (!disposed && selects(handle)) publish({ error: errorMessage(error) });
 			} finally {
@@ -1413,6 +1407,8 @@ export function createController(
 			}
 			// Only from a session this tab holds live, as `submit` (OW-forinu).
 			if (paneMode(view) !== "live") return null;
+			const handle = handleOf(view.state, selected);
+			if (handle === undefined) return null;
 			// One send at a time, the rule `submit` above states and this path did
 			// not have (OW-kelede). Two fast presses in edit mode started two whole
 			// forks, and the second one's failure took the *first* fork's follow
@@ -1431,13 +1427,12 @@ export function createController(
 			const intent = selectionIntent;
 			publish({ busy: "submitting", sending: true, error: null });
 			try {
-				// The request goes out on the click-time ref even if a rename lands
-				// meanwhile (D9), since every name a session has had resolves on the
-				// server's routes (`ManagedSession.names`, D24). Where the backend
+				// The request names the click-time handle, which a rename landing
+				// meanwhile leaves alone (D24). Where the backend
 				// abandons a running turn at a fork whatever agentpane does, which is
 				// Pi (D15), the server stops it inside the fork, and what that stop
 				// takes out of Pi's queue is dropped there (`PiAdapter.fork`).
-				const forked = await api.forkAndPrompt(selected, { index, text, ...(images && images.length > 0 ? { images } : {}) });
+				const forked = await api.forkAndPrompt(handle, { index, text, ...(images && images.length > 0 ? { images } : {}) });
 				if (disposed) return null;
 				// A fork is a selection change, so the intent bumps -- a preview poll
 				// still in flight must not put its old transcript back over the fork.
@@ -1501,9 +1496,11 @@ export function createController(
 			}
 			// Only a session this tab holds live, as `submit` (OW-forinu).
 			if (paneMode(view) !== "live") return [];
+			const handle = handleOf(view.state, selected);
+			if (handle === undefined) return [];
 			publish({ busy: "aborting", error: null });
 			try {
-				return (await api.abort(selected))?.queued ?? [];
+				return (await api.abort(handle))?.queued ?? [];
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
 				return [];
@@ -1536,7 +1533,7 @@ export function createController(
 				state: setSessionCompaction(view.state, handle, "requesting"),
 			});
 			try {
-				await api.compact(selected);
+				await api.compact(handle);
 			} catch (error: unknown) {
 				if (!disposed) {
 					// Failed admission, so our own optimistic mark has to go. The
@@ -1600,7 +1597,7 @@ export function createController(
 			// on the one ordered stream, takes it down (OW-jopifu). A failed
 			// dismissal leaves the server's copy standing, and the next snapshot
 			// shows it again, which is the truth about where it stands.
-			if (selected && dismissed !== null) void api.dismissError(selected, dismissed).catch(() => {});
+			if (handle !== undefined && dismissed !== null) void api.dismissError(handle, dismissed).catch(() => {});
 			publish({ error: null, state });
 		},
 	};

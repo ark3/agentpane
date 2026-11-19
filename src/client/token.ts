@@ -16,7 +16,7 @@ export const TOKEN_STORAGE_KEY = "agentpane-token";
 export interface TokenGate {
 	/** The stored token, or null before the first paste. */
 	token(): string | null;
-	/** An API request was answered 401: ask for the token, again if a stored one was rotated. */
+	/** The server refused the token the socket's `hello` carried: ask for it, again if a stored one was rotated. */
 	unauthorized(): void;
 	/** Keep a pasted token and stop asking. */
 	store(token: string): void;

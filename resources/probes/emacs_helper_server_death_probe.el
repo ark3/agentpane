@@ -5,9 +5,11 @@
 ;; SIGKILLed 0.3 s after this Emacs's prompt goes out, whose turn this
 ;; Emacs saw streaming: the prompt keeps its turn-done watch for the
 ;; helper's teardown, which ends the turn and raises the indicator
-;; (OW-zedawo).  The socket's error can reach the helper before the
-;; stream's drop, and the helper then writes it back as a -32603 error
-;; reply carrying no `data', which must not read as a refusal.
+;; (OW-zedawo).  Until D31 the prompt's own HTTP request could fail
+;; before the event stream's drop reached the helper, which wrote it back
+;; as a -32603 error reply carrying no `data', which must not read as a
+;; refusal; over the one socket the close settles the prompt as the
+;; connection lost, and the helper writes no reply for it.
 ;;
 ;; Run from the repository root; PROBE_RUNS sets the runs (8):
 ;;
