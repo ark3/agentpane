@@ -506,6 +506,17 @@ export class SessionManager {
 		return [...this.#sessions.values()].filter((s) => s.adapter).map((s) => s.handle);
 	}
 
+	/**
+	 * The live session under `handle`, by its ref as of now and its adapter, or
+	 * undefined where that handle has ended or was never minted. What the
+	 * socket resolves a command's handle through (D31 point 9); a queued verb
+	 * is passed the handle as well, and checks it again when it runs.
+	 */
+	live(handle: string): { ref: SessionRef; adapter: BackendAdapter } | undefined {
+		const session = this.#sessions.get(handle);
+		return session?.adapter ? { ref: session.ref, adapter: session.adapter } : undefined;
+	}
+
 	adapterFor(ref: SessionRef): BackendAdapter | undefined {
 		return this.#lookup(ref)?.adapter;
 	}
@@ -758,7 +769,8 @@ export class SessionManager {
 	 *
 	 * A verb sent for a `handle` runs only on the container under it, and only
 	 * while that container is still in the table, at the call and again when
-	 * the verb runs; otherwise it is refused with `HandleEndedError` (D30). So a
+	 * the verb runs; otherwise it is refused with `HandleEndedError` (D30). The
+	 * prompt names one over HTTP, and every verb does over the socket (D31). So a
 	 * close that lands while it waits in the queue refuses it, where without a
 	 * handle it reaches the disposed adapter, as above.
 	 */
@@ -913,8 +925,8 @@ export class SessionManager {
 	 * had. That is why the adapter says `"fork"`: unlike a rename, the parent's
 	 * id must not become a name for the fork (`#forkOnto`, OW-kekoji).
 	 */
-	fork(ref: SessionRef, entryId: string): Promise<SessionRef> {
-		return this.#serially(ref, (_session, adapter) => this.#forkOn(adapter, entryId));
+	fork(ref: SessionRef, entryId: string, handle?: string): Promise<SessionRef> {
+		return this.#serially(ref, (_session, adapter) => this.#forkOn(adapter, entryId), handle);
 	}
 
 	/** The body of a queued fork: fork, and park what the fork's attach will need. */
@@ -953,12 +965,13 @@ export class SessionManager {
 		index: number,
 		text: string,
 		images?: ImageInput[],
+		handle?: string,
 	): Promise<{ session: LiveSessionSummary; disposition: PromptDisposition }> {
 		const forked = await this.#serially(ref, async (_session, adapter) => {
 			const point = (await adapter.listForkPoints()).find((candidate) => candidate.index === index);
 			if (!point) throw new NotAForkPointError(index);
 			return this.#forkOn(adapter, point.id);
-		});
+		}, handle);
 		try {
 			await this.attach(forked);
 			const disposition = await this.submit(forked, text, images, null);
@@ -974,13 +987,13 @@ export class SessionManager {
 		}
 	}
 
-	setModel(ref: SessionRef, model: string): Promise<void> {
-		return this.#serially(ref, (_session, adapter) => adapter.setModel(model));
+	setModel(ref: SessionRef, model: string, handle?: string): Promise<void> {
+		return this.#serially(ref, (_session, adapter) => adapter.setModel(model), handle);
 	}
 
 	/** Written through to the backend; the name comes back in the adapter's state, and nowhere here (D27). */
-	setName(ref: SessionRef, name: string): Promise<void> {
-		return this.#serially(ref, (_session, adapter) => adapter.setName(name));
+	setName(ref: SessionRef, name: string, handle?: string): Promise<void> {
+		return this.#serially(ref, (_session, adapter) => adapter.setName(name), handle);
 	}
 
 	/**
@@ -991,7 +1004,7 @@ export class SessionManager {
 	 * not listed offers none. Inside the queue, so the model checked against is
 	 * the one a set-model queued ahead of this left (OW-zayefe).
 	 */
-	setEffort(ref: SessionRef, effort: string): Promise<void> {
+	setEffort(ref: SessionRef, effort: string, handle?: string): Promise<void> {
 		return this.#serially(ref, async (_session, adapter) => {
 			const { model } = adapter.getState();
 			const listed = (await adapter.listModels()).find((info) => info.id === model);
@@ -1003,11 +1016,11 @@ export class SessionManager {
 				);
 			}
 			await adapter.setEffort(effort);
-		});
+		}, handle);
 	}
 
-	compact(ref: SessionRef): Promise<void> {
-		return this.#serially(ref, (_session, adapter) => adapter.compact());
+	compact(ref: SessionRef, handle?: string): Promise<void> {
+		return this.#serially(ref, (_session, adapter) => adapter.compact(), handle);
 	}
 
 	/**

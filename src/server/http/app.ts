@@ -10,9 +10,10 @@
  * Ordering across the two channels is not guaranteed and nothing here assumes
  * it: a prompt POST answers as soon as the turn is *accepted*, and the turn's
  * events may well have reached the browser first.
+ *
+ * Beside them since ark3/agentpane#52, the socket that is to replace both
+ * (D31): `isSocketRequest`, `admitUpgrade` and `connect`, in `socket.ts`.
  */
-
-import { timingSafeEqual } from "node:crypto";
 
 import {
 	type AbortResponse,
@@ -38,17 +39,30 @@ import {
 	type SetEffortRequest,
 	type SetModelRequest,
 	type SetNameRequest,
+	ROUTES,
 	sessionKey,
 } from "../../shared/protocol.ts";
 import type { BackendAdapter } from "../adapters/types.ts";
 import { Broadcaster, type SseClient } from "./broadcaster.ts";
 import type { AppDeps } from "./deps.ts";
 import { classifyFailure, type Named } from "./failure.ts";
-import { createSession, editDraft, isBackendId, listModels, previewSession } from "./operations.ts";
+import { createSession, editDraft, isBackendId, listModels, previewSession, sessionName } from "./operations.ts";
 import { SessionManager, UnknownSessionError } from "./session-manager.ts";
+import { type Connection, openConnection, tokenMatches } from "./socket.ts";
 
 export interface App {
 	fetch(request: Request): Promise<Response>;
+	/** Whether a request is for the socket's path (D31), which the binding upgrades rather than fetches. */
+	isSocketRequest(request: Request): boolean;
+	/**
+	 * The refusal of a socket's upgrade, or null to let it proceed. The `Host`
+	 * and `Origin` checks run here, as on every route; the token does not,
+	 * since a browser cannot set a header on a socket, and arrives in the
+	 * first frame instead (D31 point 5).
+	 */
+	admitUpgrade(request: Request): Response | null;
+	/** One socket, from its upgrade to its close: see `src/server/http/socket.ts`. */
+	connect(send: (frame: string) => void, end: (code: number, reason: string) => void): Connection;
 	readonly sessions: SessionManager;
 	readonly broadcaster: Broadcaster;
 	/** Drop every stream and dispose every adapter. Server shutdown only. */
@@ -413,11 +427,7 @@ export function createApp(deps: AppDeps): App {
 				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
 				const body = await readJson<SetNameRequest>(request);
 				if (!body.ok) return body.response;
-				// One rule for all three backends, Pi's: as of `pi 1.0.0` it trims a
-				// name, refuses one empty after that, and stores line breaks as one
-				// space (`set_session_name` in `rpc-mode.js`, `appendSessionInfo`).
-				const name = typeof body.value.name === "string" ? body.value.name.replace(/[\r\n]+/g, " ").trim() : "";
-				if (name === "") return error(400, "bad_request", "name is required and must not be blank");
+				const name = sessionName(body.value.name);
 				// Written through, so only a session with a process to write to
 				// (D13, "Names are not marks"). The adapter's state change is what
 				// sends `sessions-changed` (`SessionManager.#onUpdate`).
@@ -478,6 +488,30 @@ export function createApp(deps: AppDeps): App {
 				}
 				return error(failure.status, failure.code, failure.detail, failure.named);
 			}
+		},
+		isSocketRequest(request) {
+			try {
+				return new URL(request.url).pathname === ROUTES.socket;
+			} catch {
+				// A relative URL, from an HTTP/1.0 request that names no host:
+				// `fetch` refuses it for that.
+				return false;
+			}
+		},
+		admitUpgrade(request) {
+			if (!isLoopbackHost(request)) {
+				return error(403, "forbidden_host", "this server answers only to a loopback name");
+			}
+			// A browser applies no same-origin policy to a socket, so this is the
+			// only check there is against a page elsewhere driving it.
+			if (!isTrustedRequestMetadata(request.headers)) {
+				return error(403, "forbidden_origin", "this API is reachable only from a local page");
+			}
+			if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
+			return null;
+		},
+		connect(send, end) {
+			return openConnection({ deps, sessions, broadcaster, apiToken, logError }, send, end);
 		},
 		sessions,
 		broadcaster,
@@ -591,19 +625,15 @@ function isLoopbackHost(request: Request): boolean {
 /**
  * The loopback bind and the checks above stop a browser; a local process can
  * send any header, so what stops it is a secret it cannot read. Only from the
- * `Authorization` header, never a cookie, which a browser attaches on its own,
- * or a query parameter, which lands in logs and history.
+ * `Authorization` header, or on the socket its first frame (D31), never a
+ * cookie, which a browser attaches on its own, or a query parameter, which
+ * lands in logs and history.
  *
- * Constant-time over equal lengths. A length mismatch still runs the same
- * comparison, of the token against itself, so the time spent says nothing
- * about how much of a guess was right.
+ * Constant-time, in `tokenMatches`.
  */
 function hasBearerToken(headers: Headers, expected: Buffer): boolean {
 	const match = /^Bearer +(\S+)$/i.exec(headers.get("authorization") ?? "");
-	if (match === null) return false;
-	const given = Buffer.from(match[1] as string, "utf8");
-	const sameLength = given.length === expected.length;
-	return timingSafeEqual(sameLength ? given : expected, expected) && sameLength;
+	return match !== null && tokenMatches(match[1] as string, expected);
 }
 
 function isLoopbackHostname(hostname: string): boolean {

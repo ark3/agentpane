@@ -29,6 +29,17 @@ export function isBackendId(value: unknown): value is BackendId {
 	return value === "pi" || value === "codex" || value === "claude";
 }
 
+/**
+ * One rule for all three backends, Pi's: as of `pi 1.0.0` it trims a name,
+ * refuses one empty after that, and stores line breaks as one space
+ * (`set_session_name` in `rpc-mode.js`, `appendSessionInfo`).
+ */
+export function sessionName(raw: unknown): string {
+	const name = typeof raw === "string" ? raw.replace(/[\r\n]+/g, " ").trim() : "";
+	if (name === "") throw new Refusal(400, "bad_request", "name is required and must not be blank");
+	return name;
+}
+
 export async function editDraft(text: string): Promise<string> {
 	const editor = process.env.EDITOR;
 	if (!editor) throw new Refusal(500, "editor_failed", "$EDITOR is not set");

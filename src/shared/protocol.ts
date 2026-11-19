@@ -8,11 +8,13 @@
  * `handle` on `SessionSummary` and beside `session` on every per-session
  * event (OW-suyinu), and the retirement of the event that had said a rename,
  * once both clients keyed by that handle (OW-mofuho). D27 raised it for
- * `SessionSummary.name` and the route that sets it (OW-jamaha).
+ * `SessionSummary.name` and the route that sets it (OW-jamaha). D31 raised it
+ * for the socket's frames (ark3/agentpane#52), which sit beside the SSE and
+ * REST types until the clients have moved and those go.
  *
  * Shape follows DESIGN D2 (SSE for server->client, REST for client->server)
  * and D3 (the server is authoritative; it sends assembled state, never raw
- * backend protocol events).
+ * backend protocol events); the socket is D31's.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -605,15 +607,135 @@ export interface ApiError {
 }
 
 // ---------------------------------------------------------------------------
+// Socket (D31): commands in, replies and events out, on one WebSocket
+// ---------------------------------------------------------------------------
+
+/** What a command on a live session names: the handle the client holds for it (D31 point 9). */
+export interface HandleParams {
+	handle: string;
+}
+
+/** What a command with no handle to name names: attach, preview, close, and a prompt from a detached view. */
+export interface RefParams {
+	ref: SessionRef;
+}
+
+/**
+ * A prompt names exactly one of the two (D30): the handle of the live session
+ * the sender's view holds, refused `not_attached` once it has ended; or the
+ * ref of a session the view knows is not running, which the server attaches
+ * if it must, its answer then naming the live session.
+ */
+export type PromptParams = Omit<PromptRequest, "handle"> & (
+	| { handle: string; ref?: never }
+	| { ref: SessionRef; handle?: never }
+);
+
+/**
+ * Every command and query the socket carries, by its `cmd`, with what it
+ * takes beside `id` and what a reply that admits it carries. The names are
+ * the Emacs helper's methods where it has one (`src/emacs/protocol.ts`); the
+ * results are the REST bodies, with `null` where a route answers 204, and a
+ * prompt's and an abort's always present.
+ *
+ * `hello` is the socket's first frame and carries the token (D31 point 5).
+ * The server sends nothing and runs nothing until one has; a first frame that
+ * is anything else, or a wrong token, closes the socket with
+ * `SOCKET_CLOSE.unauthorized`. Its reply follows the opening snapshots, so a
+ * client knows it is connected even when nothing is live.
+ *
+ * Close still names a ref, since one can arrive while an attach is starting,
+ * before any handle exists; whether it keeps that is ark3/agentpane#27's.
+ */
+export interface Commands {
+	hello: { params: { token: string }; result: null };
+	"sessions/list": { params: ListSessionsQuery; result: ListSessionsResponse };
+	"sessions/create": { params: CreateSessionRequest; result: CreateSessionResponse };
+	"sessions/preview": { params: RefParams; result: SessionPreviewResponse };
+	"sessions/attach": { params: RefParams; result: AttachSessionResponse };
+	"sessions/close": { params: RefParams; result: null };
+	"sessions/prompt": { params: PromptParams; result: PromptResponse };
+	"sessions/abort": { params: HandleParams; result: AbortResponse };
+	"sessions/compact": { params: HandleParams; result: null };
+	"sessions/dismissError": { params: HandleParams & DismissErrorRequest; result: null };
+	"sessions/setModel": { params: HandleParams & SetModelRequest; result: null };
+	"sessions/setEffort": { params: HandleParams & SetEffortRequest; result: null };
+	"sessions/setName": { params: HandleParams & SetNameRequest; result: null };
+	"sessions/forkPoints": { params: HandleParams; result: ForkPointsResponse };
+	"sessions/fork": { params: HandleParams & ForkRequest; result: ForkResponse };
+	"sessions/forkAndPrompt": { params: HandleParams & ForkAndPromptRequest; result: ForkAndPromptResponse };
+	"models/list": { params: { backend?: BackendId }; result: ModelsResponse };
+	"draft/edit": { params: EditDraftRequest; result: EditDraftResponse };
+}
+
+export type CommandName = keyof Commands;
+
+/** Client to server: one command, its `id` minted by the client and echoed on the reply. */
+export type CommandFrame = { [K in CommandName]: { id: string; cmd: K } & Commands[K]["params"] }[CommandName];
+
+/**
+ * The command was admitted, and everything it caused while it ran was written
+ * before this; what a turn emits after its prompt is admitted comes after
+ * (D31 point 3).
+ */
+export interface ReplyOk<K extends CommandName = CommandName> {
+	type: "reply";
+	id: string;
+	ok: true;
+	result: Commands[K]["result"];
+}
+
+/**
+ * The command was refused. `code` is what `ApiError.error` carries on the
+ * REST routes, from the same mapper, and `fork` and `attached` are as there
+ * (D30). An `id` no command frame carried is never answered: a frame that is
+ * not a JSON object with a string `id` closes the socket with
+ * `SOCKET_CLOSE.badFrame`.
+ */
+export interface ReplyFailed extends Pick<ApiError, "fork" | "attached"> {
+	type: "reply";
+	id: string;
+	ok: false;
+	code: string;
+	detail: string;
+}
+
+/** Server to client, in the order the server wrote them. */
+export type ServerFrame = { type: "event"; event: ServerEvent } | ReplyOk | ReplyFailed;
+
+/** The close codes the server sends of its own; a socket the runtime closed carries the runtime's. */
+export const SOCKET_CLOSE = {
+	/** The first frame was not a `hello` carrying the token. */
+	unauthorized: 4401,
+	/** A frame that was not a JSON object with a string `id`. */
+	badFrame: 4400,
+	/** The server is shutting down. */
+	goingAway: 1001,
+} as const;
+
+/**
+ * The largest frame the server takes, set rather than inherited (D31 point 8):
+ * an inbound frame past it costs the whole socket, not one request, so a
+ * client refuses a prompt over it before sending. 32 MB holds several
+ * screenshots, and a prompt's images come back in its upsert, which stays
+ * under the 40 MB measured to pass outbound (`docs/MANUAL_TESTING.md`, "What a
+ * WebSocket does under Bun and in Chromium (D31)").
+ */
+export const MAX_SOCKET_FRAME_BYTES = 32 * 1024 * 1024;
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
 /**
  * Single source of truth for paths, so client and server cannot drift.
- * Loopback only (D8), and every route but `GET events` needs the bearer token.
+ * Loopback only (D8), and every route but `GET events` and the socket's
+ * upgrade needs the bearer token.
  */
 export const ROUTES = {
 	events: "/api/events",
+	/** The upgrade to the socket (D31); its token arrives in the first frame, not a header. */
+	socket: "/api/socket",
 	sessions: "/api/sessions",
 	models: "/api/models",
 	editDraft: "/api/edit-draft",

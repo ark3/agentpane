@@ -25,7 +25,10 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AgentNotice, ServerEvent, SessionRef } from "../../shared/protocol.ts";
 
-/** A connected browser. One per `EventSource`. */
+/**
+ * A connected client: one per `EventSource`, or one per socket since D31
+ * (`addEventClient`), until the stream goes (ark3/agentpane#55).
+ */
 export interface SseClient {
 	readonly id: number;
 	send(event: ServerEvent): void;
@@ -90,15 +93,29 @@ export class Broadcaster {
 	}
 
 	addClient(write: SseWriter, onClose?: () => void): SseClient {
-		const client = new InternalClient(this.#nextClientId++, write, () => {
+		const client = this.#add((event) => write(formatSseFrame(event)), write, onClose);
+		// Reconnect fast: this is loopback and recovery is just a re-snapshot.
+		client.raw("retry: 500\n\n");
+		this.#startHeartbeat();
+		return client;
+	}
+
+	/**
+	 * A socket's client (D31): each event handed over as the object, in the
+	 * same synchronous fan-out as the stream's, and no retry directive or
+	 * heartbeat, since the runtime's own pings keep a socket open (D31 point 8).
+	 */
+	addEventClient(send: (event: ServerEvent) => void, onClose?: () => void): SseClient {
+		return this.#add(send, () => {}, onClose);
+	}
+
+	#add(send: (event: ServerEvent) => void, raw: SseWriter, onClose?: () => void): InternalClient {
+		const client = new InternalClient(this.#nextClientId++, send, raw, () => {
 			this.#clients.delete(client);
 			onClose?.();
 			if (this.#clients.size === 0) this.#stopHeartbeat();
 		});
 		this.#clients.add(client);
-		// Reconnect fast: this is loopback and recovery is just a re-snapshot.
-		client.raw("retry: 500\n\n");
-		this.#startHeartbeat();
 		return client;
 	}
 
@@ -238,6 +255,7 @@ class InternalClient implements SseClient {
 
 	constructor(
 		readonly id: number,
+		private readonly deliver: (event: ServerEvent) => void,
 		private readonly write: SseWriter,
 		private readonly onClose: () => void,
 	) {}
@@ -247,14 +265,18 @@ class InternalClient implements SseClient {
 	}
 
 	send(event: ServerEvent): void {
-		this.raw(formatSseFrame(event));
+		this.#guarded(() => this.deliver(event));
 	}
 
-	/** Write a pre-framed chunk (comments, retry directives). */
+	/** Write a pre-framed chunk (comments, retry directives). A socket's client drops it. */
 	raw(chunk: string): void {
+		this.#guarded(() => this.write(chunk));
+	}
+
+	#guarded(output: () => void): void {
 		if (this.#closed) return;
 		try {
-			this.write(chunk);
+			output();
 		} catch {
 			// The socket went away between our last write and this one. A dead
 			// client is a normal event -- it must never propagate into the
