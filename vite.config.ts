@@ -17,12 +17,14 @@ export default defineConfig({
 	},
 	server: {
 		// Loopback only (D8). The dev server proxies API traffic to the Bun
-		// server so the client sees one origin.
+		// server so the client sees one origin, the socket's upgrade included
+		// (D31).
 		host: "127.0.0.1",
 		proxy: {
 			"/api": {
 				target: `http://127.0.0.1:${DEFAULT_PORT}`,
 				changeOrigin: false,
+				ws: true,
 			},
 		},
 	},
