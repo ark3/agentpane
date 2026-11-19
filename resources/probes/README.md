@@ -621,5 +621,5 @@ Needs `bun install`, for `@playwright/test`, unless run with `--skip-chromium`.
 `--chromium` names the browser binary where Playwright's own download is not the one installed, as in a claude.ai cloud container (`docs/ENVIRONMENT.md`, "Cloud containers").
 Costs nothing and takes about 20s.
 
-Verified with: `bun 1.4.4` and Chromium 157.0.8103.78 in a claude.ai cloud container, 2026-11-19; not yet run on the home server.
+Verified with: `bun 1.4.4` and Chromium 157.0.8103.78 in a claude.ai cloud container, and `bun 1.4.0`, `bun 1.4.4` and Chromium 151.0.7922.34 on the home server, 2026-11-19.
 What it showed is `docs/MANUAL_TESTING.md`, "What a WebSocket does under Bun and in Chromium (D31)".

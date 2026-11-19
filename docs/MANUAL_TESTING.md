@@ -5054,21 +5054,27 @@ The owner reported that the browser's paste prompt and the Emacs helper both wor
 
 ## What a WebSocket does under Bun and in Chromium (D31)
 
-Run in a claude.ai cloud container on 2026-11-19, on `bun 1.4.4` and Chromium 157.0.8103.78 (the container's `chromium_headless_shell-1243`), with `bun resources/probes/websocket_runtime_probe.ts --chromium <that binary>`.
-Not run on the home server, whose Bun was 1.4.0 when last recorded, so each line below is to be read again there before D31's build leans on it.
+Run first in a claude.ai cloud container on 2026-11-19, on `bun 1.4.4` and Chromium 157.0.8103.78 (the container's `chromium_headless_shell-1243`), with `bun resources/probes/websocket_runtime_probe.ts --chromium <that binary>`.
+Run again on the home server the same day, on its system `bun 1.4.0` and Playwright's Chromium 151.0.7922.34, with `bun resources/probes/websocket_runtime_probe.ts`; six runs gave the same output.
+There Bun's client and one frame differed, both noted below, and every other line matched.
+To tell the version from the machine, the npm `@oven/bun-linux-x64@1.4.4` binary, installed into a throwaway directory beside the system Bun, ran the probe three times on the home server and matched the cloud run in every line.
 No agentpane code and no backend took part: each server was a bare `Bun.serve` on a free loopback port.
 
-**Both clients handled one message per task.**
+**Chromium's client and Bun 1.4.4's handled one message per task; Bun 1.4.0's ran two messages' handlers before either's continuations.**
 The server wrote six frames in one synchronous run, the third of 200 kB.
 In each `message` handler the client started a `then` and an `async` function awaiting twice, and logged all three.
-In Bun's client and in Chromium's the log read `msg0, then0, await0, msg1, ...` through `msg5`: every continuation a message started ran before the next message's handler.
+In Bun 1.4.4's client, Chromium 157's and Chromium 151's the log read `msg0, then0, await0, msg1, ...` through `msg5`: every continuation a message started ran before the next message's handler.
+In Bun 1.4.0's it read `msg0, msg1, then0, then1, await0, await1`, then one message per task from `msg2` through `msg5`, in each of six runs.
+The handlers still ran in arrival order; what ran late was the work a handler deferred.
 
 **Default pings kept an idle socket open, and `Bun.serve`'s own `idleTimeout` did not reach it.**
+This held in both places and on both Bun versions.
 With `websocket: { idleTimeout: 4 }` and `sendPings` left at its default, a client that sent nothing was still open after 14s, and the server's `pong` handler had run three times.
 With `sendPings: false` beside it, the same client was closed with 1006 after 8.0s.
 With `Bun.serve`'s `idleTimeout: 3` and the `websocket` options at their defaults, the client was still open after 14s and the server saw no pong.
 
 **Frames, under the default `websocket` options.**
+Every row was the same on both Bun versions except the 130 MB frame from the server.
 
 | Size | Server to client | Client to server |
 |---|---|---|
@@ -5076,7 +5082,7 @@ With `Bun.serve`'s `idleTimeout: 3` and the `websocket` options at their default
 | 15 MB | `send()` returned -1; received | received |
 | 17 MB | `send()` returned -1; received | the server closed the socket, 1006 "Received too big message" |
 | 40 MB | `send()` returned -1; received | closed, the same |
-| 130 MB | `send()` returned -1; the client saw close 1006 | closed, the same |
+| 130 MB | `send()` returned -1; the client saw close 1006 on `bun 1.4.4`, 1009 on `bun 1.4.0` | closed, the same |
 
 So an inbound frame past 16 MB costs the whole connection, not that one request, and an outbound one somewhere between 40 MB and 130 MB does too.
 Which end refused the 130 MB outbound frame was not determined.
