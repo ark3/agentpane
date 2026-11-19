@@ -271,7 +271,8 @@ const api: AgentpaneApi = {
 		messages.forEach((message, index) => {
 			if (message.role === "user") points.push({ id: `entry-${index}`, text: "", index });
 		});
-		return { points, forkStopsTurn: false };
+		// What the server answers for a Pi session (D30): its fork stops a running turn.
+		return { points, forkStopsTurn: true };
 	},
 	/**
 	 * A self-fork: this harness drives one session, and what the browser is here
@@ -279,9 +280,9 @@ const api: AgentpaneApi = {
 	 * action row, not the backends' fork asymmetry -- which is the server's, and
 	 * is settled live in MANUAL_TESTING.md.
 	 */
-	/** No client sends it yet (ark3/agentpane#51). */
+	/** No spec here sends an edit, so one that does fails until this answers. */
 	async forkAndPrompt(): Promise<never> {
-		throw new Error("the browser sends no fork-and-prompt yet");
+		throw new Error("this harness sends no edit");
 	},
 	async fork() {
 		return REF;

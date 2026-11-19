@@ -684,8 +684,9 @@ export class SessionManager {
 	 *  - `abort`. It exists to reach a running turn, which is never an item here,
 	 *    so all it could wait behind is a settings call, a compaction or a fork,
 	 *    and a stop must not wait out a Pi compaction. Left out, it also stays
-	 *    what it was for the second abort `forkAndSubmit` sends ahead of a Pi
-	 *    fork (OW-relehi): harmless, since the fork abandons the turn (D15).
+	 *    what it was for the second abort a client sent ahead of a Pi fork
+	 *    until ark3/agentpane#51, which agentpane-mode's `f` still sends
+	 *    (OW-relehi): harmless, since the fork abandons the turn (D15).
 	 *  - `listForkPoints`. A read: it changes nothing a verb here depends on,
 	 *    and its answer can be stale by the time a client acts on it whether or
 	 *    not it waits.

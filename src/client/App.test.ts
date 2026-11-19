@@ -15,7 +15,7 @@ import {
 	type SessionSummary,
 } from "$shared/protocol.ts";
 import App from "./App.svelte";
-import type { AgentpaneApi, EventHandlers } from "./api.ts";
+import { ApiClientError, type AgentpaneApi, type EventHandlers } from "./api.ts";
 import { createController, type AgentpaneController, type ControllerView } from "./controller.ts";
 import { previewMessages } from "./preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "./session-state.ts";
@@ -24,10 +24,12 @@ import { openToolCards } from "./render/tools/test-support.ts";
 
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
 const codexSession: SessionRef = { backend: "codex", id: "codex-1" };
-/** No client sends fork-and-prompt yet (ark3/agentpane#51), so a fake that is asked to fails the test. */
-const forkAndPromptUnsent = async (): Promise<never> => {
-	throw new Error("the browser sends no fork-and-prompt yet");
+/** For a test that never sends an edit: a fake asked to fork fails it. */
+const forkAndPromptUnused = async (): Promise<never> => {
+	throw new Error("this test sends no edit");
 };
+/** What the server's fork-points answer says of a fork stopping a running turn, as of ark3/agentpane#47: Pi alone. */
+const serverForkStopsTurn = (ref: SessionRef): boolean => ref.backend === "pi";
 
 function summary(
 	ref: SessionRef,
@@ -72,7 +74,14 @@ function state(
 	return { ...initialClientState(), ...rest, ...(suppliedSessions ? { sessions } : {}) };
 }
 
+/**
+ * A view as the controller publishes it. Unless told otherwise, it holds the
+ * server's fork-stops-turn answer for every live session in it, as a
+ * controller that has asked each would (`serverForkStopsTurn`).
+ */
 function view(overrides: Partial<ControllerView> = {}): ControllerView {
+	const sessions = overrides.state?.sessions ?? {};
+	const forkStopsTurn = Object.fromEntries(Object.entries(sessions).map(([handle, session]) => [handle, serverForkStopsTurn(session.ref)]));
 	return {
 		state: state(),
 		draft: "",
@@ -87,6 +96,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		preview: null,
 		previewFailure: null,
 		forkIndices: null,
+		forkStopsTurn,
 		...overrides,
 	};
 }
@@ -228,8 +238,8 @@ class FakeController implements AgentpaneController {
 	/** Every fork the shell asked for, in order, with the images it carried. */
 	forked: Array<{ index: number; images: { mimeType: string; base64: string }[] | undefined }> = [];
 	/**
-	 * What `forkAndSubmit` resolves to -- the attach reply of the session the
-	 * prompt landed on, or null for "the fork never landed". The real one hands
+	 * What `forkAndSubmit` resolves to -- the fork's summary from the
+	 * request's reply, or null for "the fork never landed". The real one hands
 	 * that back rather than reading `state.selected` back, so the fake must too
 	 * (OW-mifuki).
 	 */
@@ -239,9 +249,8 @@ class FakeController implements AgentpaneController {
 	/** Stands in for whatever the server does mid-fork, e.g. Pi's move onto the fork's handle. */
 	onForkAndSubmit: ((index: number) => void) | null = null;
 
-	async forkAndSubmit(index: number, images?: { mimeType: string; base64: string }[], onAttached?: (handle: string) => void) {
+	async forkAndSubmit(index: number, images?: { mimeType: string; base64: string }[]) {
 		this.forked.push({ index, images });
-		if (this.forkResult) onAttached?.(this.forkResult.handle);
 		this.onForkAndSubmit?.(index);
 		return this.forkResult ? { session: this.forkResult, disposition: this.forkDisposition } : null;
 	}
@@ -508,8 +517,8 @@ describe("App", () => {
 				effortSets.push(effort);
 			},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
+			forkPoints: async (ref) => ({ points: [], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: forkAndPromptUnused,
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -960,8 +969,8 @@ describe("App", () => {
 			setName: async (ref, name) => {
 				named.push({ ref, name });
 			},
-			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
+			forkPoints: async (ref) => ({ points: [], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: forkAndPromptUnused,
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -2386,8 +2395,8 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
+			forkPoints: async (ref) => ({ points: [], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: forkAndPromptUnused,
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -2825,8 +2834,8 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
+			forkPoints: async (ref) => ({ points: [], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: forkAndPromptUnused,
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -3167,7 +3176,8 @@ describe("App", () => {
 		expect(primary()).toHaveTextContent("Fork");
 
 		// Scrolled up and hit edit while a Pi turn was running: submitting stops it
-		// first, because Pi's fork abandons that turn anyway (D15, OW-bakosi).
+		// first, because Pi's fork abandons that turn anyway, and the server's
+		// fork-points answer says so (D15, D30).
 		controller.publish(view({ draft: "first draft", state: attachedState(messages, piSession, true) }));
 		await tick();
 		expect(primary()).toHaveTextContent("Stop and fork");
@@ -3180,8 +3190,32 @@ describe("App", () => {
 	});
 
 	/**
+	 * The labels read the server's answer, not the backend (D30): whatever a
+	 * backend's name, a session whose fork the server says stops a running turn
+	 * reads stop-first while one runs, and one it says does not reads plain.
+	 */
+	it.each([
+		["pi", false, "Fork", "Edit last message"],
+		["codex", true, "Stop and fork", "Stop and edit"],
+	] as const)("labels a streaming %s session from the server's answer that a fork stops its turn: %s (D30)", async (backend, stops, primaryLabel, shortcut) => {
+		const session: SessionRef = { backend, id: `${backend}-1` };
+		const messages = [user("first draft"), assistant([{ type: "text", text: "an answer" }])];
+		const controller = new FakeController(view({
+			state: attachedState(messages, session, true),
+			forkStopsTurn: { [sessionKey(session)]: stops },
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		expect(screen.getByRole("button", { name: shortcut })).toBeInTheDocument();
+		await fireEvent.click(screen.getAllByRole("button", { name: "Edit message" })[0]!);
+		expect(container.querySelector("button[type='submit']")).toHaveTextContent(primaryLabel);
+	});
+
+	/**
 	 * The same button on the backends whose parent turn survives the fork
-	 * (D15, OW-bakosi): nothing is stopped, so the label must not say it is.
+	 * (D15, OW-bakosi), as the server answers for them: nothing is stopped, so
+	 * the label must not say it is.
 	 * Stop is still offered -- the turn is stoppable, it is just not what
 	 * submitting this edit does.
 	 */
@@ -3396,12 +3430,12 @@ describe("App", () => {
 	 * never reaches the controller with it at all (OW-kelede). Reaching it and
 	 * being *refused* would now be harmless on this path, though not on the
 	 * plain one: a refusal resolves null and `send()` disarms, but a fork arms
-	 * its follow and badge only when its attach replies, which a refused press
+	 * its follow and badge only at its request's reply, which a refused press
 	 * never reaches, so it has no key to disarm (OW-vitefo).
 	 */
 	it("keeps the first fork's follow and badge when send is pressed twice in edit mode (OW-kelede)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "thread-fork" };
-		let resolveFork = (_ref: SessionRef) => {};
+		let resolveFork = () => {};
 		let forks = 0;
 		let emit: (event: ServerEvent) => void = () => {};
 		const api: AgentpaneApi = {
@@ -3418,15 +3452,17 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
-			fork: async () => {
+			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: async () => {
 				forks += 1;
 				if (forks > 1) throw new Error("fork refused");
-				return new Promise<SessionRef>((resolve) => {
+				await new Promise<void>((resolve) => {
 					resolveFork = resolve;
 				});
+				emit({ type: "snapshot", session: forkRef, handle: "h-fork", seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
 			},
+			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
 				emit = handlers.onEvent;
@@ -3449,7 +3485,7 @@ describe("App", () => {
 			await fireEvent.submit(form);
 			await tick();
 
-			resolveFork(forkRef);
+			resolveFork();
 			await tick();
 			await tick();
 
@@ -3470,15 +3506,15 @@ describe("App", () => {
 
 	/**
 	 * Forked from a parent whose turn this tab did not start, the parent's turn
-	 * ends during the fork: on Pi the fork's own abort ends it, and on Codex it
-	 * may simply finish. That end is not this tab's to be told about; the fork's
-	 * is, and its turn streams while its prompt is still in flight (OW-koledi).
+	 * ends during the fork: on Pi the server's fork stops it, and on Codex it
+	 * may simply finish. That end is not this tab's to be told about; the
+	 * fork's is, and its turn is streaming by the time the request answers
+	 * (OW-koledi), which is all this tab hears of its start.
 	 */
 	it.each(["pi", "codex"] as const)("badges the fork's turn and not the streaming %s parent's that ends mid-fork (OW-koledi)", async (backend) => {
 		const parentRef: SessionRef = { backend, id: "parent" };
 		const forkRef: SessionRef = { backend, id: "fork" };
-		let resolveAbort = () => {};
-		let resolveFork = (_ref: SessionRef) => {};
+		let answer = () => {};
 		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string, isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
@@ -3489,29 +3525,33 @@ describe("App", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(parentRef)],
 			createSession: async () => parentRef,
-			attach: async (ref) => {
-				if (ref.id === forkRef.id) emit(snapshot(forkRef, "h-fork", false));
-				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
-			},
+			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
-			// The fork's turn starts under its own handle before the POST returns.
-			prompt: async () => emit(status(forkRef, "h-fork", 2, true)),
+			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),
-			// Pi's `forkAndSubmit` stops the parent's turn before it forks.
-			abort: () => new Promise<void>((resolve) => {
-				resolveAbort = resolve;
-			}),
+			abort: async () => {},
 			compact: async () => {},
 			close: async () => {},
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
-			fork: () => new Promise<SessionRef>((resolve) => {
-				resolveFork = resolve;
-			}),
+			// The fork's own answer never comes, so no publish of it refreshes the
+			// watch: what the reply arms from is all that badges.
+			forkPoints: (ref) => ref.id === forkRef.id
+				? new Promise<never>(() => {})
+				: Promise.resolve({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			// The server's order: the fork attached, its turn started under its own
+			// handle, and only then the reply.
+			forkAndPrompt: async () => {
+				await new Promise<void>((resolve) => {
+					answer = resolve;
+				});
+				emit(snapshot(forkRef, "h-fork", false));
+				emit(status(forkRef, "h-fork", 2, true));
+				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
+			},
+			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
 				emit = handlers.onEvent;
@@ -3532,88 +3572,21 @@ describe("App", () => {
 			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
 			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 			await tick();
-			// On Pi this is the abort's doing; Codex's parent turn survives the fork
+			// On Pi this is the server's stop; Codex's parent turn survives the fork
 			// and may simply finish while it is out.
 			emit(status(parentRef, "h-parent", 2, false));
 			await tick();
 			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon.svg");
 
-			resolveAbort();
-			await tick();
 			// Pi's fork moves the live process off the parent's handle (D26 point 1).
 			if (backend === "pi") emit({ type: "ended", session: parentRef, handle: "h-parent" });
-			resolveFork(forkRef);
+			answer();
 			await tick();
 			await tick();
 			expect(controller.getView().state.sessions["h-fork"]?.isStreaming).toBe(true);
 			emit(status(forkRef, "h-fork", 3, false));
 			await tick();
 
-			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon-badged.svg");
-		} finally {
-			document.hasFocus = hasFocus;
-		}
-	});
-
-	it("badges a fork whose whole turn ran while its prompt's POST was still out (OW-koledi)", async () => {
-		const forkRef: SessionRef = { backend: "codex", id: "fork" };
-		let emit: (event: ServerEvent) => void = () => {};
-		const snapshot = (session: SessionRef, handle: string): ServerEvent => ({
-			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
-		});
-		const status = (seq: number, isStreaming: boolean): ServerEvent => ({
-			type: "status", session: forkRef, handle: "h-fork", seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
-		});
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(codexSession)],
-			createSession: async () => codexSession,
-			attach: async (ref) => {
-				const handle = ref.id === forkRef.id ? "h-fork" : "h-parent";
-				emit(snapshot(ref, handle));
-				return { ...summary(ref), handle };
-			},
-			preview: async (ref) => ({ ref, turns: [] }),
-			// A short turn, start to end, before the POST that started it returns.
-			// A macrotask apart, as two SSE events are: in one tick the two
-			// publishes coalesce and the watch never sees the turn at all.
-			prompt: async () => {
-				emit(status(2, true));
-				await new Promise((resolve) => setTimeout(resolve, 0));
-				emit(status(3, false));
-			},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
-			fork: async () => forkRef,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
-		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
-		const hasFocus = document.hasFocus;
-		document.hasFocus = () => false;
-		try {
-			render(App, { props: { controller } });
-			await controller.select(codexSession);
-			await tick();
-
-			await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
-			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
-			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
-			await new Promise((resolve) => setTimeout(resolve, 0));
-			await tick();
-
-			expect(controller.getView().sending).toBe(false);
 			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon-badged.svg");
 		} finally {
 			document.hasFocus = hasFocus;
@@ -3627,7 +3600,7 @@ describe("App", () => {
 	 */
 	it("keeps the parent's own watch on the parent through a fork taken mid-turn (OW-koledi)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "fork" };
-		let resolveFork = (_ref: SessionRef) => {};
+		let answer = () => {};
 		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
@@ -3644,9 +3617,7 @@ describe("App", () => {
 				return { ...summary(ref), handle };
 			},
 			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async (ref) => {
-				if (ref.id === forkRef.id) emit(status(forkRef, "h-fork", 2, true));
-			},
+			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),
 			abort: async () => {},
 			compact: async () => {},
@@ -3655,11 +3626,16 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
-			fork: () => new Promise<SessionRef>((resolve) => {
-				resolveFork = resolve;
-			}),
+			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: async () => {
+				await new Promise<void>((resolve) => {
+					answer = resolve;
+				});
+				emit(snapshot(forkRef, "h-fork"));
+				emit(status(forkRef, "h-fork", 2, true));
+				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
+			},
+			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
 				emit = handlers.onEvent;
@@ -3688,7 +3664,7 @@ describe("App", () => {
 			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
 			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 			await tick();
-			resolveFork(forkRef);
+			answer();
 			await tick();
 			await tick();
 			expect(controller.getView().sending).toBe(false);
@@ -3712,14 +3688,15 @@ describe("App", () => {
 	 * stops that turn on purpose, so its end raises nothing, as it raises
 	 * nothing in agentpane-mode (OW-dunahe); Codex's survives the fork and its
 	 * end still badges (OW-rihanu). The parent's `status:false` lands while the
-	 * abort's POST is still out, the earliest it can.
+	 * request is still out, the earliest it can, and the client sends no stop
+	 * of its own: the label read the server's answer, and the watch went with
+	 * it as the request went out (D30).
 	 */
 	it.each(["pi", "codex"] as const)("badges the %s parent turn this tab sent, forked mid-turn, only where the fork leaves it running (OW-rihanu)", async (backend) => {
 		const parentRef: SessionRef = { backend, id: "parent" };
 		const forkRef: SessionRef = { backend, id: "fork" };
 		let aborts = 0;
-		let resolveAbort = () => {};
-		let resolveFork = (_ref: SessionRef) => {};
+		let answer = () => {};
 		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
@@ -3736,15 +3713,10 @@ describe("App", () => {
 				return { ...summary(ref), handle };
 			},
 			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async (ref) => {
-				if (ref.id === forkRef.id) emit(status(forkRef, "h-fork", 2, true));
-			},
+			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),
-			abort: () => {
+			abort: async () => {
 				aborts += 1;
-				return new Promise<void>((resolve) => {
-					resolveAbort = resolve;
-				});
 			},
 			compact: async () => {},
 			close: async () => {},
@@ -3752,11 +3724,16 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
-			fork: () => new Promise<SessionRef>((resolve) => {
-				resolveFork = resolve;
-			}),
+			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: async () => {
+				await new Promise<void>((resolve) => {
+					answer = resolve;
+				});
+				emit(snapshot(forkRef, "h-fork"));
+				emit(status(forkRef, "h-fork", 2, true));
+				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
+			},
+			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
 				emit = handlers.onEvent;
@@ -3784,18 +3761,16 @@ describe("App", () => {
 			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
 			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 			await tick();
-			expect(aborts).toBe(backend === "pi" ? 1 : 0);
-			// On Pi this is the abort's doing; Codex's turn simply finishes.
+			expect(aborts).toBe(0);
+			// On Pi this is the server's stop; Codex's turn simply finishes.
 			emit(status(parentRef, "h-parent", 3, false));
 			await tick();
 			expect(icon()).toBe(backend === "pi" ? "/favicon.svg" : "/favicon-badged.svg");
 
 			window.dispatchEvent(new Event("focus"));
-			resolveAbort();
-			await tick();
 			// Pi's fork moves the live process off the parent's handle (D26 point 1).
 			if (backend === "pi") emit({ type: "ended", session: parentRef, handle: "h-parent" });
-			resolveFork(forkRef);
+			answer();
 			await tick();
 			await tick();
 			expect(controller.getView().sending).toBe(false);
@@ -3809,7 +3784,7 @@ describe("App", () => {
 		}
 	});
 
-	it("drops the watch armed on a fork whose prompt failed, so a turn there from elsewhere raises nothing (OW-koledi)", async () => {
+	it("arms no watch on a fork whose prompt was refused, so a turn there from elsewhere raises nothing (OW-koledi, D30)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "fork" };
 		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string): ServerEvent => ({
@@ -3822,14 +3797,11 @@ describe("App", () => {
 			listSessions: async () => [summary(codexSession)],
 			createSession: async () => codexSession,
 			attach: async (ref) => {
-				const handle = ref.id === forkRef.id ? "h-fork" : "h-parent";
-				emit(snapshot(ref, handle));
-				return { ...summary(ref), handle };
+				emit(snapshot(ref, "h-parent"));
+				return { ...summary(ref), handle: "h-parent" };
 			},
 			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {
-				throw new Error("prompt refused");
-			},
+			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),
 			abort: async () => {},
 			compact: async () => {},
@@ -3838,8 +3810,12 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
+			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			// The fork is created and attached, and its prompt refused (D30).
+			forkAndPrompt: async () => {
+				emit(snapshot(forkRef, "h-fork"));
+				throw new ApiClientError(400, "backend_refused", "prompt refused", { ref: forkRef, handle: "h-fork" });
+			},
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -3863,7 +3839,8 @@ describe("App", () => {
 			await tick();
 			expect(screen.getByText("prompt refused")).toBeInTheDocument();
 
-			// Another client prompts the fork this tab attached and never prompted.
+			expect(controller.getView().state.selected).toEqual(forkRef);
+			// Another client prompts the fork this tab never prompted.
 			emit(status(2, true));
 			await tick();
 			emit(status(3, false));
@@ -3878,12 +3855,11 @@ describe("App", () => {
 	/**
 	 * The fork's half of OW-yobayi: an Edit whose new text a Pi extension command
 	 * handles still lands a fork, attached and selected, but starts no turn on
-	 * it, so the follow and watch armed on the fork's handle at its attach come
-	 * down. A turn on the fork afterwards -- another client's, or one the
+	 * it, so the reply arms neither follow nor watch on the fork's handle. A turn on the fork afterwards -- another client's, or one the
 	 * extension starts of its own, which this tab cannot tell apart -- is
 	 * followed and badged by neither.
 	 */
-	it("drops the follow and watch armed on a fork whose prompt the backend handled, and says it started no turn (OW-yobayi)", async () => {
+	it("arms no follow or watch on a fork whose prompt the backend handled, and says it started no turn (OW-yobayi)", async () => {
 		const parentRef: SessionRef = { backend: "pi", id: "parent" };
 		const forkRef: SessionRef = { backend: "pi", id: "fork" };
 		let emit: (event: ServerEvent) => void = () => {};
@@ -3893,13 +3869,9 @@ describe("App", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(parentRef)],
 			createSession: async () => parentRef,
-			attach: async (ref) => {
-				// A Pi fork at a user message keeps nothing from that message on.
-				if (ref.id === forkRef.id) emit(snapshot(forkRef, "h-fork", 1, [], false));
-				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
-			},
+			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => ({ disposition: "handled" }),
+			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),
 			abort: async () => {},
 			compact: async () => {},
@@ -3908,8 +3880,12 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
+			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: async () => {
+				// A Pi fork at a user message keeps nothing from that message on.
+				emit(snapshot(forkRef, "h-fork", 1, [], false));
+				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "handled" };
+			},
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -4093,15 +4069,15 @@ describe("App", () => {
 	 * The follow, like the badge, is the fork's from the moment its handle is
 	 * known. Armed on a parent that is streaming, the parent's own transcript
 	 * already holds the edited message, so the arming engaged there at once --
-	 * and the parent's turn ending mid-fork (Pi's abort; Codex finishing on its
-	 * own) released it before it ever reached the fork (OW-vitefo).
+	 * and the parent's turn ending mid-fork (Pi's stop inside the fork; Codex
+	 * finishing on its own) released it before it ever reached the fork
+	 * (OW-vitefo).
 	 */
 	it.each(["pi", "codex"] as const)("follows the fork's turn when forked from a streaming %s parent whose turn ends mid-fork (OW-vitefo)", async (backend) => {
 		const parentRef: SessionRef = { backend, id: "parent" };
 		const forkRef: SessionRef = { backend, id: "fork" };
 		const reworded = user("reworded");
-		let resolveAbort = () => {};
-		let resolveFork = (_ref: SessionRef) => {};
+		let answer = () => {};
 		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string, seq: number, messages: AgentMessage[], isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session, handle, seq, messages, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
@@ -4112,27 +4088,27 @@ describe("App", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(parentRef)],
 			createSession: async () => parentRef,
-			attach: async (ref) => {
-				if (ref.id === forkRef.id) emit(snapshot(forkRef, "h-fork", 1, [reworded], false));
-				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
-			},
+			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => emit(status(forkRef, "h-fork", 2, true)),
+			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),
-			abort: () => new Promise<void>((resolve) => {
-				resolveAbort = resolve;
-			}),
+			abort: async () => {},
 			compact: async () => {},
 			close: async () => {},
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
-			fork: () => new Promise<SessionRef>((resolve) => {
-				resolveFork = resolve;
-			}),
+			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: async () => {
+				await new Promise<void>((resolve) => {
+					answer = resolve;
+				});
+				emit(snapshot(forkRef, "h-fork", 1, [reworded], false));
+				emit(status(forkRef, "h-fork", 2, true));
+				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
+			},
+			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
 				emit = handlers.onEvent;
@@ -4158,10 +4134,8 @@ describe("App", () => {
 		emit(status(parentRef, "h-parent", 2, false));
 		await tick();
 
-		resolveAbort();
-		await tick();
 		if (backend === "pi") emit({ type: "ended", session: parentRef, handle: "h-parent" });
-		resolveFork(forkRef);
+		answer();
 		await tick();
 		await tick();
 		expect(controller.getView().state.selected).toEqual(forkRef);
@@ -4182,13 +4156,13 @@ describe("App", () => {
 	/**
 	 * Turn marks, like the badge and follow, belong to the session whose turn
 	 * they observed. A Codex parent keeps running after the fork, so a turn of
-	 * its own that ends while the fork is selected ended unseen, and the
-	 * parent's row keeps its dot once the fork lands (OW-pirobi).
+	 * its own that ends once the fork has landed and taken the selection ended
+	 * unseen, and the parent's row keeps its dot (OW-pirobi).
 	 */
-	it("keeps the finished mark on a streaming Codex parent whose turn ends mid-fork (OW-pirobi)", async () => {
+	it("keeps the finished mark on a streaming Codex parent whose turn ends after its fork lands (OW-pirobi)", async () => {
 		const parentRef: SessionRef = { backend: "codex", id: "parent" };
 		const forkRef: SessionRef = { backend: "codex", id: "fork" };
-		let resolvePrompt = () => {};
+		let answer = () => {};
 		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string, messages: AgentMessage[], isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
@@ -4199,15 +4173,9 @@ describe("App", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(parentRef)],
 			createSession: async () => parentRef,
-			attach: async (ref) => {
-				if (ref.id === forkRef.id) emit(snapshot(forkRef, "h-fork", [user("reworded")], false));
-				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
-			},
+			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
-			// The fork's prompt stays out until the test lets it go.
-			prompt: () => new Promise<void>((resolve) => {
-				resolvePrompt = resolve;
-			}),
+			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),
 			abort: async () => {},
 			compact: async () => {},
@@ -4216,8 +4184,15 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
+			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			// The request stays out until the test lets it go.
+			forkAndPrompt: async () => {
+				await new Promise<void>((resolve) => {
+					answer = resolve;
+				});
+				emit(snapshot(forkRef, "h-fork", [user("reworded")], false));
+				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
+			},
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -4237,19 +4212,17 @@ describe("App", () => {
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await tick();
-		expect(controller.getView().state.selected).toEqual(forkRef);
 		expect(controller.getView().sending).toBe(true);
-
-		// Codex's parent turn survives the fork and finishes while the fork's
-		// prompt is still out.
-		emit(status(parentRef, "h-parent", 2, false));
-		await tick();
-		expect(nav.getByLabelText("Turn finished").closest("button")).toHaveTextContent("first draft");
-
-		resolvePrompt();
+		answer();
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await tick();
+		expect(controller.getView().state.selected).toEqual(forkRef);
 		expect(controller.getView().sending).toBe(false);
+
+		// Codex's parent turn survives the fork and finishes with the fork on
+		// screen.
+		emit(status(parentRef, "h-parent", 2, false));
+		await tick();
 
 		expect(nav.getByLabelText("Turn finished").closest("button")).toHaveTextContent("first draft");
 	});
@@ -4288,7 +4261,7 @@ describe("App", () => {
 			.toEqual(["0"]);
 		// Still "Stop and fork" here, and that is the truth rather than a stale label:
 		// `controller.abort()` does not clear `isStreaming` -- only a server event
-		// does -- and `forkAndSubmit` re-checks it and aborts again before forking.
+		// does -- and the server's fork stops the session again before it forks.
 		expect(primary()).toHaveTextContent("Stop and fork");
 
 		// The server reporting the turn stopped, which is the only thing that ever
@@ -4304,12 +4277,12 @@ describe("App", () => {
 	 * in the composer, driven through the real controller and the real abort
 	 * answer (OW-fahoti). The first stop answers with `queued` once `answer` is
 	 * called -- with no body at all when `queued` is empty, as the route's 204
-	 * does -- and any later stop, such as the fork's own, finds the queue
-	 * already empty. Every prompt is held until `land` is called or `refuse`
-	 * fails it, so a test can answer while a fork or a send is still out;
-	 * `prompts` is every prompt's text, and `aborts` counts the stops that
-	 * went out. With `streaming` false the turn has already ended, so a fork
-	 * stops nothing. The external editor is held open until `edit` answers it
+	 * does -- and any later stop finds the queue already empty. Every prompt,
+	 * a fork's included, is held until `land` is called or `refuse` fails it,
+	 * so a test can answer while a fork or a send is still out; a fork's
+	 * refusal names the fork, which the server attached before it prompted
+	 * (D30). `prompts` is every prompt's text, and `aborts` counts the stops
+	 * that went out. With `streaming` false the turn has already ended. The external editor is held open until `edit` answers it
 	 * with a text; `edits` is every text it was opened on.
 	 */
 	async function streamingPi(queued: string[], streaming = true) {
@@ -4328,10 +4301,7 @@ describe("App", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
 			createSession: async () => piSession,
-			attach: async (ref) => {
-				if (ref.id === forkRef.id) emit(snapshot(forkRef, "h-fork", false));
-				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
-			},
+			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: (_ref, body) => {
 				prompts.push(body.text);
@@ -4359,8 +4329,15 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
+			forkPoints: async (ref) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: (_ref, body) => {
+				prompts.push(body.text);
+				emit(snapshot(forkRef, "h-fork", false));
+				return new Promise((resolve, reject) => {
+					land = () => resolve({ session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" });
+					refuse = () => reject(new ApiClientError(400, "backend_refused", "prompt refused", { ref: forkRef, handle: "h-fork" }));
+				});
+			},
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -4456,10 +4433,9 @@ describe("App", () => {
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await tick();
-		// The fork is attached and selected, its prompt still out: the moment the
-		// composer still holds the text that prompt is sending.
+		// The request is still out: the moment the composer still holds the text
+		// it is sending.
 		expect(controller.getView().sending).toBe(true);
-		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
 		if (when === "while") await answer();
 		await land();
 		if (when === "after") {
@@ -4468,6 +4444,7 @@ describe("App", () => {
 		}
 
 		expect(prompts).toEqual(["first draft"]);
+		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
 		expect(controller.getView().sending).toBe(false);
 		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn\n\nhalf-written note");
 	});
@@ -4485,8 +4462,8 @@ describe("App", () => {
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await tick();
-		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
 		await land();
+		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
 
 		expect(prompts).toEqual(["first draft"]);
 		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
@@ -4494,18 +4471,18 @@ describe("App", () => {
 	});
 
 	/**
-	 * A fork whose attach moved the selection has ended the edit, so when its
-	 * prompt then fails the unsent edit text is only a draft, and the displaced
-	 * draft comes back ahead of it (OW-kijuju).
+	 * A refusal that names the fork moves the selection there, which ends the
+	 * edit, so the unsent edit text is only a draft for the fork, and the
+	 * displaced draft comes back ahead of it (OW-kijuju, D30).
 	 */
-	it("gives the displaced draft back ahead of the unsent edit text when a fork's prompt fails after its attach (OW-kijuju)", async () => {
+	it("gives the displaced draft back ahead of the unsent edit text when a refusal names the fork (OW-kijuju, D30)", async () => {
 		const { controller, refuse } = await streamingPi([], false);
 		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await tick();
-		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
 		await refuse();
+		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
 
 		expect(screen.getByText("prompt refused")).toBeInTheDocument();
 		expect(controller.getView().sending).toBe(false);
@@ -4530,30 +4507,6 @@ describe("App", () => {
 
 		expect(prompts).toEqual(["first draft"]);
 		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn\n\nhalf-written note");
-	});
-
-	/**
-	 * While a fork's prompt is out the composer holds the text it is sending,
-	 * and the fork's transcript already offers edit controls. An edit opened
-	 * there would stash that text, and Cancel would put back a message already
-	 * sent, so none opens until the send settles (OW-kijuju).
-	 */
-	it("opens no edit while a fork's prompt is still out (OW-kijuju)", async () => {
-		const { controller, land } = await streamingPi([], false);
-		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
-		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		await tick();
-		expect(controller.getView().sending).toBe(true);
-		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
-
-		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
-		await fireEvent.click(screen.getByRole("button", { name: "Edit last message" }));
-		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
-
-		await land();
-		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
 	});
 
 	/**
@@ -4615,8 +4568,9 @@ describe("App", () => {
 	});
 
 	/**
-	 * While a fork's prompt is out the composer holds the text it is sending,
-	 * and a click elsewhere returns `busy` to idle with that prompt still out.
+	 * While a fork's request is out the composer holds the text it is sending,
+	 * and a click on a session returns `busy` to idle with that request still
+	 * out.
 	 * An editor opened on that text would give an edited copy of it back under
 	 * Send, over the draft the edit displaced, so none opens until the send
 	 * settles, as no edit does (OW-kijuju, OW-momejo).
@@ -4627,7 +4581,6 @@ describe("App", () => {
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await tick();
-		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
 		await controller.select(piSession);
 		await tick();
 		expect(controller.getView()).toMatchObject({ busy: "idle", sending: true });
@@ -4896,8 +4849,8 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
-			forkAndPrompt: forkAndPromptUnsent,
+			forkPoints: async (ref) => ({ points: [], forkStopsTurn: serverForkStopsTurn(ref) }),
+			forkAndPrompt: forkAndPromptUnused,
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {

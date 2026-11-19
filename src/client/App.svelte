@@ -57,6 +57,7 @@
 		preview: null,
 		previewFailure: null,
 		forkIndices: null,
+		forkStopsTurn: {},
 	});
 	/**
 	 * The workspace filter. A sentinel rather than "" so it can never collide
@@ -114,8 +115,8 @@
 	 * What the composer held when the edit displaced it is `displacedDraft`'s,
 	 * and the edit's whole lifetime owns it, not any one exit (OW-kijuju).
 	 * Cancel puts it back in place of the edit's text. Every other way an edit
-	 * ends -- its fork landing, the fork's attach moving the selection and its
-	 * prompt then failing, a click to another session -- gives it back too, once
+	 * ends -- its fork landing, a refusal that names a fork moving the selection
+	 * there, a click to another session -- gives it back too, once
 	 * no send is out, ahead of whatever the composer holds then: after a fork
 	 * that lands that is normally nothing, so the draft comes back as it was.
 	 * Dropping it at the fork lost a note typed before the click, which
@@ -125,7 +126,7 @@
 	 *
 	 * `index` is the message's position in the transcript array, and it is the
 	 * whole of how the fork point is addressed: a `ForkPoint` names the index it
-	 * forks at, and `forkAndSubmit` matches on it (OW-roveze). `PaneMessage`
+	 * forks at, and the server matches on it (OW-roveze, D30). `PaneMessage`
 	 * carries no id of its own (D11 freezes `protocol.ts`, so it cannot grow
 	 * one), and matching on wording instead would break on two identical
 	 * messages.
@@ -384,23 +385,23 @@
 	const streamingAction = $derived(streamingNow && compaction === null);
 	/**
 	 * Whether reaching for an edit here stops the running turn, which is what the
-	 * stop-first labels below promise. Pi only, because Pi is the only backend
-	 * whose fork destroys the in-flight turn whatever agentpane does; the
-	 * evidence for that, and the versions it was measured on, sit at the abort
-	 * itself in `controller.ts` `forkAndSubmit` (D15, OW-bakosi). Elsewhere an
+	 * stop-first labels below promise. The server says whether a fork of this
+	 * session stops a running turn, in its fork-points answer (D30): true only
+	 * where the backend destroys the in-flight turn at a fork whatever agentpane
+	 * does, which is Pi, and where the adapter's own fork therefore stops it
+	 * first (D15, OW-bakosi; the evidence sits at `PiAdapter.fork`). Elsewhere an
 	 * edit submitted mid-stream is just a fork, and a button that said otherwise
 	 * would name a consequence it does not have.
 	 *
-	 * The backend half is read off the selected ref, which is the value
-	 * `forkAndSubmit` decides on, so the label and the abort cannot disagree
-	 * about which backend they are on. They can still disagree about compaction:
-	 * `forkAndSubmit`'s condition tests `isStreaming` alone, so a Pi session
-	 * mid-compaction would read "Fork" over a controller that would abort.
-	 * Nothing reaches that -- `send()` returns early under a compaction and the
-	 * submit button is disabled through one -- but it is those guards that hold
-	 * it, not this line.
+	 * The server's stop tests whether the adapter is streaming, not whether a
+	 * compaction runs, so a Pi session mid-compaction would read "Fork" over a
+	 * fork that would stop. Nothing reaches that -- `send()` returns early under
+	 * a compaction and the submit button is disabled through one -- but it is
+	 * those guards that hold it, not this line.
 	 */
-	const stopsBeforeFork = $derived(streamingAction && view.state.selected?.backend === "pi");
+	const stopsBeforeFork = $derived(
+		streamingAction && view.state.selected !== null && view.forkStopsTurn[keyOf(view.state.selected)] === true,
+	);
 	/**
 	 * The primary button names every consequence it will have (OW-hezidi).
 	 * "Fork", not a plainer phrase: all three CLIs in play use that word for this
@@ -1302,7 +1303,8 @@
 	 * composer, so it goes through `startEdit` and repeats none of it: any
 	 * divergence between the two would be a defect, not a feature.
 	 *
-	 * Where the submit would stop the turn anyway -- Pi, streaming; see
+	 * Where the submit would stop the turn anyway -- the server says a fork of
+	 * this session stops a running turn, and one is running; see
 	 * `stopsBeforeFork` -- this stops it at the click rather than at submit, the
 	 * one exception to OW-hezidi's free-and-abandonable rule, and it says so in
 	 * its own name. Elsewhere there is nothing to stop and the shortcut is free
@@ -1314,8 +1316,8 @@
 	 * and fork" either way. And it would cost something -- through that whole
 	 * round trip the composer would still hold the old draft under a button
 	 * reading "Send", where a Ctrl-Enter prompts the running session instead of
-	 * forking it. Filled first, "Stop and fork" is the truth: `forkAndSubmit`
-	 * re-checks `isStreaming` and aborts again before it forks.
+	 * forking it. Filled first, "Stop and fork" is the truth: the server's fork
+	 * stops the session again inside the operation (`PiAdapter.fork`, D30).
 	 *
 	 * The stop is `stop()`, as the Stop button's is, so what it takes out of
 	 * Pi's queue never lands inside the edit it just filled (OW-fahoti). An
@@ -1396,9 +1398,11 @@
 	 * The composer's one send path. Editing, it forks at the marked message and
 	 * sends into the fork; otherwise it prompts the selected session.
 	 *
-	 * The edit mode is cleared only once the fork has actually landed. A failed
-	 * fork leaves the draft as the edited text, and clearing the mark under it
-	 * would leave a composer saying nothing about where it is about to send.
+	 * The edit mode is cleared only once the fork has actually landed, or a
+	 * refusal that names a fork has moved the selection there, which ends it as
+	 * any selection change does. A failed fork that names none leaves the draft
+	 * as the edited text, and clearing the mark under it would leave a composer
+	 * saying nothing about where it is about to send.
 	 */
 	function send(): void {
 		// The buttons are disabled while a compaction runs, but Ctrl/Cmd-Enter
@@ -1411,8 +1415,8 @@
 		// refused by the controller and issues nothing (OW-nasofa on the plain
 		// path, OW-kelede on the fork). On the plain path that refusal's disarm
 		// would take down only what the press itself armed, never the first
-		// send's (OW-zikiga). The fork path arms nothing until the fork's attach
-		// replies, which a refused press never reaches, so there it has nothing to
+		// send's (OW-zikiga). The fork path arms nothing of the fork's until its
+		// reply, which a refused press never reaches, so there it has nothing to
 		// disarm (OW-vitefo). Both paths, and off the controller's own `sending`
 		// flag rather than `busy` -- which an abort or an attach clears while the
 		// POST it described is still outstanding (OW-kelede). The controller
@@ -1434,51 +1438,51 @@
 			});
 			return;
 		}
-		// A fork's follow and badge are both armed on the fork itself, as soon as
-		// its handle is known and before its prompt goes out, never on the
-		// parent: a parent still streaming ends its own turn during the fork --
-		// Pi's abort ends it, Codex and Claude Code may simply finish it -- and a
-		// watch on the parent took that end for the fork's (OW-koledi). A follow
-		// armed there fared no better: the parent's transcript already holds the
-		// edited message, so it engaged on the parent at once, and that turn's
-		// end released it before the fork ever saw it (OW-vitefo).
+		// A fork's follow and badge are both armed on the fork itself, from the
+		// reply that names its handle, never on the parent: a parent still
+		// streaming ends its own turn during the fork -- Pi's fork stops it, Codex
+		// and Claude Code may simply finish it -- and a watch on the parent took
+		// that end for the fork's (OW-koledi). A follow armed there fared no
+		// better: the parent's transcript already holds the edited message, so it
+		// engaged on the parent at once, and that turn's end released it before
+		// the fork ever saw it (OW-vitefo).
 		//
-		// The handle is the attach reply's: not the fork's ref, which its first
-		// prompt may already have renamed (OW-kimaya), and never `state.selected`,
-		// which a click mid-fork moves and the controller honours. And the follow
-		// arms from the edited message's index, not the transcript's length: the
+		// From the reply, which comes once the fork's prompt is admitted (D30), so
+		// its turn can already be streaming: the follow engages on the edited
+		// message's index once that message is in the fork's transcript, and the
+		// watch starts from the level the fork's view holds at the reply, as
+		// agentpane-mode's `agentpane--watch-submit` does. A turn that ends
+		// before the reply lands leaves the watch for the next turn there, which
+		// takes a whole turn inside the time between the prompt's admission and
+		// its reply, and costs one stray badge.
+		//
+		// The handle is the reply's: not the fork's ref, which its first prompt
+		// may already have renamed (OW-kimaya), and never `state.selected`, which
+		// a click mid-fork moves and the controller honours. And the follow arms
+		// from the edited message's index, not the transcript's length: the
 		// fork's transcript is the parent's truncated just before that message,
 		// so the parent's length would sit past its end and never arm (OW-hezidi).
 		//
 		// A watch this tab's own earlier submit armed on the parent is left
-		// alone, except where the fork stops that turn: Pi's abort ends it on
-		// purpose, and a dot for it would announce a turn the user just stopped,
-		// which agentpane-mode drops at the same point (OW-dunahe). The controller
-		// says when, because it alone decides whether the abort goes out, and
-		// says it before the abort does, so its `status:false` finds no watch
-		// (OW-rihanu).
-		let forkKey: string | null = null;
-		// A fork's handle is new, so whatever stands on it this submit armed,
-		// over no follow at all.
-		const forkArmed = { follow: { anchorIndex: null, hasStreamed: false }, watch: true };
-		void controller.forkAndSubmit(edit.index, edit.images, (handle) => {
-			forkKey = handle;
-			pendingFollow.set(handle, edit.index);
-			turnWatch = watchSubmit(turnWatch, handle);
-		}, (handle) => {
-			turnWatch = watchAbandon(turnWatch, handle);
-		}).then((landed) => {
-			if (!landed) {
-				// Nothing was sent, so nothing will stream for this tab to follow or
-				// be badged about -- and a fork nothing prompted is no exception.
-				if (forkKey) disarmSubmit(forkKey, forkArmed);
-				return;
-			}
+		// alone, except where the fork stops that turn: the user stopped it by
+		// forking it, and a dot for it would announce a turn the user just
+		// stopped, which agentpane-mode drops at the same point (OW-dunahe). It
+		// goes here, as the request does, wherever the label says the fork stops
+		// the turn: the server stops it inside the request, and its `status:false`
+		// can reach this tab before the reply does (OW-rihanu). A refusal before
+		// the fork leaves that turn running unwatched, as a failed stop did.
+		if (stopsBeforeFork && armedKey) turnWatch = watchAbandon(turnWatch, armedKey);
+		void controller.forkAndSubmit(edit.index, edit.images).then((landed) => {
+			// Nothing was sent, so nothing will stream for this tab to follow or
+			// be badged about.
+			if (!landed) return;
 			// The fork landed, so the edit is over, but its prompt may have started
-			// no turn on it: the same arms come down (OW-yobayi).
-			if (landed.disposition === "handled" && forkKey) {
-				disarmSubmit(forkKey, forkArmed);
-				handledKey = forkKey;
+			// no turn on it, and then nothing is armed (OW-yobayi).
+			const forkKey = landed.session.handle;
+			if (landed.disposition === "handled") handledKey = forkKey;
+			else {
+				pendingFollow.set(forkKey, edit.index);
+				turnWatch = watchSubmit(turnWatch, forkKey, view.state.sessions[forkKey]?.isStreaming === true);
 			}
 			if (editing === edit) editing = null;
 		});

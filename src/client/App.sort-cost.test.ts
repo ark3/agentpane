@@ -182,6 +182,7 @@ async function mounted(): Promise<PublishingController> {
 		preview: null,
 		previewFailure: null,
 		forkIndices: null,
+		forkStopsTurn: {},
 	});
 	render(App, { props: { controller } });
 	await tick();

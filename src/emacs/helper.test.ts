@@ -195,7 +195,6 @@ describe("requests", () => {
 			[`POST ${ROUTES.effort(pi)}`]: noContent,
 			[`GET ${ROUTES.forkPoints(pi)}`]: () => json({ points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }),
 			[`POST ${ROUTES.fork(pi)}`]: () => json({ ref: codex }),
-			[`POST ${ROUTES.forkAndPrompt(pi)}`]: () => json({ session: { ref: codex, handle: "h9" }, disposition: "started" }, 201),
 			[`DELETE ${ROUTES.error(pi)}`]: noContent,
 		});
 		const requests = [
@@ -211,7 +210,6 @@ describe("requests", () => {
 			// The whole answer, so agentpane-mode can label a fork from it (D30).
 			["sessions/forkPoints", { session: pi }, { points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }],
 			["sessions/fork", { session: pi, entryId: "e1" }, codex],
-			["sessions/forkAndPrompt", { session: pi, index: 2, text: "again" }, { session: { ref: codex, handle: "h9" }, disposition: "started" }],
 			["sessions/dismissError", { session: pi, errorId: "e4" }, null],
 		] as const;
 		requests.forEach(([method, params], index) => io.send({ jsonrpc: "2.0", id: index + 10, method, params }));
@@ -225,7 +223,6 @@ describe("requests", () => {
 		expect(calls.find((call) => call.url === ROUTES.model(pi))?.body).toEqual({ model: "m" });
 		expect(calls.find((call) => call.url === ROUTES.effort(pi))?.body).toEqual({ effort: "low" });
 		expect(calls.find((call) => call.url === ROUTES.fork(pi))?.body).toEqual({ entryId: "e1" });
-		expect(calls.find((call) => call.url === ROUTES.forkAndPrompt(pi))?.body).toEqual({ index: 2, text: "again" });
 		// Named by id, so the server clears it only while it is still the one held,
 		// even against a newer one with the same text (OW-desufa, OW-jokoto).
 		expect(calls.find((call) => call.url === ROUTES.error(pi))?.body).toEqual({ errorId: "e4" });
@@ -273,18 +270,61 @@ describe("requests", () => {
 		});
 	});
 
-	it("carries the fork a refused fork-and-prompt names in the error's data (D30)", async () => {
+	/**
+	 * One request for an edit (D30): the fork's snapshot, carrying the token,
+	 * binds the fork's buffer as an attach's does (D25), and the reply goes
+	 * after it. The token goes nowhere but back.
+	 */
+	it("answers a fork-and-prompt after the snapshot that attaches the fork, carrying its token (D30)", async () => {
+		const reply = { session: summary(codex, "h9"), disposition: "started" };
+		const { io, source, calls } = start({
+			[`POST ${ROUTES.forkAndPrompt(pi)}`]: () => json(reply, 201),
+		});
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, handle: h(pi), index: 2, text: "again", token: 7 } });
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.out).toEqual([]);
+		source.emit({ type: "snapshot", session: codex, handle: "h9", seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		await io.until(2);
+
+		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { session: codex, handle: "h9", token: 7, isStreaming: true } });
+		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 4, result: reply });
+		expect(calls.find((call) => call.url === ROUTES.forkAndPrompt(pi))?.body).toEqual({ index: 2, text: "again" });
+		// Attached: the fork's events reach Emacs from here on.
+		source.emit({ type: "status", session: codex, handle: "h9", seq: 2, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await io.until(3);
+		expect(io.out[2]).toMatchObject({ method: "session/status", params: { handle: "h9", isStreaming: false } });
+	});
+
+	/** A fork attached and then not prompted is bound before its refusal goes out, so Emacs can move to it (D30). */
+	it("carries the fork a refused fork-and-prompt names in the error's data, after the snapshot that attaches it (D30)", async () => {
 		const fork = { ref: codex, handle: "h9" };
-		const { io } = start({
+		const { io, source } = start({
 			[`POST ${ROUTES.forkAndPrompt(pi)}`]: () => json({ error: "backend_refused", detail: "not now", fork }, 400),
 		});
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, handle: h(pi), index: 0, text: "again" } });
-		await io.until(1);
-		expect(io.response(4)).toEqual({
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, handle: h(pi), index: 0, text: "again", token: 7 } });
+		await tick();
+		source.emit({ type: "snapshot", session: codex, handle: "h9", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		await io.until(2);
+		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { handle: "h9", token: 7 } });
+		expect(io.out[1]).toEqual({
 			jsonrpc: "2.0",
 			id: 4,
 			error: { code: 400, message: "not now", data: { status: 400, error: "backend_refused", detail: "not now", fork } },
 		});
+	});
+
+	it("binds nothing for a refusal naming a fork whose own start failed, or none (D30)", async () => {
+		const answers = [
+			json({ error: "internal_error", detail: "spawn failed", fork: { ref: codex, handle: null } }, 500),
+			json({ error: "not_a_fork_point", detail: "no point" }, 409),
+		];
+		const { io } = start({ [`POST ${ROUTES.forkAndPrompt(pi)}`]: () => answers.shift()! });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, index: 0, text: "again", token: 7 } });
+		io.send({ jsonrpc: "2.0", id: 5, method: "sessions/forkAndPrompt", params: { session: pi, index: 3, text: "again", token: 8 } });
+		await io.until(2);
+		expect(io.notifications()).toEqual([]);
+		expect(io.response(4)!["error"]).toMatchObject({ code: 500, data: { fork: { ref: codex, handle: null } } });
+		expect(io.response(5)!["error"]).toMatchObject({ code: 409, data: { error: "not_a_fork_point" } });
 	});
 
 	it("answers a preview of a gone session with an error whose data carries gone (D26)", async () => {

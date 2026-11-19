@@ -501,7 +501,7 @@ export class PiAdapter implements BackendAdapter {
 	 * leaves -- on the runs above Pi answered `abort` after `agent_settled` --
 	 * so Stop then Send starts a fresh turn. Each stop follows the one before
 	 * it, because several can overlap: the one "Stop and edit" sends at the
-	 * click, the one `forkAndSubmit` sends ahead of the fork, and the one
+	 * click, the one agentpane-mode's `f` sends ahead of its fork, and the one
 	 * `fork` sends itself. Each later one clears once the one before has
 	 * answered, and usually takes nothing out.
 	 *

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type {
 	AbortResponse,
 	BackendId,
+	ForkAndPromptRequest,
+	ForkAndPromptResponse,
 	ForkPointsResponse,
 	ForkRequest,
 	LiveSessionSummary,
@@ -116,10 +118,13 @@ class FakeApi implements AgentpaneApi {
 	readonly setName = vi.fn(async (_session: SessionRef, _name: string) => {});
 	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPointsResponse> => ({ points: [], forkStopsTurn: false }));
 	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
-	/** No client sends it yet (ark3/agentpane#51). */
-	readonly forkAndPrompt = vi.fn(async (): Promise<never> => {
-		throw new Error("the browser sends no fork-and-prompt yet");
-	});
+	/** Answers as the server does once the fork's prompt is admitted: the fork, under its own handle (D30). */
+	readonly forkAndPrompt = vi.fn(
+		async (_session: SessionRef, _body: ForkAndPromptRequest): Promise<ForkAndPromptResponse> => ({
+			session: summary(forkedRef),
+			disposition: "started",
+		}),
+	);
 	readonly dismissError = vi.fn(async (_session: SessionRef, _errorId: string) => {});
 	readonly listSessions = vi.fn(async (_cwd?: string): Promise<SessionSummary[]> => [summary(ref)]);
 	readonly connection: EventConnection = { close: vi.fn() };
@@ -732,7 +737,7 @@ describe("client controller", () => {
 
 		expect(api.prompt).not.toHaveBeenCalled();
 		expect(api.abort).not.toHaveBeenCalled();
-		expect(api.fork).not.toHaveBeenCalled();
+		expect(api.forkAndPrompt).not.toHaveBeenCalled();
 		expect(controller.getView().sending).toBe(false);
 		editing.resolve({ text: "edited draft" });
 		await edit;
@@ -1984,10 +1989,7 @@ describe("client controller", () => {
 	// answers `gone`.
 	it("clears the selection onto the startup view when the detached fork has run no turn", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
-		api.attach.mockImplementation(async (session: SessionRef) =>
-			sessionKey(session) === sessionKey(forkedRef) ? { ...summary(session), onDisk: false } : summary(session),
-		);
+		api.forkAndPrompt.mockResolvedValue({ session: { ...summary(forkedRef), onDisk: false }, disposition: "started" });
 		const controller = createController(api);
 		await controller.start();
 		api.open();
@@ -2381,99 +2383,80 @@ describe("client controller", () => {
 	});
 
 	/**
-	 * OW-hezidi. The fork point is addressed by the *transcript index* it names,
-	 * so identical wording in two messages cannot confuse it (OW-roveze).
+	 * OW-hezidi, as one request (D30). The fork point is addressed by the
+	 * *transcript index* the clicked message has, so identical wording in two
+	 * messages cannot confuse it, and a steered Codex turn's second user
+	 * message cannot shift it onto a later turn (OW-roveze): the server matches
+	 * the index against `ForkPoint.index`, which `session-manager.test.ts`
+	 * pins. Nothing else goes out: no fork-points read at submit, no stop, no
+	 * fork, attach or prompt of the client's own.
 	 */
-	it("forks at the point naming that transcript index and only then prompts, into the ref the fork returned (OW-hezidi)", async () => {
+	it("sends one fork-and-prompt naming the clicked message's transcript index and the draft (OW-hezidi, D30)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [
-			{ id: "turn-1", text: "same words", index: 0 },
-			{ id: "turn-2", text: "same words", index: 2 },
-			{ id: "turn-3", text: "same words", index: 4 },
-		], forkStopsTurn: false });
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		await settle();
+		api.forkPoints.mockClear();
+		api.attach.mockClear();
+		controller.setDraft("reworded");
+
+		await controller.forkAndSubmit(2);
+
+		expect(api.forkAndPrompt).toHaveBeenCalledExactlyOnceWith(ref, { index: 2, text: "reworded" });
+		expect(api.forkPoints).not.toHaveBeenCalledWith(ref);
+		expect(api.abort).not.toHaveBeenCalled();
+		expect(api.fork).not.toHaveBeenCalled();
+		expect(api.attach).not.toHaveBeenCalled();
+		expect(api.prompt).not.toHaveBeenCalled();
+		expect(controller.getView().draft).toBe("");
+	});
+
+	it("sends the edited message's images with it (OW-hezidi)", async () => {
+		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
 		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
+		const images = [{ mimeType: "image/png", base64: "aGk=" }];
 
-		await controller.forkAndSubmit(2);
+		await controller.forkAndSubmit(0, images);
 
-		expect(api.forkPoints).toHaveBeenCalledWith(ref);
-		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-2" });
-		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded", priorErrorId: null });
-		// Order, not just occurrence: prompting the parent and then forking would
-		// leave the edited turn on the session the edit was supposed to spare.
-		expect(api.fork.mock.invocationCallOrder[0]!).toBeLessThan(api.prompt.mock.invocationCallOrder[0]!);
-		expect(controller.getView().draft).toBe("");
+		expect(api.forkAndPrompt).toHaveBeenCalledExactlyOnceWith(ref, { index: 0, text: "reworded", images });
 	});
 
 	/** The fork's prompt answers the same two ways a plain one does (OW-yobayi). */
 	it("resolves a landed fork with its prompt's disposition (OW-yobayi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
 		api.emit(snapshotOf(ref));
 
 		controller.setDraft("/mcp");
-		api.prompt.mockResolvedValueOnce({ disposition: "handled" });
+		api.forkAndPrompt.mockResolvedValueOnce({ session: summary(forkedRef), disposition: "handled" });
 		expect(await controller.forkAndSubmit(0)).toEqual({ session: summary(forkedRef), disposition: "handled" });
 
 		// Forked again, from the fork the first one selected.
 		api.emit(snapshotOf(forkedRef));
 		controller.setDraft("reworded");
 		expect((await controller.forkAndSubmit(0))?.disposition).toBe("started");
+		expect(api.forkAndPrompt).toHaveBeenLastCalledWith(forkedRef, { index: 0, text: "reworded" });
 	});
 
 	/**
-	 * OW-roveze, the defect this addressing scheme exists for. Steering a running
-	 * Codex turn puts a second `userMessage` in it, which is its own `role:
-	 * "user"` transcript message -- but Codex forks at turn granularity, so the
-	 * turn still answers with one point. Three user messages, two points.
-	 *
-	 * Counting user messages made the click on the third one ask for the point at
-	 * position 2, which is the *third* turn: a fork one whole turn past where the
-	 * user pointed, with no error and nothing on screen to notice. Here the same
-	 * click asks for transcript index 3 and gets the turn that holds it.
+	 * The other half of OW-roveze: a message no point names, such as one
+	 * steering added mid-turn. The server refuses it with nothing forked, never
+	 * forking at the next point along (D20, D30), and the refusal names no fork,
+	 * so the client stays where it is with the edited text. The shell normally
+	 * draws no Edit control on such a message at all; reaching here means the
+	 * transcript moved under the affordance.
 	 */
-	it("forks at the turn holding the clicked message, not the turn in that position (OW-roveze)", async () => {
+	it("keeps the draft and the selection, and reports, when the server finds no fork point at that index (OW-roveze)", async () => {
 		const api = new FakeApi();
-		// T1: prompt at 0, reply at 1, steered prompt at 2, reply at 3.
-		// T2: prompt at 4, reply at 5. Two turns, three user messages.
-		api.forkPoints.mockResolvedValue({ points: [
-			{ id: "turn-1", text: "first", index: 0 },
-			{ id: "turn-2", text: "second", index: 4 },
-		], forkStopsTurn: false });
-		const controller = createController(api);
-		await controller.start();
-		await controller.select(ref);
-		api.emit(snapshotOf(ref));
-		controller.setDraft("reworded");
-
-		expect((await controller.forkAndSubmit(4))?.session.ref).toEqual(forkedRef);
-
-		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-2" });
-	});
-
-	/**
-	 * The other half of OW-roveze: the steered message itself. No point names
-	 * index 2, so there is nothing to fork at and the answer is a refusal --
-	 * never the next point along, which is what a positional lookup would have
-	 * handed back. The shell normally draws no Edit control on such a message at
-	 * all; reaching here means the transcript moved under the affordance.
-	 */
-	it("refuses, rather than forking elsewhere, at a message steering added mid-turn (OW-roveze)", async () => {
-		const api = new FakeApi();
-		// Three turns, so a positional lookup finds *something* at every position
-		// a click can produce -- which is the silent half of the defect: no error,
-		// and a fork at a turn the user never pointed at.
-		api.forkPoints.mockResolvedValue({ points: [
-			{ id: "turn-1", text: "first", index: 0 },
-			{ id: "turn-2", text: "second", index: 4 },
-			{ id: "turn-3", text: "third", index: 6 },
-		], forkStopsTurn: false });
+		api.forkAndPrompt.mockRejectedValueOnce(new ApiClientError(409, "not_a_fork_point", "no fork point at index 2"));
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2482,15 +2465,94 @@ describe("client controller", () => {
 
 		expect(await controller.forkAndSubmit(2)).toBeNull();
 
-		expect(api.fork).not.toHaveBeenCalled();
-		expect(api.prompt).not.toHaveBeenCalled();
 		expect(controller.getView().draft).toBe("reworded");
-		expect(controller.getView().error).not.toBeNull();
+		expect(controller.getView().state.selected).toEqual(ref);
+		expect(controller.getView().error).toBe("no fork point at index 2");
+		expect(controller.getView().sending).toBe(false);
 	});
 
-	it("ends selected and attached to a Codex-shaped fork, which renames nothing (OW-hezidi)", async () => {
+	/**
+	 * A fork the server created whose prompt then failed (D30). Left on the
+	 * parent, a second send forked the parent again and orphaned the first
+	 * (ark3/agentpane#17), so the refusal names the fork and the selection
+	 * moves there, with the text kept for the send that prompts it.
+	 */
+	it("moves to the fork a refusal names, keeping the draft, so sending again prompts the fork (D30)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
+		api.forkAndPrompt.mockRejectedValueOnce(
+			new ApiClientError(400, "backend_refused", "the backend refused the prompt", { ref: forkedRef, handle: h(forkedRef) }),
+		);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		// The fork's snapshot, broadcast before its prompt went out.
+		api.emit(snapshotOf(forkedRef));
+		api.forkPoints.mockClear();
+		controller.setDraft("reworded");
+
+		expect(await controller.forkAndSubmit(0)).toBeNull();
+
+		const refused = controller.getView();
+		expect(refused.state.selected).toEqual(forkedRef);
+		expect(paneMode(refused)).toBe("live");
+		expect(refused.draft).toBe("reworded");
+		expect(refused.error).toBe("the backend refused the prompt");
+		expect(api.forkPoints).toHaveBeenCalledWith(forkedRef);
+
+		await controller.submit();
+		expect(api.prompt).toHaveBeenCalledWith(forkedRef, expect.objectContaining({ text: "reworded" }));
+		expect(api.forkAndPrompt).toHaveBeenCalledOnce();
+		controller.dispose();
+	});
+
+	/** Its own start failed, so nothing holds it live, and the pane reads it detached (`paneMode`). */
+	it("moves to a fork the refusal names with no handle, on a pane that is not live (D30)", async () => {
+		const api = new FakeApi();
+		api.forkAndPrompt.mockRejectedValueOnce(
+			new ApiClientError(500, "internal_error", "spawn failed", { ref: forkedRef, handle: null }),
+		);
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		controller.setDraft("reworded");
+
+		expect(await controller.forkAndSubmit(0)).toBeNull();
+
+		const refused = controller.getView();
+		expect(refused.state.selected).toEqual(forkedRef);
+		expect(paneMode(refused)).not.toBe("live");
+		expect(refused.draft).toBe("reworded");
+		expect(refused.forkIndices).toBeNull();
+		controller.dispose();
+	});
+
+	/** The click owns the selection, the refusal's fork included (D17, OW-miyemo). */
+	it("leaves the selection where a click put it when the refusal that names a fork comes after (D17, D30)", async () => {
+		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
+		const api = new FakeApi();
+		const forking = deferred<ForkAndPromptResponse>();
+		api.forkAndPrompt.mockReturnValueOnce(forking.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		controller.setDraft("reworded");
+
+		const submitted = controller.forkAndSubmit(0);
+		await controller.select(other);
+		forking.reject(new ApiClientError(400, "backend_refused", "refused", { ref: forkedRef, handle: h(forkedRef) }));
+
+		expect(await submitted).toBeNull();
+		expect(controller.getView().state.selected).toEqual(other);
+		expect(controller.getView().draft).toBe("reworded");
+		controller.dispose();
+	});
+
+	it("ends selected on the fork the reply names, and lists it, attaching nothing itself (OW-hezidi, D30)", async () => {
+		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2500,46 +2562,23 @@ describe("client controller", () => {
 
 		await controller.forkAndSubmit(0);
 
-		// Codex leaves this client's adapter on the parent and the returned ref
-		// has no adapter at all, so the client is what attaches it.
-		expect(api.attach).toHaveBeenCalledWith(forkedRef);
+		// The server attached the fork inside the operation.
+		expect(api.attach).not.toHaveBeenCalled();
 		expect(controller.getView().state.selected).toEqual(forkedRef);
 		expect(controller.getView().state.summaries.map((item) => item.ref)).toContainEqual(forkedRef);
 	});
 
 	/**
-	 * Pi's own CLI abandons the in-flight turn on a mid-stream fork whatever the
-	 * client does (OW-yudoni), so the abort is not what costs the reply -- it is
-	 * what makes the loss deliberate and visible, under the label that warns
-	 * about it (D15, OW-bakosi).
+	 * Whether a fork stops a running turn is the server's to decide (D30): the
+	 * Pi adapter's fork stops it, and the Codex and Claude parents survive a
+	 * mid-stream fork with their whole reply durable (OW-gojado, OW-japuzo).
+	 * So no client sends a stop of its own, whatever the backend.
 	 */
-	it("stops a running Pi turn before forking it (D15, OW-bakosi)", async () => {
-		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
-		const controller = createController(api);
-		await controller.start();
-		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
-		controller.setDraft("reworded");
-
-		await controller.forkAndSubmit(0);
-
-		expect(api.abort).toHaveBeenCalledWith(ref);
-		expect(api.abort.mock.invocationCallOrder[0]!).toBeLessThan(api.fork.mock.invocationCallOrder[0]!);
-	});
-
-	/**
-	 * The other half of the same decision: a Codex or Claude parent survives a
-	 * mid-stream fork with its whole reply durable (OW-gojado, OW-japuzo), so an
-	 * abort there would destroy a reply nothing else was going to take. Forking
-	 * is all an edit submitted mid-stream does on those backends (D15, OW-bakosi).
-	 */
-	it.each([["codex"], ["claude"]] as const)(
-		"forks a streaming %s session without stopping its turn (D15, OW-bakosi)",
+	it.each([["pi"], ["codex"], ["claude"]] as const)(
+		"sends no stop of its own ahead of a fork of a streaming %s session (D15, D30)",
 		async (backend) => {
 			const parent: SessionRef = { backend, id: `${backend}-parent` };
 			const api = new FakeApi();
-			api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 			const controller = createController(api);
 			await controller.start();
 			await controller.select(parent);
@@ -2549,8 +2588,7 @@ describe("client controller", () => {
 			expect((await controller.forkAndSubmit(0))?.session.ref).toEqual(forkedRef);
 
 			expect(api.abort).not.toHaveBeenCalled();
-			expect(api.fork).toHaveBeenCalledWith(parent, { entryId: "turn-1" });
-			expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded", priorErrorId: null });
+			expect(api.forkAndPrompt).toHaveBeenCalledExactlyOnceWith(parent, { index: 0, text: "reworded" });
 			controller.dispose();
 		},
 	);
@@ -2559,15 +2597,15 @@ describe("client controller", () => {
 	 * A fork is a selection change, but not one that outranks a click that
 	 * happened while it was in flight (OW-mifuki). The user gave up on *going to*
 	 * the fork and went somewhere else -- and that is all they gave up on: under
-	 * D17 the click is navigation, not a retraction, so the fork is still made,
-	 * attached and prompted, and they end up with both conversations (OW-miyemo).
+	 * D17 the click is navigation, not a retraction, so the server still makes,
+	 * attaches and prompts the fork, and they end up with both conversations
+	 * (OW-miyemo).
 	 */
 	it("lands a fork whose selection was overtaken by a click mid-flight, without moving the user (D17, OW-miyemo)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
-		const forking = deferred<SessionRef>();
-		api.fork.mockReturnValueOnce(forking.promise);
+		const forking = deferred<ForkAndPromptResponse>();
+		api.forkAndPrompt.mockReturnValueOnce(forking.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2576,77 +2614,65 @@ describe("client controller", () => {
 
 		const submitted = controller.forkAndSubmit(0);
 		await controller.select(other);
-		forking.resolve(forkedRef);
+		forking.resolve({ session: summary(forkedRef), disposition: "started" });
 
 		expect((await submitted)?.session.ref).toEqual(forkedRef);
-		expect(api.attach).toHaveBeenCalledWith(forkedRef);
-		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded", priorErrorId: null });
 		expect(controller.getView().state.selected).toEqual(other);
+		expect(controller.getView().state.summaries.map((item) => item.ref)).toContainEqual(forkedRef);
 		controller.dispose();
 	});
 
 	/**
-	 * The abort window, which had no test at all: removing that guard used to
-	 * leave the whole client suite green. It is also the window where the old
-	 * behaviour was worst in kind -- the button says "Stop and fork" on Pi, which
-	 * this test's ref is (D15, OW-bakosi), so a click
-	 * here killed the parent's turn the user *had* asked for and then abandoned
-	 * the fork they had asked for too, leaving them with neither (D17, OW-miyemo).
+	 * What "Stop and fork" reads (D30): the server's answer for that session,
+	 * kept under its handle, so a label never reads another session's.
 	 */
-	it("lands a fork whose selection was overtaken while the abort was in flight (D17, OW-miyemo)", async () => {
-		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
+	it("keeps each session's fork-stops-turn answer under its own handle (D30)", async () => {
+		const other: SessionRef = { backend: "codex", id: "thread-other" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
-		const aborting = deferred<void>();
-		api.abort.mockReturnValueOnce(aborting.promise);
-		const controller = createController(api);
-		await controller.start();
-		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
-		controller.setDraft("reworded");
-
-		const submitted = controller.forkAndSubmit(0);
-		await settle();
-		expect(api.abort).toHaveBeenCalledWith(ref);
-		await controller.select(other);
-		aborting.resolve();
-
-		expect((await submitted)?.session.ref).toEqual(forkedRef);
-		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-1" });
-		expect(api.attach).toHaveBeenCalledWith(forkedRef);
-		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded", priorErrorId: null });
-		expect(controller.getView().state.selected).toEqual(other);
-		controller.dispose();
-	});
-
-	/** The `fork-points` window, the other one that had no test (D17, OW-miyemo). */
-	it("lands a fork whose selection was overtaken while fork points were being read (D17, OW-miyemo)", async () => {
-		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
-		const api = new FakeApi();
-		const points = deferred<ForkPointsResponse>();
+		api.forkPoints.mockImplementation(async (session: SessionRef) => ({ points: [], forkStopsTurn: session.backend === "pi" }));
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
 		api.emit(snapshotOf(ref));
-		// After the select: attaching a session refreshes its fork points for the
-		// transcript's Edit controls (OW-roveze), and that read is not this one.
-		api.forkPoints.mockClear();
-		api.forkPoints.mockReturnValueOnce(points.promise);
-		controller.setDraft("reworded");
-
-		const submitted = controller.forkAndSubmit(0);
 		await settle();
-		expect(api.forkPoints).toHaveBeenCalledWith(ref);
 		await controller.select(other);
-		points.resolve({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
+		api.emit(snapshotOf(other));
+		await settle();
 
-		expect((await submitted)?.session.ref).toEqual(forkedRef);
-		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-1" });
-		expect(api.attach).toHaveBeenCalledWith(forkedRef);
-		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded", priorErrorId: null });
-		expect(controller.getView().state.selected).toEqual(other);
+		expect(controller.getView().forkStopsTurn).toEqual({ [h(ref)]: true, [h(other)]: false });
 		controller.dispose();
 	});
+
+	/**
+	 * A row click on a live session reselects it without an attach, which is
+	 * where fork points are otherwise read; one this tab was never told about,
+	 * introduced while another session was on screen, is asked at the click.
+	 */
+	it("asks a live session reselected by a row click whether its fork stops a turn, once (D30)", async () => {
+		const other: SessionRef = { backend: "codex", id: "thread-other" };
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue({ points: [], forkStopsTurn: true });
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		// Live in this tab, by an opening snapshot, with `ref` on screen.
+		api.emit(snapshotOf(other));
+		await settle();
+		api.forkPoints.mockClear();
+
+		await controller.preview(other);
+		await settle();
+		expect(api.forkPoints).toHaveBeenCalledExactlyOnceWith(other);
+		expect(controller.getView().forkStopsTurn[h(other)]).toBe(true);
+
+		await controller.preview(ref);
+		await controller.preview(other);
+		await settle();
+		expect(api.forkPoints).toHaveBeenCalledOnce();
+		controller.dispose();
+	});
+
 	/**
 	 * OW-lizohe. A session renamed while the refresh an attach started is in
 	 * flight (D9) keeps its handle, which the refresh is keyed by, so the reply
@@ -2685,9 +2711,8 @@ describe("client controller", () => {
 	it("does not bump the selection intent past the click it declined to overtake (D17, OW-miyemo)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
-		const forking = deferred<SessionRef>();
-		api.fork.mockReturnValueOnce(forking.promise);
+		const forking = deferred<ForkAndPromptResponse>();
+		api.forkAndPrompt.mockReturnValueOnce(forking.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2696,13 +2721,13 @@ describe("client controller", () => {
 
 		const submitted = controller.forkAndSubmit(0);
 		await settle();
-		// The user's own attach is still in flight when the fork resolves and
-		// runs its attach, its prompt and its publishes underneath it.
+		// The user's own attach is still in flight when the fork's reply lands
+		// and publishes underneath it.
 		const attachingOther = deferred<LiveSessionSummary>();
 		api.attach.mockReturnValueOnce(attachingOther.promise);
 		const selecting = controller.select(other);
 		await settle();
-		forking.resolve(forkedRef);
+		forking.resolve({ session: summary(forkedRef), disposition: "started" });
 		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		attachingOther.resolve(summary(other));
 		await selecting;
@@ -2713,20 +2738,17 @@ describe("client controller", () => {
 	});
 
 	/**
-	 * The other side of the guard above: once the prompt has landed there is no
-	 * abandoning it, whatever the user clicked. The fork is reported back so the
-	 * caller can move its per-tab state onto the right session, and the draft is
-	 * cleared even though the selection has moved -- one draft, one composer, and
-	 * it must not go on offering text that was already sent (OW-mifuki).
+	 * The other side of the guard above: a landed prompt is not abandoned,
+	 * whatever the user clicked. The fork is reported back so the caller can
+	 * arm its per-tab state on the right session, and the draft is cleared even
+	 * though the selection has moved -- one draft, one composer, and it must not
+	 * go on offering text that was already sent (OW-mifuki).
 	 */
-	it("reports the fork it landed on, and clears the draft, when the click comes after the prompt (OW-mifuki)", async () => {
+	it("reports the fork it landed on, and clears the draft, when a click moved the selection meanwhile (OW-mifuki)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
-		api.fork.mockResolvedValue(forkedRef);
-		api.attach.mockImplementation(async (target: SessionRef) => summary(target));
-		const prompt = deferred<void>();
-		api.prompt.mockReturnValue(prompt.promise);
+		const forking = deferred<ForkAndPromptResponse>();
+		api.forkAndPrompt.mockReturnValueOnce(forking.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2735,9 +2757,8 @@ describe("client controller", () => {
 
 		const submitted = controller.forkAndSubmit(0);
 		await settle();
-		expect(api.prompt).toHaveBeenCalledOnce();
 		await controller.select(other);
-		prompt.resolve();
+		forking.resolve({ session: summary(forkedRef), disposition: "started" });
 
 		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(controller.getView().draft).toBe("");
@@ -2757,24 +2778,22 @@ describe("client controller", () => {
 	 */
 	it("goes live over the preview the declined click opened on the fork itself, once the fork's snapshot lands (OW-tatebi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
-		api.fork.mockResolvedValue(forkedRef);
 		api.preview.mockResolvedValue({ ref: forkedRef, turns: [previewAssistant("stale")] });
+		const forking = deferred<ForkAndPromptResponse>();
+		api.forkAndPrompt.mockReturnValueOnce(forking.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
 		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
-		const attachingFork = deferred<LiveSessionSummary>();
-		api.attach.mockReturnValueOnce(attachingFork.promise);
 		const submitted = controller.forkAndSubmit(0);
 		await settle();
-		// The fork is listed by now, and the click lands on it while its own
-		// attach is still in flight.
+		// The fork is listed by now, and the click lands on it while the request
+		// is still out.
 		await controller.preview(forkedRef);
 		expect(paneMode(controller.getView())).toBe("preview");
-		attachingFork.resolve(summary(forkedRef));
+		forking.resolve({ session: summary(forkedRef), disposition: "started" });
 
 		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(controller.getView().state.selected).toEqual(forkedRef);
@@ -2787,49 +2806,40 @@ describe("client controller", () => {
 	/**
 	 * The rule `submit` has always had, brought to the fork path (OW-kelede).
 	 * Two fast presses in edit mode -- Ctrl-Enter twice, or Enter then a click on
-	 * the fork button -- used to start two whole forks, each one an abort against
-	 * the parent, a `fork-points`, a `fork`, an `attach` and a `prompt`.
+	 * the fork button -- used to start two whole forks.
 	 */
 	it("forks once when the fork path is entered twice while the first is still in flight (OW-kelede)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
-		const forking = deferred<SessionRef>();
-		api.fork.mockReturnValue(forking.promise);
+		const forking = deferred<ForkAndPromptResponse>();
+		api.forkAndPrompt.mockReturnValue(forking.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
 		api.emit(snapshotOf(ref));
-		// The attach's own fork-points read (OW-roveze) is not one of the two this
-		// test is counting.
-		api.forkPoints.mockClear();
 		controller.setDraft("reworded");
 
 		const first = controller.forkAndSubmit(0);
 		const second = controller.forkAndSubmit(0);
 		await settle();
 
-		expect(api.forkPoints).toHaveBeenCalledOnce();
-		expect(api.fork).toHaveBeenCalledOnce();
-		forking.resolve(forkedRef);
+		expect(api.forkAndPrompt).toHaveBeenCalledOnce();
+		forking.resolve({ session: summary(forkedRef), disposition: "started" });
 		expect(await second).toBeNull();
 		expect((await first)?.session.ref).toEqual(forkedRef);
-		expect(api.prompt).toHaveBeenCalledOnce();
 		controller.dispose();
 	});
 
 	/**
-	 * The fork's round trip is four requests deep where a plain submit is one, so
-	 * the window in which the user types the next prompt into a live textarea is
-	 * that much wider -- and the clear used to be unconditional and wipe it
-	 * (OW-kelede). `submit`'s rule covers both cases at once: a click away does
-	 * not change the draft, so that one still clears.
+	 * The fork's request runs until its prompt is admitted, so the window in
+	 * which the user types the next prompt into a live textarea is wide -- and
+	 * the clear used to be unconditional and wipe it (OW-kelede). `submit`'s
+	 * rule covers both cases at once: a click away does not change the draft,
+	 * so that one still clears.
 	 */
 	it("keeps a draft typed while the fork was in flight (OW-kelede)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
-		api.attach.mockImplementation(async (target: SessionRef) => summary(target));
-		const prompt = deferred<void>();
-		api.prompt.mockReturnValue(prompt.promise);
+		const forking = deferred<ForkAndPromptResponse>();
+		api.forkAndPrompt.mockReturnValue(forking.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2838,9 +2848,8 @@ describe("client controller", () => {
 
 		const submitted = controller.forkAndSubmit(0);
 		await settle();
-		expect(api.prompt).toHaveBeenCalledOnce();
 		controller.setDraft("and the next thing");
-		prompt.resolve();
+		forking.resolve({ session: summary(forkedRef), disposition: "started" });
 
 		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(controller.getView().draft).toBe("and the next thing");
@@ -2875,23 +2884,6 @@ describe("client controller", () => {
 		expect(await second).toBeNull();
 		await first;
 		controller.dispose();
-	});
-
-	it("keeps the draft, and reports, when no fork point names that index (OW-hezidi)", async () => {
-		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
-		const controller = createController(api);
-		await controller.start();
-		await controller.select(ref);
-		api.emit(snapshotOf(ref));
-		controller.setDraft("reworded");
-
-		expect(await controller.forkAndSubmit(4)).toBeNull();
-
-		expect(api.fork).not.toHaveBeenCalled();
-		expect(api.prompt).not.toHaveBeenCalled();
-		expect(controller.getView().draft).toBe("reworded");
-		expect(controller.getView().error).not.toBeNull();
 	});
 
 	it("closes SSE and ignores later events after disposal", async () => {
@@ -3229,7 +3221,9 @@ describe("client controller", () => {
 				}
 				const target = path === "select" ? ref : path === "create" ? created : forkedRef;
 				const attaching = deferred<LiveSessionSummary>();
-				api.attach.mockReturnValueOnce(attaching.promise);
+				if (path === "forkAndSubmit") {
+					api.forkAndPrompt.mockReturnValueOnce(attaching.promise.then((session) => ({ session, disposition: "started" as const })));
+				} else api.attach.mockReturnValueOnce(attaching.promise);
 
 				const landing = path === "select"
 					? controller.select(ref)
@@ -3237,7 +3231,8 @@ describe("client controller", () => {
 						? controller.create("/work", "pi")
 						: controller.forkAndSubmit(0);
 				await settle();
-				expect(api.attach).toHaveBeenLastCalledWith(target);
+				if (path === "forkAndSubmit") expect(api.forkAndPrompt).toHaveBeenLastCalledWith(ref, { index: 0, text: "reworded" });
+				else expect(api.attach).toHaveBeenLastCalledWith(target);
 				api.drop();
 				attaching.resolve({ ...summary(target), onDisk: path === "select" });
 				await landing;

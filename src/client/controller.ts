@@ -33,7 +33,7 @@ export interface ControllerView {
 	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting" | "compacting" | "editing-externally";
 	/**
 	 * A prompt this controller sent is still in flight: `submit`'s single POST,
-	 * or `forkAndSubmit`'s whole abort/fork-points/fork/attach/prompt round trip.
+	 * or `forkAndSubmit`'s one fork-and-prompt request (D30).
 	 * Those two own it between them, and both re-entrancy guards -- the one in
 	 * each of them, and `send()`'s in `App.svelte` -- read it (OW-kelede).
 	 *
@@ -106,15 +106,27 @@ export interface ControllerView {
 	 * Not-yet-known is a third state on purpose, and it offers every user message
 	 * a control: a session is attached and drawn before this can answer, and a
 	 * transcript that blinks its controls in a beat later is worse than one whose
-	 * worst case for that beat is a refusal. It can only be a refusal --
-	 * `forkAndSubmit` resolves the point by index at submit, so an Edit offered
-	 * here that the backend cannot honour is declined, never redirected.
+	 * worst case for that beat is a refusal. It can only be a refusal -- the
+	 * server resolves the point by index inside the fork-and-prompt (D30), so an
+	 * Edit offered here that the backend cannot honour is declined, never
+	 * redirected.
 	 *
 	 * An affordance, not a fact, even once known: it is refreshed at attach and
 	 * at turn boundaries, and between a refresh and the click the transcript can
 	 * move under it. Nothing is decided on it.
 	 */
 	forkIndices: number[] | null;
+	/**
+	 * Whether a fork of the session under each handle stops a turn running when
+	 * it lands, as that session's last fork-points answer said (D30), which is
+	 * what "Stop and fork" and "Stop and edit" read. Keyed by the handle, not
+	 * held for the selection alone as `forkIndices` is, because a label that
+	 * reads another session's answer names a stop that will not happen, or
+	 * misses one that will, and reselecting a live session refetches nothing
+	 * when its handle is already here. A handle not here has not been told yet,
+	 * and reads as a fork that stops nothing.
+	 */
+	forkStopsTurn: Readonly<Record<string, boolean>>;
 }
 
 export type PaneMode = "live" | "preview" | "loading";
@@ -213,64 +225,49 @@ export interface AgentpaneController {
 	/**
 	 * Fork the selected session just before the user message at transcript
 	 * `index` and send the current draft, plus `images`, into the fork
-	 * (OW-hezidi). Always a new session: no backend is asked to rewind in place,
-	 * and Codex cannot.
+	 * (OW-hezidi), as one fork-and-prompt request the server runs to the end
+	 * (D30). Always a new session: no backend is asked to rewind in place, and
+	 * Codex cannot.
 	 *
 	 * `index` addresses the transcript array itself -- the one `snapshot.messages`
-	 * carries -- and a fork point is resolved by matching `ForkPoint.index`
-	 * against it (OW-roveze). Never by position in the points list: Codex answers
-	 * one point per *turn*, a steered turn holds two user messages, so counting
-	 * user messages addressed a later turn than the user clicked and forked
-	 * there silently. Never by wording either, which two identical messages break.
+	 * carries -- and the server resolves it against the fork points by
+	 * `ForkPoint.index` (OW-roveze). Never by position in the points list: Codex
+	 * answers one point per *turn*, a steered turn holds two user messages, so
+	 * counting user messages addressed a later turn than the user clicked and
+	 * forked there silently. Never by wording either, which two identical
+	 * messages break.
 	 *
 	 * No point at that index is a refusal, not a fallback. The caller normally
 	 * offers no Edit control on such a message at all, so reaching here means the
 	 * transcript moved under the affordance.
 	 *
-	 * `onAttached` hears the fork's handle the moment its attach replies, before
-	 * the prompt goes out: the fork's turn streams under that handle while the
-	 * prompt's POST is still in flight, so a caller that waited for this to
-	 * resolve would start watching the fork after its turn had begun, or ended
-	 * (OW-koledi).
-	 *
-	 * `onAbort` hears the parent's handle just before a Pi fork stops the
-	 * parent's running turn, and only then: the turn it ends was stopped on
-	 * purpose, so a caller watching it must stop before the abort's
-	 * `status:false` can reach it (OW-rihanu). Told here rather than decided by
-	 * the caller, because this is where the abort is decided, and a fork that
-	 * bails before it leaves a turn that was never stopped. An abort that fails
-	 * leaves that turn running unwatched, as agentpane-mode's does.
-	 *
-	 * Resolves to **the attach reply of the session the prompt landed on**,
-	 * with the prompt's disposition, or null if it never landed. The shell reads
-	 * only whether it landed and whether the fork's prompt was handled without
-	 * starting a turn: the fork's follow and watch are armed through
-	 * `onAttached` (OW-koledi, OW-vitefo), and a handled prompt takes them down
-	 * again (OW-yobayi), but nothing of the parent's moves to the fork
-	 * (OW-pirobi).
-	 * The reply carries the fork's handle, not only its ref, because the fork's
-	 * first prompt can rename it before this resolves -- Claude Code renames at
-	 * `init`, after `submit()` -- and by then no view or summary carries the ref
-	 * the attach replied with, so a lookup by it finds nothing (OW-kimaya).
+	 * Resolves to the request's reply, **the fork's live summary and its
+	 * prompt's disposition**, or null if the prompt never landed. The shell arms
+	 * the fork's follow and watch from the summary's handle (OW-koledi,
+	 * OW-vitefo), and takes them down again for a handled prompt (OW-yobayi).
+	 * The handle, not the ref, because the fork's first prompt can rename it
+	 * before the reply lands -- Claude Code renames at `init` -- and a lookup by
+	 * the ref the fork was created under then finds nothing (OW-kimaya).
 	 *
 	 * Null means a genuine failure -- nothing selected, a selection this tab
 	 * holds no live view of (OW-forinu), an empty draft, a press on top of one
-	 * still in flight, no fork point at that index, or a rejected request.
-	 * Clicking another session mid-fork is not one of them: under D17 that is
-	 * navigation, not a retraction, so the round trip runs to completion and the
-	 * ref comes back while the selection stays where the click put it
-	 * (OW-miyemo).
+	 * still in flight, or a refused request. A refusal that names a fork, one
+	 * the server created before its prompt failed, moves the selection to that
+	 * fork, as a landed one does, so that sending again prompts the fork rather
+	 * than forking the parent a second time (D30, ark3/agentpane#17); the draft
+	 * is kept either way. Clicking another session mid-fork is not a failure:
+	 * under D17 that is navigation, not a retraction, so the request runs to
+	 * completion while the selection stays where the click put it (OW-miyemo),
+	 * and neither a landed fork nor a refused one moves it back.
 	 *
 	 * The caller owns the compose mode this drives, and a failed fork has to
-	 * leave that mode standing: the draft is still the edited text, and clearing
-	 * the mark under it would leave a composer that says nothing about where it
-	 * is about to send.
+	 * leave that mode standing where the selection stays: the draft is still
+	 * the edited text, and clearing the mark under it would leave a composer
+	 * that says nothing about where it is about to send.
 	 */
 	forkAndSubmit(
 		index: number,
 		images?: PromptRequest["images"],
-		onAttached?: (handle: string) => void,
-		onAbort?: (handle: string) => void,
 	): Promise<{ session: LiveSessionSummary; disposition: PromptDisposition } | null>;
 	/**
 	 * Stop the selected session's turn; no-op unless its pane is live (OW-forinu).
@@ -400,6 +397,7 @@ export function createController(
 		preview: null,
 		previewFailure: null,
 		forkIndices: null,
+		forkStopsTurn: {},
 	};
 	let connection: EventConnection | undefined;
 	/** Pending rebuild of a fatally closed stream -- see `FATAL_STREAM_RETRY_MS`. */
@@ -700,8 +698,8 @@ export function createController(
 	 * A failure is swallowed. This fills in an affordance, not an operation: the
 	 * user asked for nothing, so there is nobody to report to, and the last known
 	 * set standing is the same staleness the window between two refreshes already
-	 * has. `forkAndSubmit` refetches at submit and reports its own failures, and
-	 * it is the one that decides anything.
+	 * has. The server resolves the index inside the fork-and-prompt (D30), and
+	 * `forkAndSubmit` reports its own failures; neither decides anything on this.
 	 */
 	function refreshForkPoints(ref: SessionRef): void {
 		// Keyed by the handle, so a rename landing while the request is in
@@ -714,13 +712,15 @@ export function createController(
 		forkPointsInFlight.add(handle);
 		void api
 			.forkPoints(ref)
-			.then(({ points }) => {
+			.then(({ points, forkStopsTurn }) => {
 				if (disposed) return;
+				// Kept whatever is on screen now, since it describes this handle alone.
+				const stops = { forkStopsTurn: { ...view.forkStopsTurn, [handle]: forkStopsTurn } };
 				// Only while it is still the session on screen: a reply that lands
 				// after the user clicked away describes a transcript nobody is
 				// looking at, and the session they went to has its own refresh.
-				if (handleOf(view.state, view.state.selected) !== handle) return;
-				publish({ forkIndices: points.map((point) => point.index) });
+				if (handleOf(view.state, view.state.selected) !== handle) publish(stops);
+				else publish({ ...stops, forkIndices: points.map((point) => point.index) });
 			})
 			.catch(() => {})
 			.finally(() => {
@@ -1020,6 +1020,10 @@ export function createController(
 			modelSetting: modelSettingForSession(live),
 			effortSetting: effortSettingForSession(live),
 		});
+		// A session attached here while another was on screen, by a reconnect's
+		// opening snapshot say, was never asked whether its fork stops a turn.
+		const handle = handleOf(view.state, live);
+		if (handle !== undefined && !(handle in view.forkStopsTurn)) refreshForkPoints(live);
 		await loadModelsForSelected(intent);
 	}
 
@@ -1403,164 +1407,89 @@ export function createController(
 				if (!disposed) publish({ editingExternally: false, ...(busyIs("editing-externally") ? { busy: "idle" } : {}) });
 			}
 		},
-		async forkAndSubmit(index, images, onAttached, onAbort) {
+		async forkAndSubmit(index, images) {
 			const selected = view.state.selected;
 			if (!selected) {
 				publish({ error: "Select a session before submitting a prompt." });
 				return null;
 			}
-			// Only from a session this tab holds live, as `submit` (OW-forinu). The
-			// prompt to the fork further down is not checked: the fork's snapshot
-			// usually lands after that prompt goes, so it is never live by then.
+			// Only from a session this tab holds live, as `submit` (OW-forinu).
 			if (paneMode(view) !== "live") return null;
 			// One send at a time, the rule `submit` above states and this path did
 			// not have (OW-kelede). Two fast presses in edit mode started two whole
-			// forks -- two aborts against the parent, two forks, two attaches and
-			// two identical prompts -- and worse: the second one's failure took the
-			// *first* fork's follow and badge arming back down with it, because on
-			// a renaming backend both presses' armed keys had followed onto the
-			// same fork. Nor while the external editor has the draft, as `submit`
-			// (OW-momejo).
+			// forks, and the second one's failure took the *first* fork's follow
+			// and badge arming back down with it. Nor while the external editor has
+			// the draft, as `submit` (OW-momejo).
 			if (view.sending || view.editingExternally) return null;
 			if (!view.draft) return null;
 			const text = view.draft;
-			// The requests below go out on the click-time ref even if a rename lands
-			// meanwhile (D9), since every name a session has had resolves on the
-			// server's routes (`ManagedSession.names`, D24); what this reads of the
-			// session locally it reads through the handle, which the rename leaves
-			// alone. The fork itself is not a rename: a Pi fork is a new session
-			// under a new handle (D24, OW-suhoto).
-			const handle = handleOf(view.state, selected);
-			// Captured first, the way `refetchPreview` captures it: every await
-			// below is a window in which the user can click another session, and
-			// a fork that reaches its attach after that click must not yank the
-			// selection back onto itself (OW-mifuki). That is the *only* thing the
-			// click decides: under D17 it is navigation, not a cancel, so the fork
-			// is still created, still attached and still prompted, and the user
-			// ends up with both conversations (OW-miyemo).
+			// Captured first, the way `refetchPreview` captures it: the request is a
+			// window in which the user can click another session, and a fork that
+			// answers after that click must not yank the selection back onto itself
+			// (OW-mifuki). That is the *only* thing the click decides: under D17 it
+			// is navigation, not a cancel, so the server still creates, attaches and
+			// prompts the fork, and the user ends up with both conversations
+			// (OW-miyemo).
 			const intent = selectionIntent;
 			publish({ busy: "submitting", sending: true, error: null });
 			try {
-				// Stop a running turn before forking it on Pi, and nowhere else.
-				// The asymmetry is the decision, not an oversight (D15,
-				// OW-bakosi): it stands only where the backend destroys the turn
-				// whatever agentpane does.
-				//
-				// Pi is that backend. Its CLI stops the in-flight turn on a
-				// mid-stream fork whether or not we abort: `isStreaming` goes
-				// false and the turn settles (home server, 2026-09-15,
-				// `pi 0.85.1`, and again 2026-10-14, `pi 1.2.0`;
-				// `docs/MANUAL_TESTING.md` OW-gajesu and OW-vijine, which is what
-				// the 2026-08-20 `pi 0.84.2` run in OW-yudoni had not earned).
-				// What the fork costs is the REST of the reply, not the bytes
-				// already streamed: with the probe holding the fork until 47
-				// text deltas were on the wire, the file the turn was streaming
-				// into held the reply's first 447 characters (OW-sededi), where
-				// the ungated run before it -- forking ~2s into a reasoning turn
-				// -- had read an empty assistant entry. Either way the abort
-				// does not cause the loss; it makes it deliberate and visible,
-				// and the "Stop and ..." label is the only warning the user
-				// gets.
-				//
-				// Codex's parent turn survives: a mid-stream `thread/fork` leaves
-				// it running and it finishes with its whole reply durable on disk
-				// -- measured, not inferred (home server, 2026-09-11, `codex-cli
-				// 0.154.0`; OW-gojado). Claude's survives too now that OW-razoki
-				// stopped the fork killing the parent's child, and there the abort
-				// would cost most of all: nothing reaches the store file until the
-				// turn is over, so a stop mid-turn destroys the entire reply rather
-				// than racing it (home server, 2026-09-11, `claude 2.1.268`;
-				// OW-japuzo).
-				//
-				// The prompts this stop takes out of Pi's queue (D16, OW-wisifo)
-				// are dropped here, deliberately, and so are lost: unlike a steer
-				// delivered a moment sooner, which stays in the parent's session
-				// file, a cleared one is in no file at all. They were steered into
-				// the turn the fork abandons, after the message it rewinds to.
-				// Taking them out still matters, since whether Pi's queue survives
-				// a `fork` was never measured, and a survivor could reach the
-				// fork's first turn. The composer holds the edit this fork is
-				// sending, so there is nowhere to put them without mixing them
-				// into it. Under "Stop and edit"
-				// the click's own stop, `abort` below, has usually emptied the
-				// queue already, and what that one takes out is the composer's to
-				// receive (OW-fahoti), not this one's.
-				if (selected.backend === "pi" && handle !== undefined && view.state.sessions[handle]?.isStreaming) {
-					onAbort?.(handle);
-					await api.abort(selected);
-				}
+				// The request goes out on the click-time ref even if a rename lands
+				// meanwhile (D9), since every name a session has had resolves on the
+				// server's routes (`ManagedSession.names`, D24). Where the backend
+				// abandons a running turn at a fork whatever agentpane does, which is
+				// Pi (D15), the server stops it inside the fork, and what that stop
+				// takes out of Pi's queue is dropped there (`PiAdapter.fork`).
+				const forked = await api.forkAndPrompt(selected, { index, text, ...(images && images.length > 0 ? { images } : {}) });
 				if (disposed) return null;
-				const { points } = await api.forkPoints(selected);
-				if (disposed) return null;
-				const point = points.find((candidate) => candidate.index === index);
-				if (!point) throw new Error("That message is no longer a fork point in this session.");
-				const forked = await api.fork(selected, { entryId: point.id });
-				// From here the fork exists, and every exit below up to the prompt
-				// abandons it: this `disposed` return, the one after the attach, and
-				// the `catch` on a throw from `api.attach` or `api.prompt`. That orphan
-				// is deliberate (OW-puduro): what it costs is a session file, and the
-				// owner weighed that and declined to spend anything on it (OW-fejota).
-				// The trap if that is ever revisited: the server's `DELETE` route
-				// disposes the *adapter*, never the file, and on Pi the one live
-				// adapter has MOVED onto the fork -- so a DELETE aimed at the orphan
-				// is aimed at the agent the user is talking to. Only the
-				// fork's own ref carries that hazard: since OW-kekoji the parent's ref
-				// is not an alias for it.
-				if (disposed) return null;
-				// The backends reach "attached to the fork" from opposite directions,
-				// and this one line covers all of them. Pi's fork moved the live
-				// process onto the new file, so the manager already holds a container
-				// named by the fork's ref and this attach finds it; Codex and Claude
-				// Code each minted a conversation nothing is driving, and this attach
-				// is what spawns it.
 				// A fork is a selection change, so the intent bumps -- a preview poll
 				// still in flight must not put its old transcript back over the fork.
 				//
-				// Only a fork that is actually taking the selection may bump, which
-				// is why this is read before the bump destroys what it reads. A fork
+				// Only a fork that is actually taking the selection may bump. A fork
 				// the user has clicked away from must leave the counter alone:
 				// bumping past their own click strands it, leaving their
 				// `attachAndSelect` in its `else` branch with the selection never set
-				// (D17, OW-miyemo).
+				// (D17, OW-miyemo). The reply can still land before the fork's
+				// snapshot, as an attach's can (D2), and `applyAttached` is the join
+				// that covers it; one landing after a click onto the fork's own row
+				// moves the selection onto the live session there (OW-tatebi).
 				const takesSelection = intent === selectionIntent;
-				const forkIntent = takesSelection ? ++selectionIntent : intent;
-				const attached = await api.attach(forked);
-				// Abandons the fork as well; see the note at `api.fork` for why that
-				// is deliberate.
-				if (disposed) return null;
-				onAttached?.(attached.handle);
-				// The attach is one more window for a click, and it gets the same
-				// answer: the attach still lands, it just does not move the user --
-				// unless that click landed on the fork's own row, whose selection
-				// `applyAttached` still moves onto the live session (OW-tatebi).
-				applyAttached(attached, forkIntent === selectionIntent, forked);
-				// The fork is a conversation the user has seen no error on, so admitting
-				// this clears none: one its attach's start raised stays up (OW-jokoto).
-				const response = await api.prompt(attached.ref, { text, priorErrorId: null, ...(images && images.length > 0 ? { images } : {}) });
-				if (disposed) return null;
+				if (takesSelection) ++selectionIntent;
+				applyAttached(forked.session, takesSelection, forked.session.ref);
 				// The prompt landed, so the composer must stop offering text that has
 				// already been sent -- but only if it is still that text. The
-				// textarea stays live through a round trip four requests deep, so
-				// anything typed while waiting is the next prompt, not this one
-				// (OW-nasofa's rule, brought to this path by OW-kelede). It still
-				// covers the reason the clear used to be unconditional: the draft is
-				// global, and a user who clicked away mid-POST would otherwise be
-				// looking at another session with already-sent text under a Send
-				// button -- clicking away does not change the draft, so that case
-				// still clears.
+				// textarea stays live through the request, so anything typed while
+				// waiting is the next prompt, not this one (OW-nasofa's rule, brought
+				// to this path by OW-kelede). It still covers the reason the clear
+				// used to be unconditional: the draft is global, and a user who
+				// clicked away mid-request would otherwise be looking at another
+				// session with already-sent text under a Send button -- clicking away
+				// does not change the draft, so that case still clears.
 				//
 				// The error clear is gated on the intent instead: a session clicked
 				// to in that window may have raised one of its own, and this fork has
 				// no claim on that slot.
 				publish({
 					...(view.draft === text ? { draft: "" } : {}),
-					...(forkIntent === selectionIntent ? { error: null } : {}),
+					...(takesSelection ? { error: null } : {}),
 				});
-				return { session: attached, disposition: response?.disposition ?? "started" };
+				return forked;
 			} catch (error: unknown) {
-				// Reached past a successful `api.fork`, this abandons the fork too; the
-				// note at that call says why that is deliberate (OW-puduro).
-				if (!disposed) publish({ error: errorMessage(error) });
+				if (disposed) return null;
+				// A refusal after the fork was created names it, and the server
+				// removes nothing (D17, D30). The selection moves there unless a
+				// click has moved it since, so that sending again prompts that fork
+				// rather than forking the parent again; the draft stays for that send.
+				// A fork whose own start failed has no handle, and the pane reads it
+				// detached, as `paneMode` reads any selection this tab holds no view
+				// of; one whose view has not come yet reads so until its snapshot,
+				// which refreshes its fork points as any snapshot of the selection does.
+				const fork = error instanceof ApiClientError ? error.fork : undefined;
+				if (fork && intent === selectionIntent) {
+					++selectionIntent;
+					publish({ state: { ...view.state, selected: fork.ref }, forkIndices: null });
+					refreshForkPoints(fork.ref);
+				}
+				publish({ error: errorMessage(error) });
 				return null;
 			} finally {
 				publish({ sending: false, ...(view.busy === "submitting" ? { busy: "idle" } : {}) });

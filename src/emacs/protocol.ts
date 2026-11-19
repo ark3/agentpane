@@ -70,6 +70,9 @@
  * OW-wavini raised it a nineteenth: the `"system"` role and its `system`
  * part, for the system-role message `pi 1.2.0` opens every session with and
  * sends again whenever its configuration changes.
+ * ark3/agentpane#51 raised it a twentieth, under D30: `sessions/forkAndPrompt`
+ * carries a `token` and attaches the fork for the buffer that minted it, as
+ * `sessions/attach` does, so an edit sends one request.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -335,18 +338,25 @@
  *   "Stop and fork" reads (D30). Until ark3/agentpane#47 the result was the
  *   array alone.
  * - `sessions/fork` -- `{ session, entryId }` -> the fork's ref.
- * - `sessions/forkAndPrompt` -- `{ session, index, text, images? }` ->
- *   `{ session, disposition }`. An edit of an earlier message as one server
- *   operation (D30): fork at the user message whose transcript `index` this
- *   is, attach the fork, and prompt it with `text`, clearing no turn error.
- *   `session` in the result is the fork's summary, with its `handle`, and
- *   `disposition` is `"started"` or `"handled"`, as `sessions/prompt`'s.
- *   An index no fork point names is refused with a 409 `not_a_fork_point`
- *   and nothing forked. A failure after the fork was created carries `fork`,
- *   `{ ref, handle }`, in its `data`, `handle` being `null` where the fork's
- *   own start failed; the server removes nothing. Like `sessions/fork`, it
- *   attaches nothing for this buffer: the fork's notifications come once a
- *   `sessions/attach` of it is answered.
+ * - `sessions/forkAndPrompt` -- `{ session, index, text, images?, token }`
+ *   -> `{ session, disposition }`. An edit of an earlier message as one
+ *   server operation (D30): fork at the user message whose transcript
+ *   `index` this is, attach the fork, and prompt it with `text`, clearing no
+ *   turn error. `session` in the result is the fork's summary, with its
+ *   `handle`, and `disposition` is `"started"` or `"handled"`, as
+ *   `sessions/prompt`'s. An index no fork point names is refused with a 409
+ *   `not_a_fork_point` and nothing forked. A failure after the fork was
+ *   created carries `fork`, `{ ref, handle }`, in its `data`, `handle` being
+ *   `null` where the fork's own start failed; the server removes nothing.
+ *   It is also an attach of the fork, for the buffer that minted `token`
+ *   (integer, always, from the count `sessions/attach`'s come from): the
+ *   fork is attached from the `session/snapshot` under its handle that
+ *   carries `token`, sent as for `sessions/attach` and before the reply,
+ *   and released by a `sessions/detach` or `sessions/close` carrying it,
+ *   so agentpane-mode binds the fork's buffer as an attach binds one (D25).
+ *   A refusal that names a fork under a handle answers the same way before
+ *   its error goes out; one that names none, or no fork, answers nothing.
+ *   Until ark3/agentpane#51 it carried no token and attached nothing.
  *
  * Errors: a request the server refused answers with the HTTP status as
  * `code`, the server's text as `message`, and `{ status, error, detail }` as
@@ -488,7 +498,7 @@ export interface HelperRequests {
 	"sessions/setName": { params: SessionParams & { name: string }; result: null };
 	"sessions/forkPoints": { params: SessionParams; result: ForkPointsResponse };
 	"sessions/fork": { params: SessionParams & ForkRequest; result: SessionRef };
-	"sessions/forkAndPrompt": { params: SessionParams & ForkAndPromptRequest; result: ForkAndPromptResponse };
+	"sessions/forkAndPrompt": { params: SessionParams & ForkAndPromptRequest & { token: number }; result: ForkAndPromptResponse };
 }
 
 export interface SessionStatusParams {

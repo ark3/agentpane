@@ -283,6 +283,22 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		attach.release?.();
 	};
 
+	/**
+	 * Answer `attach`, whose reply named `handle`, from the view the reducer
+	 * holds under it, or wait for the snapshot on its way; see
+	 * `sessions/attach` below for when none is expected. Resolves once the
+	 * reply may go.
+	 */
+	const bind = async (attach: Attaching, handle: string): Promise<void> => {
+		if (attach.done) return;
+		const view = state.sessions[handle];
+		if (view) answer(attach, view, handle);
+		else if (!attach.seen.has(handle) && !stopped) {
+			attach.handle = handle;
+			await new Promise<void>((resolve) => (attach.release = resolve));
+		}
+	};
+
 	/** Give up on `attach`'s snapshot, and release its reply: nothing is recorded for it. */
 	const abandon = (attach: Attaching): void => {
 		attach.done = true;
@@ -620,7 +636,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// the stream and the REST response are unordered (D2): on the fake
 				// adapters the reply reached a direct client first in 23 and 28 of 40
 				// attaches in two runs, 2026-09-28. An attach no snapshot has
-				// answered by now is answered here, by the view the reducer holds
+				// answered by now is answered here (`bind`), by the view the reducer holds
 				// under the reply's handle: the session was live, or its snapshot
 				// came before the reply, which no snapshot answers ahead of
 				// (`introduce`). With no view, a
@@ -638,14 +654,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// it too, and no REST call follows; and its REST call waits for the
 				// open, so that the snapshot it broadcasts, and any `ended` under
 				// its handle, reach this client (`openStream`).
-				if (!attach.done) {
-					const view = state.sessions[summary.handle];
-					if (view) answer(attach, view, summary.handle);
-					else if (!attach.seen.has(summary.handle) && !stopped) {
-						attach.handle = summary.handle;
-						await new Promise<void>((resolve) => (attach.release = resolve));
-					}
-				}
+				await bind(attach, summary.handle);
 				return summary;
 			} finally {
 				attaching.delete(attach);
@@ -691,7 +700,31 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		"sessions/forkPoints": ({ session }) => api.forkPoints(session),
 		"sessions/fork": ({ session, handle: _handle, ...body }) => api.fork(session, body),
-		"sessions/forkAndPrompt": ({ session, handle: _handle, ...body }) => api.forkAndPrompt(session, body),
+		// An attach of the fork for the buffer that sent `token`, as well as the
+		// operation (D30): the fork's snapshot, broadcast before its prompt goes
+		// out, answers it as an attach's answers that attach, and the reply goes
+		// after it. So does a refusal naming a fork that was attached; one whose
+		// own start failed names no handle, and binds nothing.
+		"sessions/forkAndPrompt": async ({ session, handle: _handle, token, ...body }) => {
+			const attach: Attaching = { token, seen: new Set(), done: false };
+			attaching.add(attach);
+			try {
+				await openStream();
+				if (attach.done) throw new Error("the fork and prompt was given up before it was sent");
+				let reply: Awaited<ReturnType<typeof api.forkAndPrompt>>;
+				try {
+					reply = await api.forkAndPrompt(session, body);
+				} catch (error: unknown) {
+					const handle = error instanceof ApiClientError ? error.fork?.handle : null;
+					if (handle) await bind(attach, handle);
+					throw error;
+				}
+				await bind(attach, reply.session.handle);
+				return reply;
+			} finally {
+				attaching.delete(attach);
+			}
+		},
 	};
 
 	const respond = async (request: JsonRpcRequest): Promise<void> => {

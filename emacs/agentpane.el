@@ -864,6 +864,7 @@ another status and that holds no handle, so no watch reads it; see
               :compaction nil)))
 
 (defvar agentpane--attach-sent)
+(defvar agentpane--fork-sent)
 
 (defun agentpane--notified-buffer (method params)
   "The transcript buffer the notification METHOD, with PARAMS, is about.
@@ -888,6 +889,13 @@ buffer only previewing a ref an attached buffer's session was renamed
 onto would win.  Until OW-wukako it carried `askedFor', the ref asked
 for, bound to a buffer holding that ref that had sent an attach and held
 no handle, which two buffers attaching one ref both were.
+
+The snapshot that attaches a fork an edit's `sessions/forkAndPrompt'
+created carries that request's `token' instead, which the edit's buffer
+holds as `agentpane--fork-sent' (ark3/agentpane#51), and is about the
+fork's own buffer, which no one has made yet: it is made for the
+snapshot's ref, holding the token as the attach it sent, so its detach
+releases it (`agentpane--fork-buffer').
 
 A snapshot whose `token' no buffer holds -- that of an attach its buffer
 gave up waiting for and has sent another since, or a killed buffer's --
@@ -927,9 +935,8 @@ them, which shows it, streaming and all."
       ('session/detached
        (and handle (agentpane--buffer-holding handle)))
       ('session/snapshot
-       (or (and token (seq-find (lambda (buffer)
-                                  (eql (buffer-local-value 'agentpane--attach-sent buffer) token))
-                                (buffer-list)))
+       (or (and token (agentpane--buffer-sent token))
+           (and token (agentpane--fork-answered token ref))
            (and handle (agentpane--buffer-holding handle))
            (and (not token)
                 (or (agentpane--buffer-for ref (lambda () agentpane--handle))
@@ -2606,6 +2613,37 @@ gives one, rather than that of whichever buffer was current (OW-ruhotu)."
           (setq agentpane--session summary))
         buffer)))
 
+(defun agentpane--buffer-sent (token)
+  "The buffer whose last attach carried TOKEN, if any (`agentpane--attach-sent')."
+  (seq-find (lambda (buffer) (eql (buffer-local-value 'agentpane--attach-sent buffer) token))
+            (buffer-list)))
+
+(defun agentpane--fork-answered (token ref)
+  "The fork buffer for REF, made, where TOKEN is the one a buffer's edit
+sent its `sessions/forkAndPrompt' with (`agentpane--fork-sent'); else nil."
+  (let ((parent (seq-find (lambda (buffer) (eql (buffer-local-value 'agentpane--fork-sent buffer) token))
+                          (buffer-list))))
+    (and parent (agentpane--fork-buffer parent ref token))))
+
+(defun agentpane--fork-buffer (parent ref token)
+  "The transcript buffer for REF, a fork PARENT's edit created, made if
+there is none, in PARENT's project, holding TOKEN, its request's, as the
+attach it sent: the helper answers that request as an attach of the fork
+for this buffer, and holds the attachment until a detach releases the
+token (`sessions/forkAndPrompt' in src/emacs/protocol.ts).  A buffer
+made here is drawn empty under its header, as `agentpane--fork-at'
+draws the fork it opens, until a snapshot draws it."
+  (let* ((summary (list :ref ref :cwd (plist-get (buffer-local-value 'agentpane--session parent) :cwd)))
+         (buffer (agentpane--transcript-buffer summary)))
+    (with-current-buffer buffer
+      (unless (eql agentpane--attach-sent token)
+        (when agentpane--attach-sent
+          (push agentpane--attach-sent agentpane--attach-earlier))
+        (setq agentpane--attach-sent token))
+      (unless agentpane--ewoc
+        (agentpane--draw [] (agentpane--transcript-header summary))))
+    buffer))
+
 (defvar agentpane--composer)
 
 (defun agentpane--hold-ref (ref)
@@ -2762,6 +2800,8 @@ its text is on the kill ring" (buffer-name other))))
                   (with-current-buffer other (agentpane--tokens-sent))))
     (when (buffer-local-value 'agentpane--forking other)
       (setq agentpane--forking t))
+    (unless agentpane--fork-sent
+      (setq agentpane--fork-sent (buffer-local-value 'agentpane--fork-sent other)))
     (with-current-buffer other
       (remove-hook 'kill-buffer-hook #'agentpane--detach t))
     (puthash other buffer agentpane--absorbed)
@@ -2810,6 +2850,7 @@ The streaming field also drives the turn-done watch; see
                         (plist-get params :model)))
                     (or (plist-get params :effort) agentpane--default-effort))))
   (setq agentpane--model (plist-get params :model))
+  (agentpane--show-edit-hint)
   (agentpane--show-reading-tail)
   (agentpane--show-mode-line))
 
@@ -2868,7 +2909,8 @@ exits non-locally.  Otherwise return nil."
 
 (defun agentpane--refuse-forking (&optional failed)
   "Signal a user error, sending nothing, while this buffer counts a fork in
-flight (`agentpane--forking'), calling FAILED first, if given, as
+flight, `agentpane-fork''s (`agentpane--forking') or an edit's
+\(`agentpane--fork-sent'), calling FAILED first, if given, as
 `agentpane--refuse-closing' does and for its reason.  Otherwise return nil.
 
 It guards an attach, never a command on a buffer already attached, as a
@@ -2883,7 +2925,7 @@ index, a process the fork's reply orphans when it detaches the parent
 rather than in each command: until OW-nuhayu only `agentpane-attach',
 the fork commands, `agentpane-refetch' and `agentpane-close-session'
 refused, and `agentpane-send' and `agentpane-compact' attached."
-  (when agentpane--forking
+  (when (or agentpane--forking agentpane--fork-sent)
     (when failed (funcall failed))
     (user-error "A fork of this session is already in flight")))
 
@@ -3100,7 +3142,21 @@ it, has not answered.")
 \(`agentpane-edit'), a plist: `:index', that message's transcript index;
 `:images', its images as the prompt's `images' take them; `:draft', the
 prompt region's text the edit displaced; `:overlay', the overlay naming
-the edit over the prompt separator.  Nil otherwise.")
+the edit over the prompt separator; `:label', the message's text as the
+overlay names it; and `:stops', whether the fork-points answer the edit
+opened on said a fork of the session stops a running turn (D30), which
+the overlay's hint reads (`agentpane--show-edit-hint').  Nil otherwise.")
+
+(defvar-local agentpane--fork-sent nil
+  "The `token' of the `sessions/forkAndPrompt' this buffer's edit sent,
+while it has not answered, or nil.
+The snapshot carrying it binds the fork's buffer, which
+`agentpane--notified-buffer' makes for it, as the snapshot answering an
+attach binds the buffer that sent it (`sessions/forkAndPrompt' in
+src/emacs/protocol.ts).  It is also the one record of that request being
+out: while it is, nothing attaches this buffer
+\(`agentpane--refuse-forking'), as while `agentpane--forking' holds for
+`agentpane-fork'.")
 
 (defvar-local agentpane--held-queued nil
   "The prompts this buffer's stops took out of Pi's queue (D16), in the
@@ -3748,10 +3804,10 @@ under the transcript (OW-roveze).  A message no point names is not
 forkable, and nothing is forked, as the browser offers no Edit there.
 
 A Pi fork of a streaming session stops the turn whether or not anything
-aborts it, so the turn is aborted first, the loss made deliberate, as the
-browser's `forkAndSubmit' does; that abort is the client's under D15, and
-the Pi adapter's fork stops the session again, usually taking nothing out
-\(ark3/agentpane#47).  It goes after the points are
+aborts it, so the turn is aborted first, the loss made deliberate; that
+abort is the client's under D15, and the Pi adapter's fork stops the
+session again, usually taking nothing out (ark3/agentpane#47).  An
+edit's send sends no abort of its own (`agentpane--send-edit', D30).  It goes after the points are
 matched, so a message that is not forkable costs the turn nothing.  The
 turn-done watch on the parent's handle ends as the abort goes out,
 raising nothing (`agentpane--watch-turn'), since the aborted turn's last
@@ -3844,7 +3900,8 @@ press f again at the message to fork"))))))
 
 (defun agentpane--fork-point (index then &optional failed what follow)
   "Fetch this attached buffer's fork points, and call THEN with the one
-naming INDEX; when none does, call FAILED, if given, and say the message,
+naming INDEX and whether the answer says a fork of the session stops a
+running turn (D30); when none does, call FAILED, if given, and say the message,
 which WHAT names, \"the message at point\" when nil, is not forkable.
 While a close is in flight, call FAILED and signal a user error instead,
 sparing the user a refused request; see `agentpane--closing'.
@@ -3858,7 +3915,7 @@ See `agentpane-fork'."
      (let ((point (seq-find (lambda (point) (eql (plist-get point :index) index))
                             (plist-get answer :points))))
        (if point
-           (funcall then point)
+           (funcall then point (eq (plist-get answer :forkStopsTurn) t))
          (when failed (funcall failed))
          (message "agentpane: %s is not forkable" (or what "the message at point")))))
    (if follow 'follow t) failed agentpane--spawn-timeout))
@@ -3880,13 +3937,14 @@ should a merge kill it meanwhile, which takes the fork over with
     (setq agentpane--forking t)
     (agentpane--fork-point
      index
-     (lambda (point)
+     (lambda (point _stops)
        (if (and pi-backend agentpane--streaming)
            (progn
              (agentpane--watch-forget agentpane--handle)
              ;; The prompts this stop takes out of Pi's queue, its result's
-             ;; `:queued', are dropped here, as the browser's `forkAndSubmit'
-             ;; drops them (D16, OW-wisifo), and so are lost: a cleared steer
+             ;; `:queued', are dropped here, as the server's own stop inside
+             ;; the fork drops them (`PiAdapter.fork', D16, OW-wisifo), and
+             ;; so are lost: a cleared steer
              ;; is in no session file, where one delivered a moment sooner
              ;; stays in the parent's.  They were steered into the turn the
              ;; fork abandons.  Taking them out still
@@ -3935,9 +3993,9 @@ leaving this buffer holding its session.  `C-c C-k'
 
 A message no fork point names is not editable (DESIGN D20).  The points
 are fetched and matched at the press, as `agentpane-fork' matches them, so
-such a message is refused here rather than at the send, and are matched
-again at the send, which refuses rather than forks elsewhere should the
-set have moved meanwhile.  On a buffer only previewed the press attaches
+such a message is refused here rather than at the send, and the server
+matches the index again at the send, refusing rather than forking
+elsewhere should the set have moved meanwhile (D30).  On a buffer only previewed the press attaches
 and edits nothing, as `agentpane-fork''s does and for its reason: a
 preview's index can name another message than the live one (OW-gekiki).
 
@@ -3978,15 +4036,17 @@ edited instead, as the browser withdraws the control rather than quietly
 load an older one (OW-roveze).  A transcript holding no user message is
 refused too.
 
-On a streaming Pi session this also aborts the turn, as the browser's
-Stop and edit does: the send would abort it anyway (`agentpane-fork'),
-and this stops it at the press instead.  Not through a compaction, which
-the browser's `streamingAction' leaves unstoppable, showing Edit last
-message there.  The abort goes once the points are matched and the edit
-is open, so a message that is not forkable costs the turn nothing, and it
-is not waited on, since the send checks for a streaming turn again and
-aborts it again before it forks.  Codex and Claude Code keep a parent
-turn running through a fork, and are not aborted.
+Where the fork-points answer says a fork of the session stops a running
+turn, which as of ark3/agentpane#47 it says for Pi alone, and one is
+running, this also aborts the turn, as the browser's Stop and edit does:
+the send would stop it anyway (`agentpane--edit-stops-p'), and this stops
+it at the press instead.  Not through a compaction, which the browser's
+`streamingAction' leaves unstoppable, showing Edit last message there.
+The abort goes once the points are matched and the edit is open, so a
+message that is not forkable costs the turn nothing, and it is not
+waited on, since the server's fork stops the session again before it
+forks (`PiAdapter.fork').  Codex and Claude Code keep a parent turn
+running through a fork, and are not aborted.
 What that abort takes out of Pi's queue never joins the edit, which would
 send it into the fork: it waits in this buffer until the edit ends, then
 lands ahead of the draft the edit displaced, whether
@@ -4012,9 +4072,7 @@ edit's."
         (agentpane--edit
          (ewoc-data at) "C-c C-e" "the last message"
          (lambda ()
-           (when (and agentpane--streaming
-                      (not (plist-get agentpane--status :compaction))
-                      (equal (plist-get (agentpane--ref agentpane--session) :backend) "pi"))
+           (when (agentpane--edit-stops-p)
              (agentpane-abort))))))))
 
 (defun agentpane--edit (node key what &optional then)
@@ -4024,12 +4082,12 @@ KEY is the command's key and WHAT names the message, for the echo area."
   (cond
    ((agentpane--attached-p)
     (agentpane--fork-point (plist-get node :index)
-                           (lambda (_)
+                           (lambda (_ stops)
                              ;; Here, not at the press; see `agentpane-edit'.
                              (if agentpane--sending
                                  (message "agentpane: a prompt from this buffer is still \
 being sent; press %s once it has answered to edit %s" key what)
-                               (agentpane--start-edit node)
+                               (agentpane--start-edit node stops)
                                (when then (funcall then))))
                            nil what))
    (agentpane--attaching
@@ -4039,11 +4097,13 @@ being sent; press %s once it has answered to edit %s" key what)
          (message "agentpane: the transcript now shows the live session; \
 press %s again to edit %s" key what))))))
 
-(defun agentpane--start-edit (node)
+(defun agentpane--start-edit (node &optional stops)
   "Open the edit of NODE, a user node, in this buffer; see `agentpane-edit'.
 Its text parts become the prompt region's text, joined by a blank line as
 the browser's `startEdit' joins them, and its image parts, carrying `data',
-are kept as the prompt's `images' take them, carrying `base64'."
+are kept as the prompt's `images' take them, carrying `base64'.
+STOPS is the fork-points answer's, whether a fork of the session stops a
+running turn, which the hint reads (`agentpane--show-edit-hint')."
   (let* ((parts (plist-get node :parts))
          (text (mapconcat (lambda (part) (plist-get part :text))
                           (seq-filter (lambda (part) (equal (plist-get part :type) "text")) parts)
@@ -4056,18 +4116,43 @@ are kept as the prompt's `images' take them, carrying `base64'."
                       (plist-get agentpane--editing :overlay)
                     (make-overlay agentpane--prompt-separator (1- agentpane--prompt-start)
                                   nil t nil))))
-    (overlay-put overlay 'display
-                 (propertize (format "── editing “%s” · C-RET forks there · C-c C-k cancels ──"
-                                     (agentpane--one-line text 40))
-                             'face 'agentpane-warning))
     (setq agentpane--editing
           (list :index (plist-get node :index)
                 :images images
                 :draft (if agentpane--editing
                            (plist-get agentpane--editing :draft)
                          (buffer-substring-no-properties agentpane--prompt-start (point-max)))
-                :overlay overlay))
+                :overlay overlay
+                :label (agentpane--one-line text 40)
+                :stops stops))
+    (agentpane--show-edit-hint)
     (agentpane--set-draft text)))
+
+(defun agentpane--edit-stops-p ()
+  "Whether sending this buffer's edit now stops the session's running turn:
+the fork-points answer the edit opened on said a fork of the session
+stops one (D30), and one is running, not a compaction, which the
+browser's `streamingAction' leaves unstoppable.  What the browser's
+\"Stop and fork\" reads (`stopsBeforeFork' in src/client/App.svelte)."
+  (and agentpane--editing
+       (plist-get agentpane--editing :stops)
+       agentpane--streaming
+       (not (plist-get agentpane--status :compaction))))
+
+(defun agentpane--show-edit-hint ()
+  "Draw the open edit's hint over the prompt separator: the message it
+edits, and what a send does, which names the stop where sending stops a
+running turn (`agentpane--edit-stops-p'), as the browser's primary button
+reads \"Stop and fork\" there (ark3/agentpane#17).  Drawn again at every
+status, which is where a turn starts and ends."
+  (when agentpane--editing
+    (overlay-put (plist-get agentpane--editing :overlay) 'display
+                 (propertize (format "── editing “%s” · C-RET %s · C-c C-k cancels ──"
+                                     (plist-get agentpane--editing :label)
+                                     (if (agentpane--edit-stops-p)
+                                         "stops the turn and forks there"
+                                       "forks there"))
+                             'face 'agentpane-warning))))
 
 (defun agentpane--set-draft (text)
   "Replace the prompt region's text with TEXT, and move point, in this buffer
@@ -4098,28 +4183,46 @@ ahead of it (`agentpane-abort')."
 
 (defun agentpane--send-edit (text sent)
   "Fork this buffer's session at the message its edit holds, and prompt the
-fork with TEXT and that message's images; once the prompt has answered,
-end the edit and call SENT.  The fork is `agentpane-fork''s, a streaming
-Pi turn's abort and the one fork at a time included, though that is
-checked as the send goes out and not once its attach answers
-\(OW-tukuvo), and the prompt is
-the fork buffer's own `agentpane--send-prompt'.  A fork or a prompt that
-fails leaves the edit standing, the edited text still in the prompt
-region, as the browser's `send' leaves its edit mode.
+fork with TEXT and that message's images, as one `sessions/forkAndPrompt'
+the server runs to the end (D30); once it has answered, end the edit,
+call SENT, and show the fork, in a buffer of its own, in the window that
+showed this buffer at the send, if it is still live.  The fork's buffer
+is attached by the snapshot carrying the request's `token', which the
+helper writes before the reply, as an attach's (D25): it is made for
+that snapshot (`agentpane--fork-buffer'), or at the reply where no
+snapshot came, not attached.  The fork's turn-done watch is armed there
+at the reply, from the level its snapshot left, and a prompt the backend
+handled arms none and says so in the fork's buffer, as
+`agentpane--send-prompt' says it.
 
-This buffer counts as sending, `agentpane--sending', for the whole round
-trip -- the attach, the points, any abort, the fork, and the fork's attach
-and prompt -- as the browser's `forkAndSubmit' holds `sending' across all
-of it (OW-kelede), and every failure along the way frees it.  Guarded by
-`agentpane--forking' alone, which the fork's reply clears, a second send
-while the fork's prompt waited on its attach forked again.
-A buffer no longer attached, as a Pi fork's parent is left once its fork
-has answered, attaches first, as `agentpane-fork' does.
-From the fork's reply on, the requests that free this buffer are the fork
-buffer's, and `agentpane--request' runs nothing for a buffer killed before
-its answer, so until the fork's prompt answers, killing the fork's buffer
-frees this one too; otherwise a fork buffer killed as it appeared, during
-a slow spawn, left this buffer refusing every send.
+Nothing stops a running turn here: where the backend abandons it at a
+fork, which is Pi (D15), the server's fork stops it (`PiAdapter.fork').
+The turn-done watch on this buffer's handle ends as the request goes out,
+raising nothing, where the edit's hint says the send stops a running turn
+\(`agentpane--edit-stops-p'), since the stop's last status, and a Pi
+parent's `ended', usually arrive before the reply.  A Pi fork moves the
+parent's live process onto the fork, so at the reply, or at a refusal
+naming a fork, this buffer detaches as `agentpane--fork-at' detaches a Pi
+fork's parent.
+
+A refusal that names a fork, created before its prompt failed, ends the
+edit and moves to the fork, so that sending again prompts that fork
+rather than forking this session a second time (ark3/agentpane#17): this
+buffer's prompt region gets the draft the edit displaced back, as
+`agentpane-cancel-edit' leaves it, and the fork's buffer, shown as above,
+gets the text the region held, the edited text unless it was changed
+meanwhile.  The fork is attached where the refusal names its handle, the
+helper having bound it as above, and not where its own start failed.  A
+refusal that names none, the message no longer a fork point among them,
+created nothing, and leaves the edit standing, the edited text still in
+the prompt region, as the browser's `send' leaves its edit mode.  Sent
+from a buffer not attached, the request goes all the same, and the
+server forks a session another client holds or refuses one nobody does.
+
+This buffer counts as sending, `agentpane--sending', until the request
+answers, as the browser's `forkAndSubmit' holds `sending' (OW-kelede),
+and while it does nothing attaches it (`agentpane--fork-sent').  The
+request follows this buffer into one that absorbs it meanwhile.
 The edit's lifetime owns the draft it displaced, not Cancel alone
 \(OW-kijuju, OW-hakeno): ending the edit here hands that draft to
 `agentpane--displaced', and what a stop took out of Pi's queue waits in
@@ -4131,40 +4234,71 @@ buffer releases the stopped prompts too, for a send whose edit was
 cancelled while it was in flight."
   (when agentpane--forking
     (user-error "A fork of this session is already in flight"))
+  (agentpane--refuse-closing)
   (let* ((edit agentpane--editing)
-         (parent (current-buffer))
+         (window (get-buffer-window))
+         (token (agentpane--attach-token))
+         (images (plist-get edit :images))
          (free (lambda ()
-                 (when (buffer-live-p parent)
-                   (with-current-buffer parent
-                     (setq agentpane--sending nil)
-                     (agentpane--release-queued))))))
-    (setq agentpane--sending t)
-    (agentpane--attached-then
-     (lambda ()
-       (agentpane--fork-points
-        (plist-get edit :index)
-        (lambda ()
-          (add-hook 'kill-buffer-hook free nil t)
-          (agentpane--send-prompt
-           text
-           (lambda ()
-             (remove-hook 'kill-buffer-hook free t)
-             (funcall free)
-             (when (buffer-live-p parent)
-               (with-current-buffer parent
-                 (when (eq agentpane--editing edit)
-                   (setq agentpane--displaced (plist-get edit :draft))
-                   (agentpane--end-edit))))
-             (funcall sent)
-             (when (buffer-live-p parent)
-               (with-current-buffer parent
+                 (setq agentpane--sending nil
+                       agentpane--fork-sent nil)
                  (agentpane--release-queued))))
-           (plist-get edit :images)
-           (lambda ()
-             (remove-hook 'kill-buffer-hook free t)
-             (funcall free))))
-        free))
-     free)))
+    (when (agentpane--edit-stops-p)
+      (agentpane--watch-forget agentpane--handle))
+    (setq agentpane--sending t
+          agentpane--fork-sent token)
+    (agentpane--request
+     'sessions/forkAndPrompt
+     (append (list :session (agentpane--ref agentpane--session)
+                   :index (plist-get edit :index) :text text :token token)
+             (and images (list :images (vconcat images))))
+     (lambda (answer)
+       (let ((summary (plist-get answer :session)))
+         (setq agentpane--sending nil
+               agentpane--fork-sent nil)
+         (when (eq agentpane--editing edit)
+           (setq agentpane--displaced (plist-get edit :draft))
+           (agentpane--end-edit))
+         (agentpane--forked-away)
+         (funcall sent)
+         (agentpane--release-queued)
+         (with-current-buffer (agentpane--show-fork token (plist-get summary :ref) window)
+           (if (equal (plist-get answer :disposition) "handled")
+               (agentpane--hold-handled t)
+             (agentpane--watch-submit)))))
+     'follow free agentpane--spawn-timeout nil
+     (lambda (data)
+       (let ((fork (plist-get data :fork)))
+         (when fork
+           (let ((kept (buffer-substring-no-properties agentpane--prompt-start (point-max))))
+             (agentpane--forked-away)
+             (if (not (eq agentpane--editing edit))
+                 (agentpane--show-fork token (plist-get fork :ref) window)
+               (let ((draft (plist-get edit :draft)))
+                 (agentpane--end-edit)
+                 (agentpane--set-draft draft)
+                 (agentpane--release-queued))
+               (with-current-buffer (agentpane--show-fork token (plist-get fork :ref) window)
+                 (agentpane--set-draft kept))))))))))
+
+(defun agentpane--forked-away ()
+  "Detach this buffer from its session where a fork of it moved the live
+process off it, which is Pi's (D24); see `agentpane-fork'."
+  (when (equal (plist-get (agentpane--ref agentpane--session) :backend) "pi")
+    (agentpane--detach)
+    (setq agentpane--attached nil)))
+
+(defun agentpane--show-fork (token ref window)
+  "The buffer of the fork REF an edit's request carrying TOKEN created:
+the one the snapshot carrying TOKEN bound, else one made for it, not
+attached (`agentpane--fork-buffer'); shown in WINDOW if it is still
+live, else in the selected one, and returned."
+  (let ((buffer (or (agentpane--buffer-sent token)
+                    (agentpane--fork-buffer (current-buffer) ref token))))
+    (if (window-live-p window)
+        (set-window-buffer window buffer)
+      (pop-to-buffer buffer '(display-buffer-same-window)))
+    buffer))
 
 ;;;###autoload
 (defun agentpane-new-session (backend)

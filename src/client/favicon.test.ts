@@ -52,6 +52,12 @@ describe("the turn-done watch", () => {
 		expect(watch.badged).toBe(true);
 	});
 
+	/** A fork's watch, armed at its request's reply with its turn already running (D30). */
+	it("badges a watch armed on a turn already streaming at the false that ends it", () => {
+		const watch = watchSessions(watchSubmit(emptyTurnWatch(), "pi:fork", true), streaming("pi:fork", false), UNFOCUSED);
+		expect(watch.badged).toBe(true);
+	});
+
 	it("does nothing at all when the turn finishes with the window focused", () => {
 		const watch = runTurn(watchSubmit(emptyTurnWatch(), "pi:a"), "pi:a", FOCUSED);
 		expect(watch.badged).toBe(false);

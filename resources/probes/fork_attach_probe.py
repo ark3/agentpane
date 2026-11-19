@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Fork the most recent turn, then attach the fork, through the production server.
 
-The client's `forkAndSubmit` is a four-request round trip -- fork points, fork,
-attach, prompt -- and the three backends reach "attached to the fork" by three
+The client's `forkAndSubmit` was a four-request round trip -- fork points, fork,
+attach, prompt -- until ark3/agentpane#51 made it one fork-and-prompt (D30), and
+the three backends reach "attached to the fork" by three
 different routes: Pi's fork moves the live process onto a new file, Codex
 flushes the forked rollout to disk before `thread/fork` returns (as of
 `codex-cli 0.154.0`, OW-lajehi), and Claude Code's fork runs nothing at all
