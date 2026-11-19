@@ -16,6 +16,7 @@ import {
 	emptyTurnWatch,
 	setFaviconBadge,
 	watchAbandon,
+	watchClose,
 	watchFocus,
 	watchMove,
 	watchSessions,
@@ -149,6 +150,33 @@ describe("the turn-done watch", () => {
 		expect(watch.badged).toBe(true);
 		expect(watch.waiting.size).toBe(0);
 		expect(watchFocus(watch).badged).toBe(false);
+	});
+});
+
+describe("watchClose (D31 point 6)", () => {
+	it("badges an unfocused window for a turn seen streaming, and drops every watch", () => {
+		const watch = watchSessions(watchSubmit(watchSubmit(emptyTurnWatch(), "a"), "b"), streaming("a", true), UNFOCUSED);
+		const closed = watchClose(watch, UNFOCUSED);
+		expect(closed.badged).toBe(true);
+		expect(closed.waiting.size).toBe(0);
+	});
+
+	it("badges nothing for a watch whose turn never streamed, and drops it, so a turn after a reconnect badges nothing", () => {
+		const closed = watchClose(watchSubmit(emptyTurnWatch(), "a"), UNFOCUSED);
+		expect(closed.badged).toBe(false);
+		expect(closed.waiting.size).toBe(0);
+		const after = watchSessions(watchSessions(closed, streaming("a", true), UNFOCUSED), streaming("a", false), UNFOCUSED);
+		expect(after.badged).toBe(false);
+	});
+
+	it("badges nothing in a focused window, as a turn ending there does not", () => {
+		const watch = watchSessions(watchSubmit(emptyTurnWatch(), "a"), streaming("a", true), FOCUSED);
+		expect(watchClose(watch, FOCUSED)).toEqual({ waiting: new Map(), badged: false });
+	});
+
+	it("leaves a watch with nothing waiting as it was", () => {
+		const watch = emptyTurnWatch();
+		expect(watchClose(watch, UNFOCUSED)).toBe(watch);
 	});
 });
 

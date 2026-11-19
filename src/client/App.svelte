@@ -12,6 +12,7 @@
 		emptyTurnWatch,
 		setFaviconBadge,
 		watchAbandon,
+		watchClose,
 		watchFocus,
 		watchMove,
 		watchSessions,
@@ -478,6 +479,12 @@
 		const unsubscribeGaps = controller.subscribeGaps((handle) => {
 			turnWatch = watchAbandon(turnWatch, handle);
 		});
+		// A close ends every watch, raising the badge for a turn seen streaming
+		// (D31 point 6); see `watchClose`.
+		const unsubscribeCloses = controller.subscribeCloses(() => {
+			turnWatch = watchClose(turnWatch, document.hasFocus());
+			setFaviconBadge(turnWatch.badged);
+		});
 		void controller.start();
 
 		// A read-only preview polls itself, but the controller owns no DOM (OW-76),
@@ -517,6 +524,7 @@
 			systemTheme.removeEventListener("change", onSystemTheme);
 			unsubscribe();
 			unsubscribeGaps();
+			unsubscribeCloses();
 			document.removeEventListener("visibilitychange", onTabVisibility);
 			window.removeEventListener("focus", onTabVisibility);
 			window.removeEventListener("focus", onWindowFocus);

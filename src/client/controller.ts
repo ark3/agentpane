@@ -192,6 +192,13 @@ export interface AgentpaneController {
 	 * yet, and the badge's watch has to tell the two apart (OW-jadoda).
 	 */
 	subscribeGaps(listener: (handle: string) => void): () => void;
+	/**
+	 * Hear each close of the socket, before the publish that drops every view
+	 * (D31 point 6). A published view cannot say it either: the badge's watch
+	 * ends at a close, raising for a turn seen streaming, where a view that has
+	 * not formed yet keeps it waiting.
+	 */
+	subscribeCloses(listener: () => void): () => void;
 	start(): Promise<void>;
 	dispose(): void;
 	setDraft(text: string): void;
@@ -436,6 +443,7 @@ export function createController(
 	let previewHeld = false;
 	const listeners = new Set<(next: ControllerView) => void>();
 	const gapListeners = new Set<(handle: string) => void>();
+	const closeListeners = new Set<() => void>();
 
 	/**
 	 * The controller's one chokepoint, so the pane's mode is settled here and
@@ -1183,6 +1191,7 @@ export function createController(
 		 * (`followRef`).
 		 */
 		onDisconnect() {
+			for (const listener of closeListeners) listener();
 			const summaries = view.state.summaries.map((summary): SessionSummary =>
 				summary.status === "detached" ? summary : { ...summary, status: "detached", isStreaming: false },
 			);
@@ -1209,6 +1218,10 @@ export function createController(
 			gapListeners.add(listener);
 			return () => gapListeners.delete(listener);
 		},
+		subscribeCloses(listener) {
+			closeListeners.add(listener);
+			return () => closeListeners.delete(listener);
+		},
 		refreshSessions: () => refreshSessions(true),
 		reconnect() {
 			if (disposed || reconnectTimer === undefined) return;
@@ -1232,6 +1245,7 @@ export function createController(
 			connection?.close();
 			listeners.clear();
 			gapListeners.clear();
+			closeListeners.clear();
 		},
 		setDraft(text) {
 			publish({ draft: text });

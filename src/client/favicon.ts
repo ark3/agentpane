@@ -118,11 +118,11 @@ export function watchFocus(watch: TurnWatch): TurnWatch {
  *
  * A session missing from `streaming` keeps its watch waiting, because a view
  * that has not formed yet looks exactly like one that went away. Of the three
- * things that take a view away, only a seq gap ends the watch, and not here:
- * the controller tells `App.svelte`, which calls `watchAbandon` (OW-jadoda).
- * A stream drop leaves it waiting: where the server survived the drop, the
- * reconnect's opening snapshot re-forms the view under the same handle, and a
- * turn ending there badges. An `ended` leaves it waiting too, and nothing
+ * things that take a view away, a seq gap and a close end watches, and not
+ * here: the controller tells `App.svelte`, which calls `watchAbandon` for a
+ * gap (OW-jadoda) and `watchClose` for a close (D31 point 6). Until D31 a
+ * stream drop left every watch waiting, and after a restart, with no snapshot
+ * to re-form its view, it waited forever. An `ended` leaves it waiting, and nothing
  * re-forms under that handle (D26), so the watch is never acted on again. That
  * includes the `ended` a Pi fork sends under the parent's handle while the fork
  * is in flight (`#forkOnto`, D26 point 1): the fork's watch was never on the
@@ -157,6 +157,21 @@ export function watchSessions(
 	}
 	if (waiting === undefined && badged === watch.badged) return watch;
 	return { waiting: waiting ?? watch.waiting, badged };
+}
+
+/**
+ * The socket closed (D31 point 6), which is taken to mean the server exited
+ * and every turn with it (D25 point 3). A watch on a turn seen streaming
+ * ends as a turn ending does, badging an unfocused window, and every watch is
+ * dropped: one that never saw its turn stream asked for nothing that is now
+ * over, and a reconnect that finds a turn running under the same handle is
+ * not one this tab can still tell from another's. agentpane-mode does the
+ * same at its helper's death, a deliberate shutdown aside (D25 point 4).
+ */
+export function watchClose(watch: TurnWatch, hasFocus: boolean): TurnWatch {
+	if (watch.waiting.size === 0) return watch;
+	const ended = [...watch.waiting.values()].some(Boolean);
+	return { waiting: new Map(), badged: watch.badged || (ended && !hasFocus) };
 }
 
 /** The icon `index.html` links, and its badged sibling. Both live in `public/`. */

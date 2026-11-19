@@ -176,6 +176,10 @@ class FakeController implements AgentpaneController {
 		return () => {};
 	}
 
+	subscribeCloses() {
+		return () => {};
+	}
+
 	async start() {
 		this.started += 1;
 	}
@@ -2448,6 +2452,84 @@ describe("App", () => {
 			document.hasFocus = hasFocus;
 		}
 	});
+
+	/**
+	 * Driven by the real controller: the close is the controller's to hear,
+	 * and the wiring from it to the watch is what is under test. A close is
+	 * taken to mean the server exited (D31 point 6): a turn seen streaming is
+	 * over, and every watch goes, so a turn under the same handle after the
+	 * reconnect raises nothing.
+	 */
+	for (const streamed of [true, false]) {
+		it(`at a close of the socket, ${streamed ? "raises the badge for a turn seen streaming" : "raises nothing for a turn not yet seen streaming"}, and drops the watch (D31 point 6)`, async () => {
+			let handlers: EventHandlers | undefined;
+			const api: AgentpaneApi = {
+				listSessions: async () => [summary(piSession)],
+				createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
+				attach: async () => ({ ...summary(piSession), handle: "h-1" }),
+				preview: async (ref) => ({ ref, turns: [] }),
+				prompt: async () => {},
+				editDraft: async (body) => ({ text: body.text }),
+				abort: async () => {},
+				compact: async () => {},
+				close: async () => {},
+				listModels: async () => [],
+				setModel: async () => {},
+				setEffort: async () => {},
+				setName: async () => {},
+				forkPoints: async () => ({ points: [], forkStopsTurn: serverForkStopsTurn(piSession) }),
+				forkAndPrompt: forkAndPromptUnused,
+				fork: async () => piSession,
+				dismissError: async () => {},
+				connect: (next: EventHandlers) => {
+					handlers = next;
+					return { close: () => {} };
+				},
+			};
+			const snapshot = (isStreaming: boolean): ServerEvent => ({
+				type: "snapshot", session: piSession, handle: "h-1", seq: 1, messages: [], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+			});
+			const status = (seq: number, isStreaming: boolean): ServerEvent => ({
+				type: "status", session: piSession, handle: "h-1", seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
+			});
+			const icon = () => document.querySelector('link[rel="icon"]')!.getAttribute("href");
+			document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+			const hasFocus = document.hasFocus;
+			document.hasFocus = () => false;
+			try {
+				const controller = createController(api);
+				render(App, { props: { controller } });
+				handlers!.onOpen();
+				handlers!.onEvent(snapshot(false));
+				await controller.select(piSession);
+				await tick();
+				await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "Summarize the diff" } });
+				await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+				await tick();
+				if (streamed) handlers!.onEvent(status(2, true));
+				await tick();
+				expect(icon()).toBe("/favicon.svg");
+
+				handlers!.onDisconnect();
+				await tick();
+				expect(icon()).toBe(streamed ? "/favicon-badged.svg" : "/favicon.svg");
+
+				// The server survived after all: the reconnect's opening snapshot
+				// re-forms the view under the same handle, and its turn ends.
+				window.dispatchEvent(new Event("focus"));
+				await tick();
+				handlers!.onOpen();
+				handlers!.onEvent(snapshot(true));
+				await tick();
+				handlers!.onEvent(status(2, false));
+				await tick();
+				expect(icon()).toBe("/favicon.svg");
+				controller.dispose();
+			} finally {
+				document.hasFocus = hasFocus;
+			}
+		});
+	}
 
 	it("re-arms follow on submit even after the reader had scrolled away, tracks growth, and locks once the submitted message would be pushed off the top", async () => {
 		const old = user("old message");
