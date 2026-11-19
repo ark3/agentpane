@@ -556,7 +556,7 @@ Each case prints `RAISED k of n` and each run's echo-area messages, and passes o
 No live model calls, no network beyond the loopback pipe.
 
 Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19.
-What it showed is `docs/MANUAL_TESTING.md`, "A request the helper's teardown aborts gets no reply, and only a refusal abandons a prompt's watch (OW-hiliti)", and "The Emacs helper over the socket (ark3/agentpane#53)".
+What it showed is `docs/MANUAL_TESTING.md`, "A request the helper's teardown aborts gets no reply, and only a refusal abandons a prompt's watch (OW-hiliti)", and "Both clients over the socket (ark3/agentpane#53)".
 
 ## `emacs_helper_server_death_probe.el`
 
@@ -599,7 +599,7 @@ Each run prints the helper's exit and its replies, and the probe prints `ANSWERE
 No live model calls, no network beyond loopback.
 
 Verified with: `bun 1.4.0` on the home server, 2026-09-29; again without the timer, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19.
-What it showed is the `docs/MANUAL_TESTING.md` sections on OW-pezelo and OW-nuzoto.
+What it showed is the `docs/MANUAL_TESTING.md` sections on OW-pezelo and OW-nuzoto, and "Both clients over the socket (ark3/agentpane#53)".
 
 ## `pi_store_survey.ts`
 

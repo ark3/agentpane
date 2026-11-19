@@ -5159,6 +5159,31 @@ A 31 MB `sessions/list` frame was answered; a 33 MB one closed the socket, 1006,
 On a bare `Bun.serve` with the same `websocket` options, one 40 MB frame from the server returned -1 from `send()` and arrived.
 Six 20 MB frames sent in one synchronous run returned -1 four times and then 0 twice, and the client received none of them: the socket was closed, 1006, rather than left open with frames dropped.
 
+## Both clients over the socket (ark3/agentpane#53)
+
+Run on the home server on 2026-11-19, on its system `bun 1.4.0`, Emacs 31.1 with jsonrpc.el 1.0.29, and Playwright's Chromium 151.0.7922.34, against this checkout once both clients spoke D31's socket.
+Two throwaway drivers, kept outside the repo, each started `bun src/server/index.ts` on a free loopback port with the token in `~/.ssh/agentpane-token`.
+
+**The real helper drove a Claude Code session through create, prompt and close.**
+On `claude 2.1.328` with `haiku` named to `sessions/create`, against Claude Code's own state directory, which was writable in this session; the run left one small session in the repo's project there.
+The driver wrote JSON-RPC frames to `bun run src/emacs/main.ts` on stdin.
+A `sessions/list` answered; a `sessions/create` carrying the token 1 was answered by a `session/snapshot` under the new handle carrying `token: 1`, and then its reply.
+A `sessions/prompt` naming that handle answered `null`, and the turn's nodes and statuses followed under the handle until `isStreaming: false`.
+A `sessions/abort` naming a handle the server never minted answered -32000 with `data.error` `not_attached`.
+A `sessions/close` carrying the token was answered after a `session/detached` under the handle with `cause: "ended"`.
+The server killed, the helper exited 0, 0.02s later.
+
+**The helper's three probes passed over the socket.**
+`emacs_helper_no_server_probe.py`, 5 runs: both requests were answered -32000, "could not reach the agentpane server", `data.error` `unreachable`, and the helper exited 0.02s to 0.03s after they were sent; until D31 the replies carried no `data`.
+`emacs_helper_drop_probe.el`, 3 runs a case, against its stand-in whose socket closes 500 ms after it opens: RAISED 3 of 3, busy and idle.
+`emacs_helper_server_death_probe.el`, 8 runs, its stand-in server SIGKILLed 0.3s after the prompt went out: RAISED 8 of 8, every prompt failing with "the helper exited"; over HTTP the prompt's own request could fail first and answer it with a -32603, which the probe existed to keep from reading as a refusal.
+
+**The built browser client asked for the token, lost the server, and reconnected on its own.**
+`bun run build`, then a Playwright script opened the server's own page, with no token stored.
+The token prompt opened at the refused `hello`; with the token pasted, the page said hello again, listed 566 sessions, read the auto-selected session's preview, and read "Connected".
+The frames it sent were `hello`, `sessions/list` and `sessions/preview`, and no HTTP command went out.
+SIGTERM to the server showed "Reconnecting…" 1.4s later; the server restarted on the same port 6s after that, and the page reconnected 3.8s after the restart, with the stored token and no prompt.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
