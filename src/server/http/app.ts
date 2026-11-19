@@ -12,17 +12,12 @@
  * events may well have reached the browser first.
  */
 
-import { spawn } from "node:child_process";
 import { timingSafeEqual } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
 
 import {
 	type AbortResponse,
 	type ApiError,
 	type AttachSessionResponse,
-	type BackendId,
 	type CreateSessionRequest,
 	type CreateSessionResponse,
 	type DismissErrorRequest,
@@ -45,20 +40,12 @@ import {
 	type SetNameRequest,
 	sessionKey,
 } from "../../shared/protocol.ts";
-import { type BackendAdapter, BackendRefusedError } from "../adapters/types.ts";
+import type { BackendAdapter } from "../adapters/types.ts";
 import { Broadcaster, type SseClient } from "./broadcaster.ts";
 import type { AppDeps } from "./deps.ts";
-import {
-	AttachedNotPromptedError,
-	EffortNotOfferedError,
-	ForkNotPromptedError,
-	HandleEndedError,
-	NotAForkPointError,
-	ServerShuttingDownError,
-	SessionManager,
-	UnknownBackendError,
-	UnknownSessionError,
-} from "./session-manager.ts";
+import { classifyFailure, type Named } from "./failure.ts";
+import { createSession, editDraft, isBackendId, listModels, previewSession } from "./operations.ts";
+import { SessionManager, UnknownSessionError } from "./session-manager.ts";
 
 export interface App {
 	fetch(request: Request): Promise<Response>;
@@ -67,8 +54,6 @@ export interface App {
 	/** Drop every stream and dispose every adapter. Server shutdown only. */
 	close(): Promise<void>;
 }
-
-const BACKENDS: readonly BackendId[] = ["pi", "codex", "claude"];
 
 export function createApp(deps: AppDeps): App {
 	const broadcaster = new Broadcaster(deps.heartbeatMs ?? 0);
@@ -115,20 +100,20 @@ export function createApp(deps: AppDeps): App {
 		// /api/models
 		if (segments.length === 2 && segments[1] === "models") {
 			if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
-			return listModels(url.searchParams.get("backend"));
+			return listModelsRoute(url.searchParams.get("backend"));
 		}
 
 		// /api/edit-draft
 		if (segments.length === 2 && segments[1] === "edit-draft") {
 			if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
-			return editDraft(request);
+			return editDraftRoute(request);
 		}
 
 		if (segments[1] === "sessions") {
 			// /api/sessions
 			if (segments.length === 2) {
 				if (request.method === "GET") return listSessions(url.searchParams.get("cwd"));
-				if (request.method === "POST") return createSession(request);
+				if (request.method === "POST") return createSessionRoute(request);
 				return methodNotAllowed(request.method, "GET, POST");
 			}
 
@@ -193,38 +178,14 @@ export function createApp(deps: AppDeps): App {
 		});
 	}
 
-	async function editDraft(request: Request): Promise<Response> {
+	async function editDraftRoute(request: Request): Promise<Response> {
 		const body = await readJson<EditDraftRequest>(request);
 		if (!body.ok) return body.response;
 		if (typeof body.value.text !== "string") {
 			return error(400, "bad_request", "text is required and must be a string");
 		}
-		const editor = process.env.EDITOR;
-		if (!editor) return error(500, "editor_failed", "$EDITOR is not set");
-
-		const directory = await mkdtemp(join(tmpdir(), "agentpane-draft-"));
-		// Markdown gave multiline prompts useful editor mode in practice; there is no format setting to maintain.
-		const filename = join(directory, "draft.md");
-		try {
-			await writeFile(filename, body.value.text, "utf8");
-			// Deliberately outside D7's agent sandbox: this is the trusted operator's own editor.
-			const exitCode = await new Promise<number>((resolve, reject) => {
-				const child = spawn("sh", ["-c", 'exec $EDITOR "$1"', "agentpane-edit-draft", filename], {
-					stdio: "inherit",
-				});
-				child.once("error", reject);
-				child.once("close", (code) => resolve(code ?? 1));
-			});
-			if (exitCode !== 0) {
-				return error(500, "editor_failed", `external editor exited with status ${exitCode}`);
-			}
-			const response: EditDraftResponse = { text: await readFile(filename, "utf8") };
-			return json(response);
-		} catch (err: unknown) {
-			return error(500, "editor_failed", describe(err));
-		} finally {
-			await rm(directory, { recursive: true, force: true });
-		}
+		const response: EditDraftResponse = { text: await editDraft(body.value.text) };
+		return json(response);
 	}
 
 	// -- sessions ------------------------------------------------------------
@@ -236,26 +197,11 @@ export function createApp(deps: AppDeps): App {
 		return json(body);
 	}
 
-	async function createSession(request: Request): Promise<Response> {
+	async function createSessionRoute(request: Request): Promise<Response> {
 		const body = await readJson<CreateSessionRequest>(request);
 		if (!body.ok) return body.response;
 		const { cwd, backend, model } = body.value;
-		if (typeof cwd !== "string" || !isAbsolute(cwd)) {
-			return error(400, "bad_request", "cwd is required and must be an absolute path");
-		}
-		try {
-			if (!(await stat(cwd)).isDirectory()) {
-				return error(400, "bad_request", "cwd must name an existing directory");
-			}
-		} catch {
-			return error(400, "bad_request", "cwd must name an existing directory");
-		}
-		if (!isBackendId(backend)) return error(400, "bad_backend", `unknown backend "${backend}"`);
-		// Starts the agent too, and a start that fails leaves nothing (D30).
-		const ref = await sessions.create(cwd, backend, model);
-		const session = sessions.summaryOf(ref);
-		if (!session) return error(404, "not_found", `no such session: ${sessionKey(ref)}`);
-		const response: CreateSessionResponse = { session };
+		const response: CreateSessionResponse = await createSession(sessions, cwd, backend, model);
 		return json(response, 201);
 	}
 
@@ -287,20 +233,9 @@ export function createApp(deps: AppDeps): App {
 	): Promise<Response> {
 		switch (action) {
 			case "preview": {
-				// Read-only, non-attaching (OW-38): selecting a session to look at must
-				// not spawn one, and must not re-walk the corpus (D9). It reads the
-				// one stored file for this ref through the index seam and returns its
-				// mapped transcript messages. The attach-on-GET route is left untouched.
-				// It asks `sessions` one thing, whether it holds the ref, so that no
-				// file reads as `gone` only for a session nobody holds (D26 point 5);
-				// a held one with nothing on disk yet is empty. Asked before the read:
-				// asked after, a file that appeared during it for a session closed
-				// meanwhile would read as gone.
+				// The attach-on-GET route is left untouched (OW-38); see `previewSession`.
 				if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
-				const held = sessions.holds(ref);
-				const turns = await deps.index.preview(ref);
-				if (turns === null && !held) return error(404, "gone", `no such session: ${sessionKey(ref)}`);
-				const response: SessionPreviewResponse = { ref, turns: turns ?? [] };
+				const response: SessionPreviewResponse = await previewSession(deps, sessions, ref);
 				return json(response);
 			}
 			case "prompt": {
@@ -526,50 +461,8 @@ export function createApp(deps: AppDeps): App {
 
 	// -- models --------------------------------------------------------------
 
-	async function listModels(backend: string | null): Promise<Response> {
-		if (backend !== null && !isBackendId(backend)) {
-			return error(400, "bad_backend", `unknown backend "${backend}"`);
-		}
-		const wanted = backend ? [backend] : BACKENDS;
-		const models: ModelsResponse["models"] = [];
-		for (const id of wanted) {
-			const factory = deps.adapters[id];
-			if (!factory) continue;
-			// Prefer a live adapter -- a running agent can answer authoritatively.
-			// Otherwise ask an unstarted one: model lists are a property of the
-			// backend, not of a session, but `listModels` only exists on an adapter
-			// instance. Construction is contractually side-effect-free, so this
-			// spawns nothing.
-			//
-			// Known limitation, verified against the real `PiAdapter`: asking one
-			// that has not been started rejects with "Pi process is not running".
-			// A filtered request surfaces that failure to its caller; the merged
-			// request still omits Pi so another backend's useful answer survives.
-			// Spawning to answer a *listing* question is exactly what D9 rules out.
-			const live = sessions
-				.liveRefs()
-				.filter((ref) => ref.backend === id)
-				.map((ref) => sessions.adapterFor(ref))
-				.find((adapter) => adapter !== undefined);
-			let adapter: BackendAdapter;
-			try {
-				adapter = live ?? factory.create({ backend: id, id: "" });
-			} catch (cause) {
-				// A factory that will not construct without a real id is still not
-				// grounds for failing the other backend's list.
-				if (backend !== null) throw cause;
-				continue;
-			}
-			try {
-				models.push(...(await adapter.listModels()));
-			} catch (cause) {
-				// Ditto for a backend that cannot enumerate without a subprocess.
-				if (backend !== null) throw cause;
-			} finally {
-				if (!live) await Promise.resolve(adapter.dispose()).catch(() => {});
-			}
-		}
-		const body: ModelsResponse = { models };
+	async function listModelsRoute(backend: string | null): Promise<Response> {
+		const body: ModelsResponse = await listModels(deps, sessions, backend);
 		return json(body);
 	}
 
@@ -578,28 +471,12 @@ export function createApp(deps: AppDeps): App {
 			try {
 				return await handle(request);
 			} catch (thrown) {
-				// A fork-and-prompt that failed after its fork was created, and a
-				// prompt naming no handle refused after its attach, answer as their
-				// cause would, and name the fork or the session beside it (D30).
-				const err = thrown instanceof ForkNotPromptedError || thrown instanceof AttachedNotPromptedError ? thrown.cause : thrown;
-				const named: Named =
-					thrown instanceof ForkNotPromptedError
-						? { fork: thrown.fork }
-						: thrown instanceof AttachedNotPromptedError
-							? { attached: thrown.attached }
-							: {};
-				if (err instanceof UnknownSessionError) return error(404, "not_found", err.message, named);
-				if (err instanceof HandleEndedError) return error(409, "not_attached", err.message, named);
-				if (err instanceof UnknownBackendError) return error(501, "no_backend", err.message, named);
-				if (err instanceof ServerShuttingDownError) {
-					return error(503, "server_shutting_down", err.message, named);
+				const failure = classifyFailure(thrown);
+				if (failure.unexpected) {
+					const ref = sessionRefFromRequest(request);
+					logError(`${ref ? `session ${sessionKey(ref)}: ` : ""}${failure.detail}`);
 				}
-				if (err instanceof BackendRefusedError) return error(400, "backend_refused", err.message, named);
-				if (err instanceof EffortNotOfferedError) return error(400, "bad_request", err.message, named);
-				if (err instanceof NotAForkPointError) return error(409, "not_a_fork_point", err.message, named);
-				const ref = sessionRefFromRequest(request);
-				logError(`${ref ? `session ${sessionKey(ref)}: ` : ""}${describe(err)}`);
-				return error(500, "internal_error", describe(err), named);
+				return error(failure.status, failure.code, failure.detail, failure.named);
 			}
 		},
 		sessions,
@@ -622,10 +499,6 @@ function decodeSegment(segment: string): string {
 		// A malformed escape is not a path we have -- let it 404 as itself.
 		return segment;
 	}
-}
-
-function isBackendId(value: unknown): value is BackendId {
-	return value === "pi" || value === "codex" || value === "claude";
 }
 
 function sessionRefFromRequest(request: Request): SessionRef | undefined {
@@ -761,9 +634,6 @@ function accepted(): Response {
 	return new Response(null, { status: 202 });
 }
 
-/** What a refusal names beside its cause: a fork, or a session a prompt attached (D30). */
-type Named = Pick<ApiError, "fork" | "attached">;
-
 function error(status: number, code: string, detail?: string, named: Named = {}): Response {
 	const body: ApiError = {
 		error: code,
@@ -796,8 +666,4 @@ async function readJson<T>(request: Request): Promise<ReadResult<T>> {
 		return { ok: false, response: error(400, "bad_json", "request body must be a JSON object") };
 	}
 	return { ok: true, value: parsed as T };
-}
-
-function describe(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }
