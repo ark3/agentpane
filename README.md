@@ -10,7 +10,7 @@ view), but multi-backend and with its own client stack.
 ## Start here
 
 1. **`docs/DESIGN.md`** — read first: goals/non-goals, architecture, the settled decisions and their reasoning, the backend adapter contract, the Codex→`AgentMessage` mapping, and the test strategy.
-2. **`docs/HANDOFF.md`** — the evidence behind those decisions, with re-runnable probes, reference material by absolute path, and the environment gotchas.
+2. **`docs/MANUAL_TESTING.md`** — the evidence behind those decisions, and **`docs/ENVIRONMENT.md`** — the machines agentpane runs on and their gotchas.
 3. **`resources/`** — validated Codex protocol bindings, reproducible probe
    scripts, and captured protocol fixtures for offline adapter tests.
 
@@ -54,5 +54,4 @@ bun run check
 Live runs against Pi, Codex, and Claude Code are recorded in [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
 The Pi and Codex smoke runs are reproducible from `resources/probes/agentpane_{codex,pi}_smoke.py`; they exercise the built client's reachability and the REST/SSE path with a real agent subprocess: create/attach, streaming, idle, reconnect, abort, and shutdown without an orphan.
 
-**For what is done, read [`docs/WORKSTREAMS.md`](docs/WORKSTREAMS.md)** — its Status table is the only statement of project status.
-**For what is left, run `card list --open`**; the list is deliberately not repeated here.
+**For what is left, see the [GitHub issues](https://github.com/ark3/agentpane/issues)**; the list is deliberately not repeated here.

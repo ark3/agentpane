@@ -283,7 +283,7 @@ export class PiAdapter implements BackendAdapter {
 		// Readiness probe: pipane's process pool found spawning alone isn't
 		// enough to know the process can accept commands (it used to poll with
 		// a raw setTimeout before switching to a get_state round trip -- see
-		// HANDOFF's pipane references). Round-tripping get_state here is the
+		// docs/ENVIRONMENT.md's pipane references). Round-tripping get_state here is the
 		// same fix: `start()` doesn't resolve until Pi has actually answered.
 		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
 		this.adoptSessionFile(state.data.sessionFile);

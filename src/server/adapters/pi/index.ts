@@ -1,5 +1,5 @@
 /**
- * Public surface of the Pi adapter (WORKSTREAMS.md: this workstream owns
+ * Public surface of the Pi adapter (the code map in docs/DESIGN.md: this component owns
  * `src/server/adapters/pi/` and nothing else).
  */
 

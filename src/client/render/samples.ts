@@ -1,6 +1,6 @@
 /**
  * Hand-built `AgentMessage[]` samples -- what the renderer is verified against
- * (WORKSTREAMS) and what a later shell workstream can point at a Transcript to
+ * (the code map in docs/DESIGN.md) and what a later shell workstream can point at a Transcript to
  * see it work with no server running.
  *
  * These are *modelled on* `resources/fixtures/pi/*.jsonl` rather than loaded
@@ -8,7 +8,7 @@
  * the field set here (api/provider/model/usage/stopReason/timestamp, `thinking`
  * blocks with an opaque signature and empty text, `bash` chosen to edit a file)
  * is copied from real captures. Depending on the files at test time would tie
- * these tests to fixture wording, which WORKSTREAMS forbids.
+ * these tests to fixture wording, which AGENTS.md forbids.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";

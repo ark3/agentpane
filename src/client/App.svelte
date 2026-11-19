@@ -1,4 +1,10 @@
 <script lang="ts">
+	/*
+	 * This component holds three seams it does not yet use: the scroll, follow
+	 * and nav-rail engine, the session list, and the composer. Split them out
+	 * when a change touches two of them at once, never as a drive-by, and keep
+	 * `view` as `$state.raw` through the split (the docblock on `view` below).
+	 */
 	import { onMount, tick } from "svelte";
 	import { sessionKey, type BackendId, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
 	import { paneMode, withQueued, type AgentpaneController, type ControllerView } from "./controller.ts";

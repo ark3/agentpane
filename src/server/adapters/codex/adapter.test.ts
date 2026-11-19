@@ -403,8 +403,9 @@ describe("CodexAdapter lifecycle", () => {
 	});
 
 	it("carries both policies onto the forked thread", async () => {
-		// A fork is a thread-creation path like start and resume, and Codex does
-		// not inherit the parent's policies onto it (D7a).
+		// A fork is a thread-creation path like start and resume, and as of
+		// codex-cli 0.154.0 it inherits the parent's approval policy but not its
+		// sandbox (D7a), so both are passed.
 		const { adapter, proc } = await startedAdapter({ threadId: STORED_REF.id, turns: twoStoredTurns() }, STORED_REF);
 
 		const forked = await adapter.fork("turn-second");

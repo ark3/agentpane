@@ -7,7 +7,7 @@ than silently downgrading to a follow-up. Claude Code's rejection and Codex's
 steer were both settled live; Pi's half rested on `submit()` in
 `src/server/adapters/pi/process.ts` setting `streamingBehavior: "steer"` when
 `this.state.isStreaming`, plus Pi's own `rpc.md` (which lives on the work
-laptop -- see `docs/HANDOFF.md`, "Reference material on the work laptop"), and
+laptop -- see `docs/ENVIRONMENT.md`, "Reference material"), and
 on nothing anyone ran. A mid-turn POST returning **202** was separately observed, but a 202 that
 steers into the running turn, a 202 that queues for a following turn, and a 202
 that drops the text are three different products behind one status code.

@@ -447,7 +447,8 @@ describe("SSE stream", () => {
 		expect(lossy.transcript(PI_SESSION)[2]).toBeDefined();
 		await lossy.close();
 
-		// D3's entire recovery story: re-subscribe, take a fresh snapshot.
+		// A fresh stream takes a fresh snapshot (D3); what a client does about
+		// the gap it saw is D25's, which detaches the session.
 		const repaired = await openStream();
 		await repaired.waitForCount(1);
 		const filled = repaired.transcript(PI_SESSION)[1];

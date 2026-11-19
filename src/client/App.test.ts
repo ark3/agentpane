@@ -1633,7 +1633,7 @@ describe("App", () => {
 		expect(controller.refreshCalls).toBe(1);
 	});
 
-	it("does not offer a way to close or disconnect a session from the UI (D12 owns reclamation)", () => {
+	it("offers no button that closes a session (D12 owns reclamation)", () => {
 		const controller = new FakeController(view({
 			state: state({ summaries: [summary(piSession, "Live", { status: "attached" })] }),
 		}));

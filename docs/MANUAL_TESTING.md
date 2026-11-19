@@ -3,8 +3,7 @@
 ## What this document is
 
 **The evidence behind the live runs**, and the instructions for reproducing
-them. It does not state project status — `WORKSTREAMS.md`'s Status table does
-that, and GitHub issues hold what is still outstanding.
+them. It does not state project status; GitHub issues hold what is still outstanding.
 Record a run's results here; record what the run left undone as a GitHub issue.
 `OW-` ids below name the legacy cards retired on 2026-11-13 into `docs/work/closed/` (`docs/work/README.md`).
 
@@ -1511,7 +1510,7 @@ Each regression below removed one declaration from `.preview`, ran the spec alon
 
 The production client was built with `bun run build` and served on port 4197 with `PATH=/tmp/ow-derewo-bin:$PATH PORT=4197 bun run start`.
 The home server still had no `direnv` at the time of this run, so `/tmp/ow-derewo-bin/direnv` was the same pass-through shim used by the earlier adapter run: it consumed `exec <cwd>` and executed the remaining real `sbox -- <agent>` command unchanged.
-The owner installed the real `direnv` on 2026-09-13, so this substitution applies to runs before that date only; see `docs/HANDOFF.md`, "Environment gotchas".
+The owner installed the real `direnv` on 2026-09-13, so this substitution applies to runs before that date only; see `docs/ENVIRONMENT.md`, "Home server".
 
 A throwaway Playwright script created and attached one empty conversation per backend over the real HTTP server, opened the built UI, clicked each conversation row, selected the required model through the visible `Conversation model` picker, sent one prompt, waited for the real turn to settle, and read both the locked composer label and assistant footer from the rendered DOM.
 
@@ -1689,7 +1688,7 @@ A session file materialised carrying the version-3 header `{"type":"session","ve
 **Without that redirection Pi resolves no model at all.**
 Driven against the real `~/.pi/agent`, with no `PI_CODING_AGENT_DIR`, the process starts and answers `get_state` — but reports `model: {"id": "unknown", "name": "unknown", "provider": "unknown", "contextWindow": 0}` and `thinkingLevel: "off"`.
 `pi --help` names the cause on stderr: `Invalid settings file /home/ark3/.pi/agent/settings.json: EROFS: read-only file system, mkdir '/home/ark3/.pi/agent/settings.json.lock'`.
-Pi takes a lock merely to *read* its settings, exactly as `docs/HANDOFF.md` records it doing for the credential store, and the sandbox mounts that directory read-only.
+Pi takes a lock merely to *read* its settings, exactly as `docs/ENVIRONMENT.md` records it doing for the credential store, and the sandbox mounts that directory read-only.
 No turn was driven from that state, so what such a turn does is unmeasured; the model resolution is the finding.
 This is why `AGENTS.md` pins Pi with a flag rather than by pointing at `settings.json`: on this machine, today, that file reaches Pi only when it has been copied somewhere writable first.
 
@@ -1706,7 +1705,7 @@ Both readings are correct for their moment, which is the only reason this paragr
 What this leaves open.
 `resources/probes/agentpane_pi_smoke.py` drives Pi through the built server and had not been run on this machine when this section was written; nothing here exercised the server, the adapter, or a fork.
 It has since — see "The Pi smoke probe runs on the home server, end to end through the built server" (OW-moradi), run later the same evening.
-Whether the read-only `~/.pi/agent` survives the next sandbox restart is unmeasured and expected to change — the owner intends to grant write access, and when that lands the `docs/HANDOFF.md` gotcha and the `AGENTS.md` note above both want re-measuring rather than editing from memory.
+Whether the read-only `~/.pi/agent` survives the next sandbox restart is unmeasured and expected to change — the owner intends to grant write access, and when that lands the `docs/ENVIRONMENT.md` gotcha and the `AGENTS.md` note above both want re-measuring rather than editing from memory.
 
 ## The sandbox restart makes the backend state directories writable (OW-vowire)
 
@@ -1714,7 +1713,7 @@ Run on the home server 2026-09-13, later the same evening as the section above, 
 That section measured the opposite condition hours earlier, and both readings stand for their moment.
 
 **The sandbox is still on; three directories inside it are not read-only any more.**
-`$HOME` itself still refuses a write, which is the test `docs/HANDOFF.md` gives for whether the sandbox is running at all, so it is.
+`$HOME` itself still refuses a write, which is the test `docs/ENVIRONMENT.md` gives for whether the sandbox is running at all, so it is.
 Writable now: `~/.pi/agent`, `~/.codex`, `~/.claude`, alongside `/tmp` and the repo tree.
 `~/src` does not exist on this machine.
 
@@ -1734,7 +1733,7 @@ Before the restart this path printed `failed to initialize sqlite state runtime`
 That is the whole of what was checked: no thread was started and no turn was driven, so this says the state runtime initializes, and nothing more.
 
 What this closes and what it leaves.
-The three passages OW-vowire named — the `docs/HANDOFF.md` state-directory gotcha, its neighbouring sbox-profiles sentence, and the Pi sentence in `AGENTS.md`'s model pin — are reconciled with these readings in the same change, each keeping the date it was measured on.
+The three passages OW-vowire named — the `docs/ENVIRONMENT.md` state-directory gotcha, its neighbouring sbox-profiles sentence, and the Pi sentence in `AGENTS.md`'s model pin — are reconciled with these readings in the same change, each keeping the date it was measured on.
 The model pin stays a flag on all three CLIs: the pre-restart reading is exactly the failure the flag exists to survive, and a readable settings file is still a mutable one.
 The throwaway `PI_CODING_AGENT_DIR` and `CODEX_HOME` keep their other purpose — keeping a probe off the real session corpus and credentials — which is why `fork_probe.py` should not drop them.
 
@@ -1746,7 +1745,7 @@ The client was rebuilt rather than reused (`build.returncode: 0`, no `--skip-bui
 The bare run took 16 seconds wall clock (23:12:24.002 to 23:12:39.917 local, `-04:00`), the `--tool-check` run 19 seconds.
 
 This is the first time anything has driven Pi through agentpane's own server **on this machine**.
-It is not the first time anywhere: `docs/HANDOFF.md` findings 39–42 came out of the first execution of the production chain, on the work laptop, against `pi 0.84.1`.
+It is not the first time anywhere: HANDOFF findings 39–42 came out of the first execution of the production chain, on the work laptop, against `pi 0.84.1`.
 What the two ad-hoc runs in "Pi arrives on the home server" above did, earlier the same evening, was drive `pi --mode rpc` directly; the OW-vowire section between them added a `sbox -- pi --mode rpc` invocation, which is most of the spawn chain but still no `direnv`, no server, no adapter and no abort.
 
 **The production spawn chain starts an agent, and `bwrap` is in it — finding 39 reproduces here on 0.85.1.**
@@ -1885,7 +1884,7 @@ So this window can witness a non-blocking `request` event during the tool turn, 
 Since OW-yosuzo (2026-09-24) agentpane cancels a Pi dialog at arrival instead of holding it, so a dialog no longer blocks the tool turn, and this window would witness one as a `request` event.
 
 **What this does to finding 42.**
-`docs/HANDOFF.md` finding 42 was rewritten in the same change to say what was measured rather than what the old field appeared to say.
+HANDOFF finding 42 was rewritten in the same change to say what was measured rather than what the old field appeared to say.
 Its claim survives in narrowed form — a shell tool *call* reached the wire with no dialog request beside it — and is now dated to `pi 0.85.1` on this machine, where no `trust.json` was copied, rather than resting on the `pi 0.84.1` laptop run whose evidence column could not carry it.
 The headline previously read "Pi ran a shell tool", which nothing has ever measured: the probe's `tool_called` predicate matches a `toolCall` block and no run has recorded a `toolResult`, exactly as the OW-moradi section above already noted about the same predicate.
 That is now stated as a limit on the finding rather than left in its headline.
@@ -2289,7 +2288,7 @@ Filed as OW-pizaki.
 
 **Finding 41 re-confirmed on 0.85.1, and through the resume path.**
 The `renamed` event replacing the minted `virtual:` id with Pi's own file path arrived on the first attach, before any prompt existed.
-This is not new: `docs/HANDOFF.md` finding 41 measured it on `pi 0.84.1` -- "Pi names its session file during `start()`, not on the first prompt" -- and warned that code written for only the prompt-time rename will miss it.
+This is not new: HANDOFF finding 41 measured it on `pi 0.84.1` -- "Pi names its session file during `start()`, not on the first prompt" -- and warned that code written for only the prompt-time rename will miss it.
 What this run adds is the same behaviour on 0.85.1 and the resume half finding 41 could not see: no second `renamed` ever appeared, because the re-attach used the already-final id, so a re-attach is not a rename point at all.
 `createdAt` did change source across the detach, from the virtual mint time `2026-09-16T23:33:23.898Z` to the file header's `2026-09-16T23:33:27.765Z`, about 3.9s later.
 What changed on 2026-09-16 is not the fact but its cost: D9's first-prompt contract is restated in roughly 23 non-test places, `src/server/http/session-manager.ts`'s `markPrompted` docblock and four copies in D9 among them, and OW-tewave's Detach item with D12's reaper behind it make re-attach a routine user-reachable path -- so this stops being trivia about dead code and starts licensing the resume logic.
@@ -3092,7 +3091,7 @@ Pi was run as `pi --mode rpc --model openrouter/deepseek/deepseek-v4.1-flash:hig
 That file did not exist at 0.8, 2, 5 or 10 s, and the `sessions` directory held nothing at all.
 The prompt `Reply with the single word OK.` was sent at 10.04 s; with the path polled every 50 ms, the file was absent through the user and assistant `message_end`s and first seen at 10.97 s, just after `agent_end` and `agent_settled` at 10.95 s, 7099 bytes holding `session`, `model_change`, `thinking_level_change` and the system, user and assistant messages.
 A second process, asked only `get_state` and closed after 3 s, exited 0 having written nothing: the named file never existed and the `sessions` directory stayed empty.
-`docs/HANDOFF.md` finding 41 says the file already existed when `start()`'s probe answered on `pi 0.84.1`, but the evidence it names is a live `renamed` event, which shows the name and not the write; on 0.87.1 the name came at start and the write only with the first turn.
+HANDOFF finding 41 says the file already existed when `start()`'s probe answered on `pi 0.84.1`, but the evidence it names is a live `renamed` event, which shows the name and not the write; on 0.87.1 the name came at start and the write only with the first turn.
 
 **What this means for D9.**
 On all three backends as measured, attach replaces the `virtual:` id and nothing reaches disk until the first turn, so an id that no longer starts with `virtual:` does not mean the session has a store file.
@@ -4852,7 +4851,7 @@ It used the throwaway state directory the probe always builds — `make_state_ho
 `checks.startup.process_chain`, read from `/proc`, was `bun`, `bwrap`, `bwrap`, `pi`, and the id `checks.rename` adopted at attach was a JSONL path under that temporary directory's `sessions/`, so the Pi beneath the inner `sbox` took its agent directory from the variable.
 Its turns completed rather than ending in the `stopReason: "error"` that a lock refused under a read-only store produced before 2026-09-13: `checks.model` read `openrouter/deepseek/deepseek-v4.1-flash` at effort `high` off a `snapshot`, `checks.tool_output` saw `thinking` and `toolCall` blocks, and `checks.abort` stopped the long turn at 20004 characters and read 20025 when idle; `cleanup` removed the state directory and found no orphaned worker.
 
-Not tried: the probe's chain without `PI_CODING_AGENT_DIR`; `docs/HANDOFF.md`, "Each backend needs a writable state directory", records a direct `sbox -- pi --mode rpc` failing that way before 2026-09-13 with `EROFS ... auth.json.lock`, so this run shows the variable suffices, not that it is still necessary.
+Not tried: the probe's chain without `PI_CODING_AGENT_DIR`; `docs/ENVIRONMENT.md`, "Each backend needs a writable state directory", records a direct `sbox -- pi --mode rpc` failing that way before 2026-09-13 with `EROFS ... auth.json.lock`, so this run shows the variable suffices, not that it is still necessary.
 
 ## Two Pi prompts posted together are both steered, and both answered 202 (OW-wibude)
 
@@ -5030,3 +5029,150 @@ With `HOME` pointed at a temp directory, the token file was created at `600`, re
 Everything on the work laptop and on macOS, which the owner does in one visit after the fix is merged and pushed: the mask probe, and the reproduction probe run through `sbox` against a server started outside it; the browser's paste prompt and the Emacs helper against the owner's own server, including after a rotation; and seatbelt's read denial under `~/.ssh` for this file and `link(2)` creating it, neither of which these runs have exercised.
 Nobody has yet looked at the token field now that it shows what was pasted; the owner's look at it is still to come.
 The owner's outputs from those steps are to be added to this section.
+
+## HANDOFF findings 1–49
+
+These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
+They moved here verbatim and keep their numbers, so a citation of the form "HANDOFF finding 41" anywhere in the repo names a row below.
+Each row is a record of what was measured and when, not a claim about the current CLIs; where a later run corrected one, the row says so.
+
+### Validated facts (with evidence)
+
+Every load-bearing assumption was reproduced live.
+Re-run the probes in `resources/probes/` to re-confirm.
+
+| # | Claim | How it was verified |
+|---|-------|---------------------|
+| 1 | `pi-web-ui@0.75.3` is maintained and exports the renderers (`MessageList`, `ChatPanel`, `registerMessageRenderer`, `registerToolRenderer`) | `npm view @earendil-works/pi-web-ui`; extracted `dist/*.d.ts` from the tarball |
+| 2 | The UI renders **`AgentMessage[]`** (from `@earendil-works/pi-agent-core`), not raw protocol events | `MessageList.d.ts`: `messages: AgentMessage[]` |
+| 3 | Pi's `--mode rpc` `message_end` events **already are `AgentMessage` objects** (role, content blocks, usage, stopReason, model, timestamp) | `resources/probes/pi_rpc_probe.sh`, live turn on pi 0.84.1 |
+| 4 | `codex app-server` speaks a real protocol over **stdio** (`stdio://` is the default `--listen`), so it is sbox-transparent like Pi | `codex app-server --help`; `resources/probes/codex_turn_probe.py` |
+| 5 | Codex ships its **entire protocol as generated TypeScript + JSON Schema** (`codex app-server generate-ts` / `generate-json-schema`) | Generated bindings copied to `resources/codex-protocol/` (726 files, 631 of them under `v2/`, regenerated from `codex-cli 0.156.0` on 2026-09-24 by OW-riluye) |
+| 6 | A full Codex turn works: `initialize` → `thread/start` → `turn/start` → streaming `item/agentMessage/delta` → `item/completed` → `turn/completed` | `resources/probes/codex_turn_probe.py`, live turn on codex-cli 0.147.0 |
+| 7 | **Both** backends support fork-from-past natively: Pi `fork`/`get_fork_messages`; Codex `thread/fork` + `thread/rollback` | Pi `docs/rpc.md`; Codex `resources/codex-protocol/ClientRequest.ts` **— corrected by findings 43–48: this flattens two operations, and `thread/rollback` is deprecated. Nothing here had been run; OW-mewiga ran it.** |
+| 8 | The sandbox seam works transparently over stdio | Proven in production: pipane ran `sandboxed-pi` (`~/.local/bin/sandboxed-pi` → `sbox -- pi`) |
+
+**No showstopper was found in this first round.**
+The main engineering task it identified was the Codex `ThreadItem` → `AgentMessage` mapping; that mapping has since landed (see `docs/DESIGN.md`).
+
+### Second round: one reversal, and further findings
+
+Facts 1 and 2 above are true as stated, but the *conclusion* originally drawn from them — build the client on `pi-web-ui` — was **reversed**; findings 9–15 are why.
+Findings 16–25 are new ground covered while settling the transport and session model and while capturing protocol fixtures.
+Everything here is reproducible from the 0.75.3 tarball (`npm pack @earendil-works/pi-web-ui@0.75.3`), the installed packages, the session directories named in 18, and `resources/probes/capture_fixtures.py`.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 9 | `Agent` (in `pi-agent-core`) is a **concrete class** that runs the LLM loop in-process — it owns `streamFn`, `getApiKey`, tool execution. `ChatPanel.setAgent()` and `AgentInterface.session` both want one, which is structurally incompatible with running the model in a sandboxed subprocess | `pi-agent-core/dist/agent.d.ts`; `pi-web-ui/dist/ChatPanel.d.ts` |
+| 10 | `pi-web-ui` ships **four** tool renderers — Bash, Calculate, GetCurrentTime, Default. **None** for coding tools. pipane wrote 663 lines of its own (`bash`, `read`, `edit`, `write`, `canvas`) | `ls dist/tools/renderers/`; `pipane/src/client/tool-renderers.ts` |
+| 11 | `renderMessage` transitively drags `pdfjs-dist`, `xlsx`, `docx-preview`, `jszip` via a side-effect import chain (`Messages.js` → `tools/index.js` → `extract-document.js` → `attachment-utils.js`, all static top-level imports). Neither package declares `sideEffects: false`, so it cannot be tree-shaken. `xlsx` resolves from `https://cdn.sheetjs.com/...tgz`, not the registry | import chain read in `dist/`; `jq .sideEffects package.json` on both |
+| 12 | No fallback tool renderer exists. pipane's patch **added** `setFallbackToolRenderer`; 0.75.3 still lacks it. Codex's `mcpToolCall`/`dynamicToolCall` carry arbitrary names that cannot be pre-registered, so one is required | `grep setFallbackToolRenderer` over the patch and over 0.75.3 `dist/` |
+| 13 | mini-lit's `MarkdownBlock` escapes HTML with regexes over the markdown *source* (`escapeHtml` defaults true), then renders via `unsafeHTML` with no sanitizer on the output | `mini-lit@0.2.1 dist/MarkdownBlock.js:14-58,241` |
+| 14 | Of pipane's 181-hunk `pi-web-ui` patch, ~95% is a mechanical class-fields → constructor-assignment downlevel that **0.75.3 already ships**; `createStreamFn` was absorbed upstream. Only `allowSendDuringStreaming` and `setFallbackToolRenderer` remain unfixed | patch vs. `dist/components/AgentInterface.js` in 0.75.3 |
+| 15 | mini-lit is still `@mariozechner/mini-lit@0.2.1` (personal scope; the pi packages moved to `@earendil-works/*`), last published 2025-11-12 | `npm view @mariozechner/mini-lit time` |
+| 16 | Codex sends **server-initiated requests** with a `RequestId` — approvals, `item/tool/requestUserInput`, MCP elicitation, dynamic tool call — and blocks until answered | `resources/codex-protocol/ServerRequest.ts` |
+| 17 | pipane binds **all interfaces** (`server.listen(PORT)` with no host), gates remote access with a token, and bypasses auth for loopback. There is **no `Origin` validation** anywhere in its server | `pipane/src/server/server.ts:98,389`; `grep -ri origin src/server/` |
+| 18 | **Both** backends store sessions as JSONL on disk and are enumerable with **no process running**. Codex: `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`, first line `{"type":"session_meta","payload":{id,cwd,timestamp,model_provider,…}}`. Pi: `~/.pi/agent/sessions/**/*.jsonl`, first line `{"type":"session",…,cwd}` | walked and parsed directly; see D9 |
+| 19 | Enumeration is **fast**: 583 Codex + 390 Pi files across 28 workspaces — walk ~0.01s, read first line of all 973 files ~0.27s (Python). No index cache is warranted yet | measured on the work laptop, 2026-08-10 |
+| 20 | Codex header format has **drifted**: 5 of 583 files use an older bare `{id,timestamp}` header with no `cwd`. The walk must tolerate unrecognised headers rather than throw | same census |
+| 21 | Codex also exposes `thread/list` over the protocol (cursor pagination, sort, `cwd`/`archived`/`searchTerm` filters), returning `Thread` with `id`, `sessionId`, `forkedFromId`, `preview`, `name`, `cwd`, `createdAt`, `updatedAt`, `status`. Not needed for enumeration (18), but richer for an attached session | `resources/codex-protocol/v2/{ThreadListParams,ThreadListResponse,Thread}.ts` |
+| 22 | Codex **does** send approval requests: a live `item/fileChange/requestApproval` (followed by `serverRequest/resolved`) appears in a captured turn. Leaving one unanswered hangs the turn | `resources/fixtures/codex/tool-edit.jsonl` |
+| 23 | Codex emits substantially more than the DESIGN mapping table lists — `turn/diff/updated`, `thread/tokenUsage/updated`, `thread/status/changed`, `thread/started`, `account/rateLimits/updated`, `mcpServer/startupStatus/updated`, `remoteControl/status/changed` | event census in `resources/fixtures/codex/*.meta.json` |
+| 24 | Pi chose the **`bash`** tool to edit a file, not a dedicated edit tool; its assistant messages carry `text`, `thinking`, and `toolCall` blocks, with `stopReason` of `stop` and `toolUse` | `resources/fixtures/pi/*.jsonl` |
+| 25 | `thread/start` accepts **`ephemeral: true`**, which keeps a thread out of the on-disk rollout store — how the fixture capture avoids polluting `~/.codex/sessions` | `resources/codex-protocol/v2/ThreadStartParams.ts`; used in `capture_fixtures.py` |
+| 26 | Codex's session layout is **not uniformly `YYYY/MM/DD/`** — 3 files sit flat at `~/.codex/sessions/`, 580 are nested. Walk to arbitrary depth | census over the real directory |
+| 27 | A Codex session's **first user-role block is almost never the human's text** — 19 of 20 sampled open with harness-injected content (AGENTS.md, `<environment_context>`, `<user_instructions>`, plugin/skill boilerplate). The real message is usually the 2nd or 3rd user turn. Pi is unaffected | independent samples by the session-index workstream and by review |
+
+On 9–15, the net effect: `pi-web-ui`'s real contribution was message chrome, markdown, and a registry — while the tool renderers, the fallback hook, and the diff rendering were all going to be ours regardless.
+DESIGN D5 records what we build instead.
+
+On 18–21: an earlier draft of D9 had the server keep a workspace-less `codex app-server` alive purely to answer `thread/list`, on the mistaken assumption that Codex sessions were only reachable through the protocol.
+They are on disk, exactly like Pi's.
+If you find yourself about to spawn a process to answer a *listing* question, re-read 18.
+
+### Third round: what building the Pi adapter established
+
+Findings 28–30 came out of implementing an adapter against a real subprocess rather than a fixture.
+DESIGN's "What the wrapper chain does to process events" is where they are acted on.
+Each is also pinned by a test in `src/server/adapters/pi/process.test.ts` that was confirmed to fail against the unfixed code.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 28 | A **failed spawn emits `error` then `close`, and never `exit`** (ENOENT gives `close` code `-2`). Reaping on `exit` alone therefore never reaps a failed spawn — the Pi adapter's readiness probe hung forever, so `start()` never rejected | direct probe against `node:child_process`, spawning a nonexistent binary |
+| 29 | **`direnv` writes routine diagnostics to stderr**, so a healthy start produces stderr output. Treating stderr as an error channel reports errors on working sessions; the useful signal is the retained tail at process death | `direnv exec` observed writing to fd 2 |
+| 30 | **Pi's `fork` veto is reported as `success: true`** with `data.cancelled: true`, not as an error response — a `session_before_fork` extension handler cancelling reads as a successful rewind unless the flag is checked | `pi-coding-agent/docs/rpc.md`, "fork" |
+
+### Fourth round: what building the renderer established
+
+Findings 31–33 came out of checking the render layer against the *tools'* own schemas rather than against hand-written samples.
+Each is pinned by a test that was confirmed to fail against the unfixed code.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 31 | **Pi's `edit` tool nests its replacements**: the arguments are `{ path, edits: [{ oldText, newText }, …] }`, an array, because one call may carry several disjoint edits. The result content is only the sentence `Successfully replaced N block(s) in <path>` — the diff and the unified patch are in `details`, which no renderer sees by default | `pi-coding-agent/dist/core/tools/edit.js`, `editSchema` and the result construction |
+| 32 | **A Pi tool result can carry an image.** `read` returns `[{type:"text"},{type:"image",data,mimeType}]` for any path it detects as an image, so a card that renders `resultText()` alone shows a blank body for `read shot.png` | `pi-coding-agent/dist/core/tools/read.js`, the `mimeType` branch |
+| 33 | **`toggle` fires for programmatic `<details>` changes too.** The spec queues it whenever the `open` attribute changes state, whoever changed it — so a component that auto-opens a disclosure and also listens for `toggle` reads its own change as a user action | direct probe in jsdom: setting `open` on a detached `<details>` delivers a `toggle` event |
+
+Finding 31 is the one with reach beyond its slice: it is why the renderer accepts *both* an `edits[]` array and a flat `oldText`/`newText` (or `old_string`/`new_string`) pair.
+An adapter that maps an edit-shaped call into `AgentMessage` should emit one of those two shapes, or register its own renderer.
+
+### Fifth round: what the live vertical slice established
+
+Findings 34–38 came out of running the built server against a real `codex app-server` over the production REST/SSE path, rather than against fixtures.
+Finding 34 settles DESIGN's third open question — for Codex.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 34 | **A signal to the server does reach the agent through the whole wrapper chain.** SIGTERM to the server exits the native `codex app-server` leaf two `exec`s down inside `bwrap`, leaving no orphan. The live chain is `bun server → bwrap → bwrap → node launcher → native codex`; `direnv` and the Python sbox wrapper `exec` into it rather than surviving as separate processes. Confirmed for Pi too — see 39 | `resources/probes/agentpane_codex_smoke.py`; run-scoped process tree captured before and after SIGTERM |
+| 35 | **The npm Codex launcher is itself a Node process whose argv also says `app-server`**, so counting workers by argv reports two agents where one is running. The live worker is the leaf whose `comm` is `codex` | same run; the launcher topology in its recorded process tree |
+| 36 | **An adapter owns its subprocess before `start()` resolves** — Codex across its `initialize` round trip, Pi across its `get_state` probe. Teardown that walks only the process table cannot see it, and `disposeAll()` returning is the server's licence to exit, so that window orphaned an agent on every attach that raced it | `src/server/http/session-manager.test.ts`, "teardown racing a startup" — each case confirmed failing first |
+| 37 | **`submit()` resolving is a promise that the backend admitted the turn.** The prompt route relays a rejection as a 500, and the browser answers by preserving the draft to send again. Any round trip an adapter runs *after* admission must therefore be unable to fail the submit, or the user is invited to resend a prompt that is already running | `src/server/adapters/pi/process.test.ts`, the first-prompt id probe |
+| 38 | **`/proc/<pid>/stat` cannot be split on whitespace.** `comm` sits in parentheses and may itself contain spaces and parentheses, so `split()[3]` is not the parent pid — it silently drops that process and every descendant hanging off it. Parse after the final `)` | direct probe against a synthesised stat line and against `ps` for every visible pid |
+
+Findings 36 and 37 are the same lesson from two directions: the moment a subprocess exists is earlier than the moment our bookkeeping says it does, and the moment a turn is committed is earlier than the moment `submit()` returns.
+Both windows are milliseconds wide and both were reachable on every prompt.
+
+### Sixth round: what running Pi live established
+
+Findings 39–42 came out of the first execution of the production Pi spawn chain.
+Nothing had run it before: `capture_fixtures.py` deliberately bypasses sbox because it only needs the protocol, so `direnv exec <workspace> sbox -- pi --mode rpc` had been assembled, unit-tested against a fake, and never once executed.
+All four are pinned by `resources/probes/agentpane_pi_smoke.py`.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 39 | **The production Pi chain works, and a signal reaches through it.** `bun server → bwrap → bwrap → pi`, one agent, and SIGTERM to the server leaves no run-scoped worker. With 34, this settles DESIGN's third open question for both Pi and Codex | live run; process tree captured at attach and again before shutdown |
+| 40 | **Pi's process reports `comm=pi` with a command line of exactly `pi`.** It is a `#!/usr/bin/env node` script, so both the name and the missing flags are surprising: setting `process.title` in Node overwrites the argv memory the command line is read from. The only processes still carrying `--mode rpc` are the `bwrap` wrappers, so an agent identified by argv is either invisible or triple-counted | `/proc/<pid>/{comm,cmdline}` for the live agent and every wrapper above it |
+| 41 | **Pi names its session file during `start()`, not on the first prompt.** D9 said a `virtual` session has no JSONL path until its first prompt writes one, and `PiAdapter` carries a second `get_state` probe in `submit()` for exactly that case. On 0.84.1 the file is already named when `start()`'s probe answers, so the id changes during **attach** and that second probe never fires. The adapter contract is satisfied either way — it promises `ref` is unstable at two points, not that it moves at exactly one — but code written for only the prompt-time rename will miss this. Named is not written: this row first said the file already *exists* at that point, which its evidence, a rename, cannot show, and on `pi 0.87.1` the named file did not exist until the first turn's reply ended (`docs/MANUAL_TESTING.md`, OW-bohodu), on `pi 1.2.0` until the first user message's `message_end` (OW-tigaye) | live `renamed` event, observed before any prompt was sent |
+| 42 | **Pi emitted a shell tool call and no approval dialog request reached the wire.** The turn produced `thinking` and `toolCall` blocks and settled with no `extension_ui_request` beside it. This was first claimed on `pi 0.84.1` from a field that structurally could not carry it — the probe snapshotted requests before the tool prompt was posted — and was measured for the first time on **`pi 0.85.1`**, home server, 2026-09-13, where the tool turn's own window was empty. Read it with all three of its limits: nothing here records a `toolResult`, so this is a tool call reaching the client and not a command observed to execute; the home server has no `trust.json` for the harness to copy, so this says Pi asked nothing *there* rather than that the sandboxed path never adds a prompt; and the field only ever sees an `extension_ui_request` carrying a dialog method, so empty means no dialog request reached the wire, never that Pi asked nothing | `--tool-check` run at `2760e01`; `agent_requests_seen.tool_turn` spans the tool prompt to that turn's recorded idle and is empty, with `checks.tool_output.turn_idle_at` closing it. See `docs/MANUAL_TESTING.md`, "The Pi smoke probe measures the tool turn's own requests" |
+
+Finding 41 is the one to be careful with: it means the first-prompt materialisation path is currently dead code against this Pi version.
+Do not delete it on that basis — a `virtual` session whose backend has not yet written a file is exactly what D9 describes, and the behaviour here may be a property of how `pi --mode rpc` starts rather than a promise.
+
+### Seventh round: the first fork ever run on either backend (OW-mewiga)
+
+Finding 7 asserted fork support from `rpc.md` and the Codex bindings alone; nothing had run a fork on either backend.
+Findings 43–48 are the four cells of `{Pi, Codex} × {rewind, new session}` run live on the work laptop, plus the two command-surface deltas OW-mewiga asked to bring back.
+All are reproduced by `resources/probes/fork_probe.py` (pi 0.84.2 / codex-cli 0.147.0), with a forked session fixture per backend at `resources/fixtures/{pi,codex}/fork.jsonl`.
+Finding 7 is corrected below; DESIGN's fork goal (`DESIGN.md:21`) was likewise flattened and is now split into the two operations.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 43 | **Pi's `fork` is copy-on-write, not the in-place rewind its adapter docblock claims.** the fork docblock in `pi/process.ts` ("fork-from-past") then said `fork` "rewinds the active branch of the SAME session file in place." On 0.84.2 it does not: the active file is left **byte-identical** (sha unchanged, its tail still the abandoned assistant reply), and the post-fork re-ask lands in a **new** file whose header carries a `parentSession` pointer back to it. The abandoned tail therefore always survives on disk. Separately, 81 of 419 corpus files carry in-file sibling branches under one parent id — the TUI `/fork` shape — so both routes preserve and neither destroys. No destructive-rewind warning is warranted, which was the open question the cell existed to settle | `resources/probes/fork_probe.py` `pi_rewind` cell; corpus tree scan over `~/.pi/agent/sessions` |
+| 44 | **Pi's `clone` takes NO entry id** (the highest-value unknown in OW-mewiga). `rpc.md` "clone": it duplicates the *whole active branch* into a new session at the current position — there is no per-entry parameter. So branching-into-a-new-session-from-a-chosen-point on Pi is a composition: `fork` (rewind) to the point, then `clone`; or `clone` then `switch_session` into the copy. The RPC process does **not** auto-switch to the clone (`get_state` still reports the original file), so a caller that wants to work in it must `switch_session` first. The probe clones, switches, and drives a completed turn inside the clone | `resources/probes/fork_probe.py` `pi_new_session` cell; `rpc.md` "clone" |
+| 45 | **Codex `thread/fork` mints a new thread whose on-disk rollout carries `forked_from_id`.** `thread/fork` with `lastTurnId` (inclusive) returns a new thread id; a real turn drives to a completed `agentMessage` inside it; the fork writes nothing to the parent rollout (which is not the same as the parent being idle — a parent forked mid-turn keeps writing its own turn, OW-gojado). The lineage is on disk, not only over the protocol: `session_meta.payload.forked_from_id` (snake_case) mirrors the `Thread.forkedFromId` (camelCase) of finding 21. 21 of 597 corpus files carry it — `source: cli` / `thread_source: user` for real user forks, and a `subagent` variant for spawned agents | `resources/probes/fork_probe.py` `codex_new_session` cell; `forked_from_id` census over `~/.codex/sessions` |
+| 46 | **Codex still cannot rewind in place — `thread/rollback` remains DEPRECATED.** The generated schema for 0.147.0 (`ClientRequest.json` → `ThreadRollbackParams`) carries `description: "DEPRECATED: \`thread/rollback\` will be removed soon."`, and its own docstring warns it only edits history and does not revert file changes. There is no non-deprecated in-place rewind command. "Codex cannot rewind" is a result, not a gap in the probe: rewind on Codex is expressed as a new-session fork through an earlier turn (finding 45), which is exactly the adapter's design (`codex/adapter.ts`, "fork-from-past") | `resources/probes/fork_probe.py` `codex_rewind` cell reads the live schema |
+| 47 | **`rpc.md` documents 32 RPC commands; `PiCommand` transcribes 11.** The 21 absent, all real and simply never sent: `steer`, `follow_up`, `new_session`, `cycle_model`, `set_thinking_level`, `cycle_thinking_level`, `get_available_thinking_levels`, `set_steering_mode`, `set_follow_up_mode`, `set_auto_compaction`, `set_auto_retry`, `abort_retry`, `bash`, `abort_bash`, `get_session_stats`, `export_html`, `switch_session`, `clone`, `get_tree`, `get_last_assistant_text`, `set_session_name`, `get_commands`. Fork-relevant among these: **`clone`** (finding 44), **`switch_session`** (drive a turn in a clone), **`new_session`** (with optional `parentSession` lineage), and **`get_tree`** (`DESIGN.md:520` lists it but it is not transcribed). `PiCommand`'s docstring already says it is a deliberate subset; this records the exact delta so the next fork/tree work knows what is upstream vs. untranscribed | `diff` of `#### ` command headers in `rpc.md` §Commands against `type: "…"` arms of `PiCommand` (`pi/protocol.ts`) |
+| 48 | **Codex's `ClientRequest.json` carries 133 request methods; the adapter speaks ~11.** The generated schema (`codex app-server generate-json-schema --experimental`) enumerates 133 client→server methods. The adapter uses `initialize`, `thread/start`, `thread/resume`, `thread/fork`, `thread/read`, `thread/compact/start`, `turn/start`, `turn/interrupt`, and reads `model/list` — *corrected by OW-kelene*: `thread/read` is gone from that list, replaced by a paged `thread/turns/list` for fork points and a reattach's transcript, because as of `codex-cli 0.156.0` every full-history load of a paginated thread drew a deprecation notice. Directly fork/rewind-relevant and unused: **`thread/rollback`** (deprecated, finding 46), **`thread/list`** (finding 21, lineage over the protocol), **`thread/turns/list`** / **`thread/items/list`** (turn granularity for fork points without a full `thread/read`; `thread/turns/list` used since OW-kelene), and **`thread/delete`** / **`thread/archive`** (managing the threads a fork multiplies). `ThreadForkParams` also offers a `path`-based fork and per-fork config overrides (`model`, `sandbox`, `approvalPolicy`, `cwd`) — *corrected by OW-18*: the adapter now passes `cwd`, `sandbox` and `approvalPolicy` on `thread/fork`, because a fork inherits the parent's `approvalPolicy` but not its sandbox, which falls back to `workspaceWrite`. `model` is still not passed | `ClientRequest.json` method census vs. `client.request(...)` call sites in `codex/adapter.ts` |
+
+On finding 7's correction: "both backends support fork-from-past natively" was true but flat — it collapsed two operations that behave differently per backend.
+**New-session fork** is native and symmetric: Pi `clone` (whole branch) or `fork`+`clone`, Codex `thread/fork` (turn-granular), both leaving lineage on disk.
+**In-place rewind** is not symmetric: Pi's `fork` does it (as copy-on-write, preserving the old branch), Codex has no supported command for it and expresses it as a new-session fork instead.
+The table's finding-7 row is unchanged as a record of what was believed; this round is its correction.
+
+### Eighth round: spawned Codex agents share one connection (OW-fafeja)
+
+Finding 49 came from a live parent turn that spawned one child and waited for it on the home server with the required Luna model pin.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 49 | **A spawned Codex agent is a separate thread on the parent's app-server connection.** Its thread status, turn lifecycle, item lifecycle, agent-message deltas, token usage, and MCP startup notifications interleave with the parent turn, so transcript reduction must reject notifications whose `threadId` is not the attached parent. The parent receives `collabAgentToolCall` spawn/wait lifecycle items that identify the child and eventually carry its terminal message. Codex-cli 0.153.4 emitted no child `thread/started` in this run | `resources/fixtures/codex/subagent.{jsonl,meta.json}`; captured with `codex -m gpt-5.6-luna app-server` |

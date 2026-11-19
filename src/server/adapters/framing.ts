@@ -7,7 +7,7 @@
  * SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR), which are valid unescaped
  * characters inside a JSON string -- a model response that happens to
  * contain one would get its line torn in half and fail to parse. See Pi's
- * rpc.md "Framing" section and HANDOFF's "Environment gotchas"; the same
+ * rpc.md "Framing" section and `docs/BACKENDS.md`, "RPC framing"; the same
  * hazard applies to any JSON-lines transport.
  *
  * This is pure and synchronous on purpose: it takes decoded string chunks
