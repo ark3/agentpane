@@ -17,6 +17,7 @@ import {
 	type ForkResponse,
 	type ListSessionsResponse,
 	type ModelsResponse,
+	type PromptResponse,
 	ROUTES,
 	type SessionPreviewResponse,
 	type SessionPreviewTurn,
@@ -80,6 +81,13 @@ function previewAssistant(text: string): SessionPreviewTurn {
 
 function get(path: string): Promise<Response> {
 	return app.fetch(new Request(`http://127.0.0.1${path}`));
+}
+
+/** The handle `ref` is live under, which a prompt from a view holding it names (D30). */
+function handleOf(ref: SessionRef): string {
+	const handle = app.sessions.summaryOf(ref)?.handle;
+	if (handle === undefined) throw new Error(`${sessionKey(ref)} is not held`);
+	return handle;
 }
 
 function post(path: string, body?: unknown): Promise<Response> {
@@ -584,7 +592,7 @@ describe("SSE stream", () => {
 	});
 });
 
-describe("only the attach route starts an agent (D25, OW-sirofi)", () => {
+describe("only an attach, a create and a prompt naming no handle start an agent (D25, D30, OW-sirofi)", () => {
 	/** Refused as a session not attached, with nothing spawned for it. */
 	async function expectRefused(response: Response): Promise<void> {
 		expect(pi.created).toHaveLength(0);
@@ -592,8 +600,23 @@ describe("only the attach route starts an agent (D25, OW-sirofi)", () => {
 		expect(((await response.json()) as ApiError).error).toBe("not_attached");
 	}
 
-	it("refuses a prompt to a session not attached", async () => {
-		await expectRefused(await post(ROUTES.prompt(PI_SESSION), { text: "hello" }));
+	it("refuses a prompt naming a handle to a session not attached", async () => {
+		await expectRefused(await post(ROUTES.prompt(PI_SESSION), { text: "hello", handle: "gone" }));
+	});
+
+	it("refuses a prompt naming a handle a close ended, though the session was attached again under another (D30)", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		const ended = handleOf(PI_SESSION);
+		expect((await app.fetch(new Request(`http://127.0.0.1${ROUTES.session(PI_SESSION)}`, { method: "DELETE" }))).status).toBe(204);
+		await get(ROUTES.session(PI_SESSION));
+		expect(handleOf(PI_SESSION)).not.toBe(ended);
+
+		const response = await post(ROUTES.prompt(PI_SESSION), { text: "hello", handle: ended });
+
+		expect(response.status).toBe(409);
+		expect(((await response.json()) as ApiError).error).toBe("not_attached");
+		expect(pi.created).toHaveLength(2);
+		expect(pi.forRef(PI_SESSION)?.prompts).toEqual([]);
 	});
 
 	it("refuses a fork of a session not attached", async () => {
@@ -622,6 +645,7 @@ describe("only the attach route starts an agent (D25, OW-sirofi)", () => {
 
 	it("respawns nothing for a prompt or a model that arrives while a close is out", async () => {
 		await get(ROUTES.session(PI_SESSION));
+		const handle = handleOf(PI_SESSION);
 		const adapter = pi.forRef(PI_SESSION)!;
 		const held = deferred();
 		const dispose = adapter.dispose.bind(adapter);
@@ -635,7 +659,7 @@ describe("only the attach route starts an agent (D25, OW-sirofi)", () => {
 		// Answered while the disposal is still held, so both reach their route
 		// inside the close's window.
 		const answers = await Promise.all([
-			post(ROUTES.prompt(PI_SESSION), { text: "hello" }),
+			post(ROUTES.prompt(PI_SESSION), { text: "hello", handle }),
 			post(ROUTES.model(PI_SESSION), { model: "pi-2" }),
 		]);
 		expect(pi.created).toHaveLength(1);
@@ -666,11 +690,13 @@ describe("prompting", () => {
 		app = createTestApp({ index, adapters: { pi: commands } });
 		await get(ROUTES.session(PI_SESSION));
 
-		const handled = await post(ROUTES.prompt(PI_SESSION), { text: "/mcp" });
+		const handle = handleOf(PI_SESSION);
+
+		const handled = await post(ROUTES.prompt(PI_SESSION), { text: "/mcp", handle });
 		expect(handled.status).toBe(200);
 		expect(await handled.json()).toEqual({ disposition: "handled" });
 
-		const started = await post(ROUTES.prompt(PI_SESSION), { text: "hello" });
+		const started = await post(ROUTES.prompt(PI_SESSION), { text: "hello", handle });
 		expect(started.status).toBe(202);
 		expect(await started.text()).toBe("");
 	});
@@ -680,7 +706,7 @@ describe("prompting", () => {
 		const client = await openStream();
 		await client.waitForCount(1);
 
-		expect((await post(ROUTES.prompt(PI_SESSION), { text: "hello" })).status).toBe(202);
+		expect((await post(ROUTES.prompt(PI_SESSION), { text: "hello", handle: handleOf(PI_SESSION) })).status).toBe(202);
 		// An event after the prompt, so everything the prompt sent has arrived ahead of it.
 		pi.forRef(PI_SESSION)?.append(userMessage("hello"));
 		await client.until(() => client.typed("upsert").length === 1, "the upsert after the prompt");
@@ -797,11 +823,83 @@ describe("prompting", () => {
 		await get(ROUTES.session(PI_SESSION));
 		const client = await openStream();
 
-		const response = await post(ROUTES.prompt(PI_SESSION), { text: "go" });
+		const response = await post(ROUTES.prompt(PI_SESSION), { text: "go", handle: handleOf(PI_SESSION) });
 		expect(response.status).toBe(500);
 		expect(await response.json()).toEqual({ error: "internal_error", detail: "agent is wedged" });
 		expect(client.typed("error")).toEqual([]);
 		await client.close();
+	});
+
+	it("rejects a prompt whose handle is not a string", async () => {
+		const response = await post(ROUTES.prompt(PI_SESSION), { text: "go", handle: 1 });
+		expect(response.status).toBe(400);
+		expect(pi.created).toHaveLength(0);
+	});
+
+	describe("a prompt naming no handle, from a view that knows its session is not running (D30)", () => {
+		it("starts the session, prompts it, and answers 202 naming the live session after its snapshot went out", async () => {
+			const client = await openStream();
+
+			const response = await post(ROUTES.prompt(PI_SESSION), { text: "hello" });
+
+			expect(response.status).toBe(202);
+			const body = (await response.json()) as PromptResponse;
+			expect(body).toEqual({ disposition: "started", session: app.sessions.summaryOf(PI_SESSION) });
+			expect(body.session).toMatchObject({ ref: PI_SESSION, status: "attached" });
+			expect(pi.forRef(PI_SESSION)?.prompts).toEqual([{ text: "hello", images: undefined }]);
+			await client.until(() => client.typed("snapshot").length === 1, "the attach's snapshot");
+			await client.close();
+		});
+
+		it("answers a prompt the backend handled 200, naming the session", async () => {
+			const commands = new FakeAdapterFactory({ onSubmit: () => "handled" });
+			app = createTestApp({ index, adapters: { pi: commands } });
+
+			const response = await post(ROUTES.prompt(PI_SESSION), { text: "/mcp" });
+
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({ disposition: "handled", session: app.sessions.summaryOf(PI_SESSION) });
+		});
+
+		it("answers a refusal after the attach as that refusal, naming the session it attached", async () => {
+			const refusing = new FakeAdapterFactory({
+				onSubmit() {
+					throw new BackendRefusedError("not now");
+				},
+			});
+			app = createTestApp({ index, adapters: { pi: refusing } });
+
+			const response = await post(ROUTES.prompt(PI_SESSION), { text: "hello" });
+
+			expect(response.status).toBe(400);
+			expect(await response.json()).toEqual({
+				error: "backend_refused",
+				detail: "not now",
+				attached: { ref: PI_SESSION, handle: handleOf(PI_SESSION) },
+			});
+			expect(app.sessions.isAttached(PI_SESSION)).toBe(true);
+		});
+
+		it("answers a start that failed as that failure, naming nothing and leaving nothing attached", async () => {
+			app = createTestApp({ index, adapters: { pi: new FakeAdapterFactory({ failStart: "would not start" }) } });
+
+			const response = await post(ROUTES.prompt(PI_SESSION), { text: "hello" });
+
+			expect(response.status).toBe(500);
+			expect(await response.json()).toEqual({ error: "internal_error", detail: "would not start" });
+			expect(app.sessions.isAttached(PI_SESSION)).toBe(false);
+		});
+
+		it("keeps an error the attach's start raised, which its sender cannot have held (OW-jokoto)", async () => {
+			app = createTestApp({
+				index,
+				adapters: { pi: new FakeAdapterFactory({ onStart: (adapter) => adapter.emitError("resumed with a warning") }) },
+			});
+
+			expect((await post(ROUTES.prompt(PI_SESSION), { text: "hello" })).status).toBe(202);
+
+			expect(app.sessions.errorIdOf(PI_SESSION)).not.toBeNull();
+		});
 	});
 
 	it("rejects a prompt with no text", async () => {
@@ -1013,9 +1111,10 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 	});
 
 	it("keeps an error the start of an attach raised before a first prompt whose sender held none (OW-bomolu)", async () => {
-		// Emacs's first prompt from a previewed buffer, as `agentpane--attached-then`
-		// sends it: the helper's stream is already open, `sessions/attach` is the GET,
-		// and `sessions/prompt` follows with the `priorErrorId` read before that attach.
+		// Emacs's first prompt from a buffer whose attach was out when the user
+		// sent, which waits for it (`agentpane--send-prompt`): the helper's stream
+		// is already open, `sessions/attach` is the GET, and `sessions/prompt`
+		// follows, naming the handle, with the `priorErrorId` read before that attach.
 		const raising = new FakeAdapterFactory({ onStart: (adapter) => adapter.emitError("extension failed to load") });
 		app = createTestApp({ index, adapters: { pi: raising } });
 		const watching = await openStream();
@@ -1025,7 +1124,7 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 		const raised = watching.typed("snapshot")[0]?.errorId;
 		expect(raised).toEqual(expect.any(String));
 
-		expect((await post(ROUTES.prompt(PI_SESSION), { text: "hello", priorErrorId: null })).status).toBe(202);
+		expect((await post(ROUTES.prompt(PI_SESSION), { text: "hello", priorErrorId: null, handle: handleOf(PI_SESSION) })).status).toBe(202);
 
 		// Anything the admission broadcast is ahead of this on the stream.
 		raising.forRef(PI_SESSION)?.emitNotice({ kind: "configWarning", message: "fence", details: null, path: null });

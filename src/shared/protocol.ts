@@ -384,6 +384,15 @@ export interface PromptRequest {
 	 * takes whatever error it holds when the request arrives.
 	 */
 	priorErrorId?: string | null;
+	/**
+	 * The handle of the live session the sender's view holds (D30). Named, the
+	 * prompt goes only to the live session under it and starts nothing: one
+	 * that has ended is refused 409 `not_attached`, and the sender keeps the
+	 * text. Absent, the sender's view knows the session is not running, and the
+	 * server attaches it if it must, then prompts it; the answer then names
+	 * the live session (`PromptResponse.session`).
+	 */
+	handle?: string;
 }
 
 /**
@@ -402,14 +411,19 @@ export interface PromptRequest {
 export type PromptDisposition = "started" | "handled";
 
 /**
- * The prompt route's body, sent only for a handled prompt, with 200: no turn
- * was started for it, though work an extension started of its own may still
- * stream (`PromptDisposition`). A started one is answered 202 with no body,
- * as it was before the outcome existed, so a client that reads only the
- * status still reads it as today.
+ * The prompt route's body. The status says the disposition: 200 for a
+ * handled prompt, for which no turn was started, though work an extension
+ * started of its own may still stream (`PromptDisposition`), and 202 for a
+ * started one. A prompt that named its handle gets a body only when handled,
+ * a started one 202 with no body, as before the outcome existed, so a client
+ * that reads only the status still reads it as today. One that named no
+ * handle always gets a body, naming the live session it attached as well
+ * (`PromptRequest.handle`, D30); like an attach's reply it can precede that
+ * session's snapshot (D2).
  */
 export interface PromptResponse {
-	disposition: "handled";
+	disposition: PromptDisposition;
+	session?: LiveSessionSummary;
 }
 
 /**
@@ -582,6 +596,12 @@ export interface ApiError {
 	 * prompts that fork rather than forking the parent a second time.
 	 */
 	fork?: { ref: SessionRef; handle: string | null };
+	/**
+	 * Only from a prompt that named no handle, for a refusal after the server
+	 * attached its session: that session, by its ref and the handle it is live
+	 * under, so a client binds the view that sent it (D30).
+	 */
+	attached?: { ref: SessionRef; handle: string };
 }
 
 // ---------------------------------------------------------------------------

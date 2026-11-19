@@ -16,7 +16,9 @@ import { FakeCodexProcess } from "../adapters/codex/test-support.ts";
 import { BackendRefusedError } from "../adapters/types.ts";
 import { Broadcaster } from "./broadcaster.ts";
 import {
+	AttachedNotPromptedError,
 	ForkNotPromptedError,
+	HandleEndedError,
 	NotAForkPointError,
 	SessionManager,
 	UnknownBackendError,
@@ -1402,6 +1404,93 @@ describe("fork and prompt, one operation (D30)", () => {
 		const { session } = await sessions.forkAndPrompt(ref, 0, "again");
 
 		expect(sessions.errorIdOf(session.ref)).not.toBeNull();
+	});
+});
+
+/** A prompt names the handle its sender holds live, or only the ref (D30). */
+describe("a prompt names a handle or a ref (D30)", () => {
+	it("prompts the live session under the handle it names", async () => {
+		const adapter = (await sessions.attach(REF)) as FakeAdapter;
+		const handle = sessions.summaryOf(REF)!.handle;
+
+		await expect(sessions.submit(REF, "hello", undefined, null, handle)).resolves.toBe("started");
+		expect(adapter.prompts).toEqual([{ text: "hello", images: undefined }]);
+	});
+
+	it("refuses a handle that a close ended, though the session was attached again under another", async () => {
+		await sessions.attach(REF);
+		const ended = sessions.summaryOf(REF)!.handle;
+		await sessions.close(REF);
+		const again = (await sessions.attach(REF)) as FakeAdapter;
+		expect(sessions.summaryOf(REF)!.handle).not.toBe(ended);
+
+		await expect(sessions.submit(REF, "hello", undefined, null, ended)).rejects.toBeInstanceOf(HandleEndedError);
+		expect(again.prompts).toEqual([]);
+	});
+
+	it("refuses a handle whose session a close took while its prompt waited in the queue", async () => {
+		const held = deferred();
+		pi = new FakeAdapterFactory({ onSubmit: (_adapter, text) => (text === "first" ? held.promise.then(() => undefined) : undefined) });
+		sessions = new SessionManager({ index, adapters: { pi } }, broadcaster);
+		const adapter = (await sessions.attach(REF)) as FakeAdapter;
+		const handle = sessions.summaryOf(REF)!.handle;
+
+		const first = sessions.submit(REF, "first", undefined, null, handle);
+		const second = sessions.submit(REF, "second", undefined, null, handle);
+		await settle();
+		const closing = sessions.close(REF);
+		held.resolve();
+
+		await first;
+		await expect(second).rejects.toBeInstanceOf(HandleEndedError);
+		await closing;
+		expect(adapter.prompts.map((prompt) => prompt.text)).toEqual(["first"]);
+	});
+
+	it("starts the session a prompt naming no handle is sent to, prompts it, and answers its live summary", async () => {
+		const result = await sessions.attachAndSubmit(REF, "hello", undefined, null);
+
+		const adapter = sessions.adapterFor(REF) as FakeAdapter;
+		expect(pi.created).toHaveLength(1);
+		expect(adapter.prompts).toEqual([{ text: "hello", images: undefined }]);
+		expect(result).toEqual({ session: sessions.summaryOf(REF), disposition: "started" });
+		expect(result.session.status).toBe("attached");
+	});
+
+	it("prompts a session already live when the prompt names no handle, starting nothing", async () => {
+		const adapter = (await sessions.attach(REF)) as FakeAdapter;
+
+		await sessions.attachAndSubmit(REF, "hello", undefined, null);
+
+		expect(pi.created).toHaveLength(1);
+		expect(adapter.prompts).toEqual([{ text: "hello", images: undefined }]);
+	});
+
+	it("refuses a prompt refused after its attach with an error naming the session it attached", async () => {
+		pi = new FakeAdapterFactory({
+			onSubmit: () => {
+				throw new BackendRefusedError("not now");
+			},
+		});
+		sessions = new SessionManager({ index, adapters: { pi } }, broadcaster);
+
+		const error = await sessions.attachAndSubmit(REF, "hello", undefined, null).catch((e: unknown) => e);
+
+		expect(error).toBeInstanceOf(AttachedNotPromptedError);
+		expect((error as AttachedNotPromptedError).cause).toBeInstanceOf(BackendRefusedError);
+		expect((error as AttachedNotPromptedError).attached).toEqual({ ref: REF, handle: sessions.summaryOf(REF)?.handle });
+		expect(sessions.isAttached(REF)).toBe(true);
+	});
+
+	it("refuses a prompt whose session would not start with that failure, naming nothing", async () => {
+		pi = new FakeAdapterFactory({ failStart: "would not start" });
+		sessions = new SessionManager({ index, adapters: { pi } }, broadcaster);
+
+		const error = await sessions.attachAndSubmit(REF, "hello", undefined, null).catch((e: unknown) => e);
+
+		expect(error).not.toBeInstanceOf(AttachedNotPromptedError);
+		expect((error as Error).message).toBe("would not start");
+		expect(sessions.isAttached(REF)).toBe(false);
 	});
 });
 

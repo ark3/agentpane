@@ -49,8 +49,10 @@ import { type BackendAdapter, BackendRefusedError } from "../adapters/types.ts";
 import { Broadcaster, type SseClient } from "./broadcaster.ts";
 import type { AppDeps } from "./deps.ts";
 import {
+	AttachedNotPromptedError,
 	EffortNotOfferedError,
 	ForkNotPromptedError,
+	HandleEndedError,
 	NotAForkPointError,
 	ServerShuttingDownError,
 	SessionManager,
@@ -308,9 +310,12 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.text !== "string") {
 					return error(400, "bad_request", "text is required");
 				}
-				const { priorErrorId } = body.value;
+				const { priorErrorId, handle } = body.value;
 				if (priorErrorId !== undefined && priorErrorId !== null && typeof priorErrorId !== "string") {
 					return error(400, "bad_request", "priorErrorId must be a string or null");
+				}
+				if (handle !== undefined && typeof handle !== "string") {
+					return error(400, "bad_request", "handle must be a string");
 				}
 				// Which error the sender held when the user sent, by id: only that one
 				// may go at admission. One raised after -- while this request was on
@@ -318,10 +323,20 @@ export function createApp(deps: AppDeps): App {
 				// sender saw (OW-31, OW-bipume, OW-lameke, OW-jokoto); see
 				// `SessionManager.submit`. A sender that names none gets the error
 				// held now.
+				// Read before any attach below, whose start may raise one newer still.
 				const priorError = priorErrorId === undefined ? sessions.errorIdOf(ref) : priorErrorId;
-				// Only the GET above and a create start a session (D25, D30): a prompt that arrives
-				// for one not attached, a close under way included, is refused.
-				if (!sessions.isAttached(ref)) return notAttached(ref);
+				// A prompt that names no handle was sent from a view that knows the
+				// session is not running: the manager attaches it if it must, then
+				// prompts it, and the answer names the live session, so a client binds
+				// that view to it (D30). The status says the disposition, as below.
+				if (handle === undefined) {
+					const attached = await sessions.attachAndSubmit(ref, body.value.text, body.value.images, priorError);
+					const response: PromptResponse = attached;
+					return json(response, attached.disposition === "handled" ? 200 : 202);
+				}
+				// One that names a handle goes only to the live session under it, and
+				// starts nothing: a handle that has ended, a close under way or one
+				// crossed by a re-attach included, is refused `not_attached` (D25, D30).
 				// Through the manager, not straight at the adapter: it queues the
 				// prompt behind the session's other verbs (D24).
 				//
@@ -334,7 +349,7 @@ export function createApp(deps: AppDeps): App {
 				// answered 200 with a body saying so (OW-dulipe); an extension's own
 				// work may still stream (`PromptDisposition`). A started one keeps
 				// today's bodiless 202.
-				const disposition = await sessions.submit(ref, body.value.text, body.value.images, priorError);
+				const disposition = await sessions.submit(ref, body.value.text, body.value.images, priorError, handle);
 				if (disposition === "handled") {
 					const response: PromptResponse = { disposition };
 					return json(response);
@@ -495,8 +510,9 @@ export function createApp(deps: AppDeps): App {
 
 	/**
 	 * The refusal of a route that acts on a running session, sent for one that
-	 * is not: only the attach route, the GET of `ROUTES.session`, starts one
-	 * (D25). A 409 and not a 404, since the session exists and is listed.
+	 * is not: only the attach route, the GET of `ROUTES.session`, a create
+	 * and a prompt that names no handle start one (D25, D30). A 409 and not a
+	 * 404, since the session exists and is listed.
 	 */
 	function notAttached(ref: SessionRef): Response {
 		return error(409, "not_attached", `session ${sessionKey(ref)} is not attached`);
@@ -562,21 +578,28 @@ export function createApp(deps: AppDeps): App {
 			try {
 				return await handle(request);
 			} catch (thrown) {
-				// A fork-and-prompt that failed after its fork was created answers as
-				// its cause would, and names the fork beside it (D30).
-				const err = thrown instanceof ForkNotPromptedError ? thrown.cause : thrown;
-				const fork = thrown instanceof ForkNotPromptedError ? thrown.fork : undefined;
-				if (err instanceof UnknownSessionError) return error(404, "not_found", err.message, fork);
-				if (err instanceof UnknownBackendError) return error(501, "no_backend", err.message, fork);
+				// A fork-and-prompt that failed after its fork was created, and a
+				// prompt naming no handle refused after its attach, answer as their
+				// cause would, and name the fork or the session beside it (D30).
+				const err = thrown instanceof ForkNotPromptedError || thrown instanceof AttachedNotPromptedError ? thrown.cause : thrown;
+				const named: Named =
+					thrown instanceof ForkNotPromptedError
+						? { fork: thrown.fork }
+						: thrown instanceof AttachedNotPromptedError
+							? { attached: thrown.attached }
+							: {};
+				if (err instanceof UnknownSessionError) return error(404, "not_found", err.message, named);
+				if (err instanceof HandleEndedError) return error(409, "not_attached", err.message, named);
+				if (err instanceof UnknownBackendError) return error(501, "no_backend", err.message, named);
 				if (err instanceof ServerShuttingDownError) {
-					return error(503, "server_shutting_down", err.message, fork);
+					return error(503, "server_shutting_down", err.message, named);
 				}
-				if (err instanceof BackendRefusedError) return error(400, "backend_refused", err.message, fork);
-				if (err instanceof EffortNotOfferedError) return error(400, "bad_request", err.message, fork);
-				if (err instanceof NotAForkPointError) return error(409, "not_a_fork_point", err.message, fork);
+				if (err instanceof BackendRefusedError) return error(400, "backend_refused", err.message, named);
+				if (err instanceof EffortNotOfferedError) return error(400, "bad_request", err.message, named);
+				if (err instanceof NotAForkPointError) return error(409, "not_a_fork_point", err.message, named);
 				const ref = sessionRefFromRequest(request);
 				logError(`${ref ? `session ${sessionKey(ref)}: ` : ""}${describe(err)}`);
-				return error(500, "internal_error", describe(err), fork);
+				return error(500, "internal_error", describe(err), named);
 			}
 		},
 		sessions,
@@ -738,11 +761,14 @@ function accepted(): Response {
 	return new Response(null, { status: 202 });
 }
 
-function error(status: number, code: string, detail?: string, fork?: ApiError["fork"]): Response {
+/** What a refusal names beside its cause: a fork, or a session a prompt attached (D30). */
+type Named = Pick<ApiError, "fork" | "attached">;
+
+function error(status: number, code: string, detail?: string, named: Named = {}): Response {
 	const body: ApiError = {
 		error: code,
 		...(detail === undefined ? {} : { detail }),
-		...(fork === undefined ? {} : { fork }),
+		...named,
 	};
 	return json(body, status);
 }

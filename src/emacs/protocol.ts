@@ -76,6 +76,10 @@
  * ark3/agentpane#48 raised it a twenty-first, under D30: `sessions/create`
  * starts the session's agent, carries a `token` and answers the session's
  * summary, attaching it for the token as `sessions/attach` does.
+ * ark3/agentpane#49 raised it a twenty-second, under D30: `sessions/prompt`
+ * sends its `handle` to the server, which prompts only the live session
+ * under it, and one naming none carries a `token` and attaches its session
+ * for the buffer that minted it, as `sessions/attach` does.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -201,7 +205,7 @@
  * Every per-session notification below carries it, absent only where the
  * server sent none, and every request that takes a `session` accepts one
  * beside it and sends it nowhere, `sessions/detach` and `sessions/close`
- * included (OW-nowihu); `compaction` is `"requesting"`, `"running"` or `null`;
+ * included (OW-nowihu), save `sessions/prompt`, which sends it on (D30); `compaction` is `"requesting"`, `"running"` or `null`;
  * `model` is a string or `null`; so is `effort`, the reasoning effort the
  * session's next turn runs at, `null` when the backend reports none; and so
  * is `unrestoredModel`, the model the session's store last recorded when the
@@ -281,7 +285,8 @@
  *   per-session notifications below flow for this session. One given up
  *   on while that open is pending is not sent at all, and answers a
  *   `-32603` error with no `data`: the server never saw it.
- * - `sessions/prompt` -- `{ session, text, images?, priorErrorId? }` ->
+ * - `sessions/prompt` -- `{ session, handle, text, images?, priorErrorId? }`
+ *   or `{ session, token, text, images?, priorErrorId? }` ->
  *   `null` for a prompt that started a turn or joined one, or
  *   `{ disposition: "handled" }` for one the backend consumed without
  *   starting a turn for it: the prompt route's own `PromptResponse`
@@ -290,11 +295,24 @@
  *   in `pi 1.2.0`, read at the installed package, not measured); after
  *   `/refs`, `/llama` and `/mcp` on `pi 1.2.0` none did (docs/MANUAL_TESTING.md,
  *   OW-kokotu). No other backend answers it.
+ *   How it is addressed says what it may do (D30). Sent from a buffer
+ *   holding the session live, it names that buffer's `handle`, goes only to
+ *   the live session under it and starts nothing: a handle that has ended is
+ *   refused with a 409 whose `data.error` is `not_attached`, a close and a
+ *   re-attach crossing it included. Sent from a buffer that knows the
+ *   session is not running, it names no handle and carries a `token`, and
+ *   the server attaches the session if it must and then prompts it: the
+ *   snapshot that answers that attach carries the `token`, is about the
+ *   buffer whose `agentpane--attach-sent` it is, and goes out before the
+ *   reply, as `sessions/attach` below says of its own. A refusal after the
+ *   attach carries `attached`, `{ ref, handle }`, in its `data`, and answers
+ *   the same way before its error goes out; one whose start failed names
+ *   nothing and binds nothing.
  *   `priorErrorId` (string or `null`) is the `errorId` of the turn
  *   error the buffer held when the user sent, `null` when it held none, read
- *   before any `sessions/attach` the send itself makes: admitting the prompt
- *   clears the session's error only while it is still that one, so an error
- *   raised after the send, that attach's start among them, stays
+ *   at the send: admitting the prompt clears the session's error only while
+ *   it is still that one, so an error raised after the send, the start of
+ *   the attach a prompt naming no handle makes among them, stays
  *   (OW-jokoto). Absent, the server takes whatever error it holds when the
  *   prompt arrives.
  * - `sessions/abort` -- `{ session }` -> `null` for a stop that took nothing
@@ -376,7 +394,8 @@
  * Errors: a request the server refused answers with the HTTP status as
  * `code`, the server's text as `message`, and `{ status, error, detail }` as
  * `data`, `error` and `detail` being the HTTP body's own fields, and `fork`
- * beside them where the body has one (`sessions/forkAndPrompt`), so a
+ * or `attached` beside them where the body has one (`sessions/forkAndPrompt`,
+ * `sessions/prompt`), so a
  * mid-turn prompt rejection reads in Emacs as it does in the browser. Any
  * other failure is `-32603` with its message and no `data`, and says nothing
  * of whether the server acted on the request; an unknown method is
@@ -502,7 +521,10 @@ export interface HelperRequests {
 	"sessions/create": { params: CreateSessionRequest & { token: number }; result: SessionSummary };
 	"models/list": { params: { backend: BackendId }; result: ModelInfo[] };
 	"sessions/attach": { params: SessionParams & { token: number }; result: SessionSummary };
-	"sessions/prompt": { params: SessionParams & PromptRequest; result: PromptResponse | null };
+	"sessions/prompt": {
+		params: { session: SessionRef } & Omit<PromptRequest, "handle"> & ({ handle: string; token?: undefined } | { handle?: undefined; token: number });
+		result: PromptResponse | null;
+	};
 	"sessions/abort": { params: SessionParams; result: AbortResponse | null };
 	"sessions/compact": { params: SessionParams; result: null };
 	"sessions/close": { params: SessionParams & { tokens?: number[] }; result: null };

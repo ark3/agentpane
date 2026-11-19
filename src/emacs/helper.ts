@@ -352,8 +352,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * The server let go of `handle` (D26): a close, by any client, or on Pi a
 	 * fork moving the process onto a conversation of its own, and nothing
 	 * comes under it again. The attachment under it goes and Emacs is told:
-	 * a buffer left counting itself attached would send a prompt with no
-	 * attach before it, which the prompt route refuses (D25). The buffer lets
+	 * a buffer left counting itself attached would send a prompt naming the
+	 * ended handle, which the prompt route refuses (D25, D30). The buffer lets
 	 * go of the handle, and its own next attach, by the ref it holds, finds
 	 * the session wherever it is now, the route answering the current handle
 	 * and ref (`agentpane--notified-buffer` in emacs/agentpane.el).
@@ -674,9 +674,32 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				attaching.delete(attach);
 			}
 		},
-		// `handle` is dropped before the rest is spread into the HTTP body.
-		"sessions/prompt": async ({ session, handle: _handle, ...body }) => {
-			return (await api.prompt(session, body)) ?? null;
+		// One naming its handle goes only to the live session under it (D30). One
+		// naming none is an attach for the buffer that sent `token` as well:
+		// the server attaches the session if it must, and the snapshot that
+		// answers it, and the reply after it, are bound as `sessions/attach`
+		// binds its own; so is a refusal naming the session attached. Emacs
+		// gets the disposition alone, as from a prompt naming its handle.
+		"sessions/prompt": async ({ session, handle, token, ...body }) => {
+			if (handle !== undefined) return (await api.prompt(session, { ...body, handle })) ?? null;
+			const attach: Attaching = { token, seen: new Set(), done: false };
+			attaching.add(attach);
+			try {
+				await openStream();
+				if (attach.done) throw new Error("the prompt was given up before it was sent");
+				let reply: Awaited<ReturnType<typeof api.prompt>>;
+				try {
+					reply = await api.prompt(session, body);
+				} catch (error: unknown) {
+					const attached = error instanceof ApiClientError ? error.attached?.handle : undefined;
+					if (attached) await bind(attach, attached);
+					throw error;
+				}
+				if (reply?.session) await bind(attach, reply.session.handle);
+				return reply?.disposition === "handled" ? { disposition: "handled" } : null;
+			} finally {
+				attaching.delete(attach);
+			}
 		},
 		"sessions/abort": async ({ session }) => {
 			return (await api.abort(session)) ?? null;
@@ -779,7 +802,13 @@ function toRpcError(error: unknown): { code: number; message: string; data?: unk
 		return {
 			code: error.status,
 			message: error.message,
-			data: { status: error.status, error: error.code, detail: error.detail, ...(error.fork ? { fork: error.fork } : {}) },
+			data: {
+				status: error.status,
+				error: error.code,
+				detail: error.detail,
+				...(error.fork ? { fork: error.fork } : {}),
+				...(error.attached ? { attached: error.attached } : {}),
+			},
 		};
 	}
 	return { code: -32603, message: error instanceof Error ? error.message : String(error) };

@@ -80,6 +80,37 @@ export class ForkNotPromptedError extends Error {
 	}
 }
 
+/**
+ * A prompt named a handle the session it was sent to is no longer live
+ * under: closed, or closed and attached again under another (D30). Refused as
+ * a session not attached, and nothing is started for it.
+ */
+export class HandleEndedError extends Error {
+	constructor(
+		readonly ref: SessionRef,
+		readonly handle: string,
+	) {
+		super(`session ${sessionKey(ref)} is not attached under handle ${handle}`);
+		this.name = "HandleEndedError";
+	}
+}
+
+/**
+ * `attachAndSubmit` attached the session and then its prompt was refused.
+ * `cause` is that refusal, which the caller answers as it would on its own,
+ * naming `attached` beside it, so a client binds the view that sent it to the
+ * live session (D30).
+ */
+export class AttachedNotPromptedError extends Error {
+	constructor(
+		override readonly cause: unknown,
+		readonly attached: { ref: SessionRef; handle: string },
+	) {
+		super(cause instanceof Error ? cause.message : String(cause));
+		this.name = "AttachedNotPromptedError";
+	}
+}
+
 /** `setEffort` named a level the session's model does not list (OW-tewofe). */
 export class EffortNotOfferedError extends Error {
 	constructor(message: string) {
@@ -703,9 +734,9 @@ export class SessionManager {
 	 *    and its answer can be stale by the time a client acts on it whether or
 	 *    not it waits.
 	 *  - `attach`. It creates the adapter this queues on, and `#attaching`
-	 *    already collapses concurrent attaches. Only the attach route and
-	 *    `create` call it (D25, D30); every other route queues on an adapter
-	 *    already there, or is refused.
+	 *    already collapses concurrent attaches. Only the attach route,
+	 *    `create` and a prompt that names no handle call it (D25, D30); every
+	 *    other route queues on an adapter already there, or is refused.
 	 *  - `close` and `disposeAll`. Teardown is ordered by `#disposing`,
 	 *    `PendingStart.torndown` and `#terminate`, and waits behind nothing. A
 	 *    verb still queued when it runs reaches the disposed adapter, as an
@@ -724,11 +755,25 @@ export class SessionManager {
 	 * running waits for it, and the parent's queued verbs, ahead of it on the
 	 * same chain, fail first. A verb sent on the parent's ref after the fork
 	 * misses `#lookup`.
+	 *
+	 * A verb sent for a `handle` runs only on the container under it, and only
+	 * while that container is still in the table, at the call and again when
+	 * the verb runs; otherwise it is refused with `HandleEndedError` (D30). So a
+	 * close that lands while it waits in the queue refuses it, where without a
+	 * handle it reaches the disposed adapter, as above.
 	 */
-	async #serially<T>(ref: SessionRef, verb: (session: ManagedSession, adapter: BackendAdapter) => Promise<T>): Promise<T> {
+	async #serially<T>(
+		ref: SessionRef,
+		verb: (session: ManagedSession, adapter: BackendAdapter) => Promise<T>,
+		handle?: string,
+	): Promise<T> {
 		const session = this.#lookup(ref);
+		const ended = (): boolean =>
+			handle !== undefined && (session?.handle !== handle || this.#sessions.get(handle) !== session || !session.adapter);
+		if (ended()) throw new HandleEndedError(ref, handle as string);
 		if (!session?.adapter) throw new UnknownSessionError(ref);
 		const run = session.queue.then(() => {
+			if (ended()) throw new HandleEndedError(ref, handle as string);
 			const adapter = session.adapter;
 			if (!adapter) throw new UnknownSessionError(ref);
 			return verb(session, adapter);
@@ -748,8 +793,16 @@ export class SessionManager {
 	 * `onRefChanged`, like every other (`#rename`).
 	 * Resolves with the adapter's disposition, so the route can tell its
 	 * sender when no turn was started for the prompt (OW-dulipe).
+	 * A prompt sent for a `handle` goes only to the live session under it,
+	 * and is refused with `HandleEndedError` once that has ended (D30).
 	 */
-	submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorIdOf(ref)): Promise<PromptDisposition> {
+	submit(
+		ref: SessionRef,
+		text: string,
+		images?: ImageInput[],
+		priorError = this.errorIdOf(ref),
+		handle?: string,
+	): Promise<PromptDisposition> {
 		return this.#serially(ref, async (session, adapter) => {
 			this.markPrompted(session.ref);
 			// The session's error goes once the next prompt is admitted and has
@@ -787,7 +840,39 @@ export class SessionManager {
 				this.broadcaster.errorCleared(session);
 			}
 			return disposition;
-		});
+		}, handle);
+	}
+
+	/**
+	 * A prompt that names no handle, sent from a view that knows its session is
+	 * not running (D30): attach the session if it must, which starts its agent
+	 * where nobody holds it, then prompt the live session that attach landed
+	 * on, and answer its live summary with the prompt's disposition.
+	 *
+	 * The prompt is sent for that attach's handle, so a close and a re-attach
+	 * landing between the two refuse it rather than prompting a session the
+	 * sender never asked to start. `priorError` is the caller's to read before
+	 * the attach, which an error the attach's start raised is newer than
+	 * (OW-jokoto). A refusal after the attach is `AttachedNotPromptedError`,
+	 * naming the session; a start that fails is answered as its own failure,
+	 * and leaves nothing (`create`).
+	 */
+	async attachAndSubmit(
+		ref: SessionRef,
+		text: string,
+		images: ImageInput[] | undefined,
+		priorError: string | null,
+	): Promise<{ session: LiveSessionSummary; disposition: PromptDisposition }> {
+		await this.attach(ref);
+		const attached = this.summaryOf(ref);
+		if (!attached) throw new UnknownSessionError(ref);
+		try {
+			const disposition = await this.submit(ref, text, images, priorError, attached.handle);
+			return { session: this.summaryOf(ref) ?? attached, disposition };
+		} catch (cause) {
+			const held = this.summaryOf(ref);
+			throw new AttachedNotPromptedError(cause, { ref: held?.ref ?? attached.ref, handle: attached.handle });
+		}
 	}
 
 	/**

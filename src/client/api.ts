@@ -64,14 +64,17 @@ export class ApiClientError extends Error {
 	readonly detail: string | undefined;
 	/** The fork a fork-and-prompt created before it failed (`ApiError.fork`, D30). */
 	readonly fork: ApiError["fork"];
+	/** The session a prompt naming no handle attached before it was refused (`ApiError.attached`, D30). */
+	readonly attached: ApiError["attached"];
 
-	constructor(status: number, code?: string, detail?: string, fork?: ApiError["fork"]) {
+	constructor(status: number, code?: string, detail?: string, fork?: ApiError["fork"], attached?: ApiError["attached"]) {
 		super(detail ?? code ?? `HTTP ${status}`);
 		this.name = "ApiClientError";
 		this.status = status;
 		this.code = code;
 		this.detail = detail;
 		this.fork = fork;
+		this.attached = attached;
 	}
 }
 
@@ -89,7 +92,10 @@ export interface AgentpaneApi {
 	 * as it did before the outcome existed, so a caller or fake that ignores
 	 * it is unchanged; with the body for one the backend handled without
 	 * starting a turn for it, though an extension's own work may still arrive
-	 * on the stream (`PromptDisposition`, OW-dulipe).
+	 * on the stream (`PromptDisposition`, OW-dulipe). One that named no
+	 * handle always resolves with the body, naming the session it attached
+	 * (`PromptRequest.handle`, D30); a refusal after that attach rejects with
+	 * an `ApiClientError` whose `attached` names it.
 	 */
 	prompt(ref: SessionRef, body: PromptRequest): Promise<PromptResponse | void>;
 	editDraft(body: EditDraftRequest): Promise<EditDraftResponse>;
@@ -200,9 +206,10 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		async prompt(ref, body) {
 			const response = await send(ROUTES.prompt(ref), jsonRequest(body));
 			if (!isSuccessful(response.status)) throw await toApiClientError(response);
-			// The route answers a started prompt 202 with no body, and only a
-			// handled one 200 with a `PromptResponse`.
-			if (response.status === 200) return (await response.json()) as PromptResponse;
+			// The route answers a started prompt that named its handle 202 with no
+			// body, and a handled one, or any that named none, with a `PromptResponse`.
+			const text = await response.text();
+			if (text) return JSON.parse(text) as PromptResponse;
 		},
 		editDraft(body) {
 			return request(ROUTES.editDraft, jsonRequest(body), (response) => response as EditDraftResponse);
@@ -277,7 +284,7 @@ async function toApiClientError(response: Response): Promise<ApiClientError> {
 		return new ApiClientError(response.status);
 	}
 
-	if (isApiError(body)) return new ApiClientError(response.status, body.error, body.detail, body.fork);
+	if (isApiError(body)) return new ApiClientError(response.status, body.error, body.detail, body.fork, body.attached);
 	return new ApiClientError(response.status);
 }
 

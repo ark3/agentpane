@@ -124,6 +124,25 @@ describe("agentpane API", () => {
 		});
 	});
 
+	it("answers a started prompt that named no handle with the session it attached (D30)", async () => {
+		const live = { ...summary, status: "attached" as const, handle: "h1" };
+		const fetch = fetchRecorder(response({ disposition: "started", session: live }, 202));
+		const api = createAgentpaneApi({ fetch });
+
+		expect(await api.prompt(ref, { text: "hello" })).toEqual({ disposition: "started", session: live });
+	});
+
+	it("names the session on the error a prompt refused after its attach answers with (D30)", async () => {
+		const attached = { ref, handle: "h1" };
+		const fetch = fetchRecorder(response({ error: "backend_refused", detail: "no", attached }, 400));
+		const api = createAgentpaneApi({ fetch });
+
+		const error = await api.prompt(ref, { text: "hello" }).catch((e: unknown) => e);
+
+		expect(error).toBeInstanceOf(ApiClientError);
+		expect(error).toMatchObject({ status: 400, code: "backend_refused", detail: "no", attached });
+	});
+
 	it("round-trips a draft through the external editor", async () => {
 		const fetch = fetchRecorder(response({ text: "edited" }));
 		const api = createAgentpaneApi({ fetch });

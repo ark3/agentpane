@@ -243,6 +243,60 @@ describe("requests", () => {
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
 	});
 
+	it("sends a prompt's handle to the route, so it goes only to the live session the buffer holds (D30)", async () => {
+		const { io, calls } = start({ [`POST ${ROUTES.prompt(pi)}`]: () => new Response(null, { status: 202 }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/prompt", params: { session: pi, handle: "h1", text: "hello", priorErrorId: null } });
+		await io.until(1);
+		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: null });
+		expect(calls.find((call) => call.url === ROUTES.prompt(pi))?.body).toEqual({ text: "hello", priorErrorId: null, handle: "h1" });
+	});
+
+	/**
+	 * A prompt naming no handle attaches its session for the buffer that sent
+	 * the token (D30): the snapshot carrying it binds that buffer as an
+	 * attach's does (D25), and the reply goes after it, the disposition alone.
+	 */
+	it("answers a prompt naming no handle after the snapshot that attaches its session, carrying its token (D30)", async () => {
+		const reply = { disposition: "started", session: summary(pi, "h9") };
+		const { io, source, calls } = start({ [`POST ${ROUTES.prompt(pi)}`]: () => json(reply, 202) });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, text: "hello", priorErrorId: null, token: 7 } });
+		await tick();
+		expect(io.out).toEqual([]);
+		source.emit({ type: "snapshot", session: pi, handle: "h9", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		await io.until(2);
+
+		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { session: pi, handle: "h9", token: 7 } });
+		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 4, result: null });
+		expect(calls.find((call) => call.url === ROUTES.prompt(pi))?.body).toEqual({ text: "hello", priorErrorId: null });
+	});
+
+	it("answers a handled prompt naming no handle with the disposition alone (D30)", async () => {
+		const { io, source } = start({ [`POST ${ROUTES.prompt(pi)}`]: () => json({ disposition: "handled", session: summary(pi, "h9") }) });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, text: "/mcp", token: 7 } });
+		await tick();
+		source.emit({ type: "snapshot", session: pi, handle: "h9", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		await io.until(2);
+		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 4, result: { disposition: "handled" } });
+	});
+
+	it("carries the session a refused prompt naming no handle attached in the error's data, after its snapshot (D30)", async () => {
+		const attached = { ref: pi, handle: "h9" };
+		const { io, source } = start({
+			[`POST ${ROUTES.prompt(pi)}`]: () => json({ error: "backend_refused", detail: "not now", attached }, 400),
+		});
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, text: "hello", token: 7 } });
+		await tick();
+		expect(io.out).toEqual([]);
+		source.emit({ type: "snapshot", session: pi, handle: "h9", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		await io.until(2);
+		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { handle: "h9", token: 7 } });
+		expect(io.out[1]).toEqual({
+			jsonrpc: "2.0",
+			id: 4,
+			error: { code: 400, message: "not now", data: { status: 400, error: "backend_refused", detail: "not now", attached } },
+		});
+	});
+
 	it("forwards sessions/setName's session and name to the name route (D27, OW-jamaha)", async () => {
 		const { io, calls } = start({ [`POST ${ROUTES.name(pi)}`]: noContent });
 		io.send({ jsonrpc: "2.0", id: 7, method: "sessions/setName", params: { session: pi, handle: h(pi), name: "probe name" } });
@@ -1038,7 +1092,7 @@ describe("a handle's end (D26, OW-likopo)", () => {
 		io.notifications().map((message) => [message["method"], (message["params"] as { handle?: string } | undefined)?.handle]);
 
 	// A close by another client: the buffer still counts itself attached, so
-	// a prompt from it sends no attach, and the prompt route refuses it.
+	// a prompt from it names the ended handle, and the prompt route refuses it.
 	it("tells Emacs an attachment whose handle ended is detached, though a listing would fail, and says nothing more under it", async () => {
 		const { io, source, calls } = start({
 			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi, "h1") }),
@@ -1690,7 +1744,7 @@ describe("the handle (D24, OW-suyinu)", () => {
 		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: { ...summary(pi), handle } });
 	});
 
-	it("accepts the handle beside the session on a request, and forwards it into no HTTP body", async () => {
+	it("accepts the handle beside the session on a request, and forwards it into no HTTP body but a prompt's (D30)", async () => {
 		const { io, calls } = start({
 			[`POST ${ROUTES.prompt(pi)}`]: noContent,
 			[`POST ${ROUTES.fork(pi)}`]: () => json({ ref: codex }),
@@ -1701,7 +1755,7 @@ describe("the handle (D24, OW-suyinu)", () => {
 		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/setModel", params: { session: pi, handle, model: "m" } });
 		await io.until(3);
 
-		expect(calls.find((call) => call.url === ROUTES.prompt(pi))?.body).toEqual({ text: "hello" });
+		expect(calls.find((call) => call.url === ROUTES.prompt(pi))?.body).toEqual({ text: "hello", handle });
 		expect(calls.find((call) => call.url === ROUTES.fork(pi))?.body).toEqual({ entryId: "e1" });
 		expect(calls.find((call) => call.url === ROUTES.model(pi))?.body).toEqual({ model: "m" });
 	});
