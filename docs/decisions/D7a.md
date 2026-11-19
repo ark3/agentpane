@@ -10,7 +10,7 @@ Not `~/.codex/config.toml`: the `-c approval_policy=never` route `app-server` do
 
 Both policies go on **all three** thread-creation paths — `thread/start`, `thread/resume`, and `thread/fork`.
 `thread/fork` is not symmetry for its own sake.
-The OW-18 run found that a fork inherits the parent's `approvalPolicy` but **not** its `sandbox`: forking a `dangerFullAccess` parent with only `threadId` and `cwd` returned a thread reporting `workspaceWrite`.
+The OW-18 run, on `codex-cli 0.154.0` on 2026-09-11, found that a fork inherits the parent's `approvalPolicy` but **not** its `sandbox`: forking a `dangerFullAccess` parent with only `threadId` and `cwd` returned a thread reporting `workspaceWrite`.
 The copied `~/.codex/config.toml` sets no sandbox key, so that value is app-server's own default rather than the operator's configuration; the probe records the config's key names for exactly that reason.
 Passing both explicitly repairs that downgrade.
 
