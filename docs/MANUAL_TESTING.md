@@ -4953,6 +4953,7 @@ Whether agentpane renders the tool hold's errored assistant message, or the text
 Run on the home server (`may`) on 2026-11-13, local time `-05:00`, on `bun 1.4.0`, `pi 1.5.2` and `codex-cli 0.169.0`, with the `sbox` checkout at `4c19fad` (2026-10-28), from the `fix/loopback-api-token` branch as each commit named below left it.
 Every run but the owner's trial took place inside an agent session's own `sbox` (bwrap), whose tmpfs `~/.ssh` held a throwaway `agentpane-token` that a server started there created; none of those read or wrote the real `~/.ssh`.
 The owner's trial, the paragraph "The owner's trial, outside any sandbox", ran outside any sandbox against the real `~/.ssh`, and recorded no versions; those above are the agent session's.
+The work-laptop visit, the paragraph "The work laptop, on macOS", ran there on 2026-11-18 and records its own versions.
 In the agent session's runs every Pi ran on a throwaway `PI_CODING_AGENT_DIR` holding copies of `auth.json`, `models-store.json` and `settings.json`, and the Codex run on a throwaway `CODEX_HOME`; neither used the session's own state directory.
 D29 in `docs/DESIGN.md` is the decision these runs check.
 
@@ -5025,10 +5026,31 @@ Against `bun run build` and `PORT=56599 bun run start`, the same curl sweep as a
 `python3 resources/probes/loopback_token_repro_probe.py --base-url http://127.0.0.1:56599` exited 0 at 19:13:31, create and attach both 401, as did the same command through a nested `sbox --profile none --`; the mask probe again refused with exit 3.
 With `HOME` pointed at a temp directory, the token file was created at `600`, refused at `644` and refused with no `.ssh`, with the same messages as above.
 
-**Not yet run.**
-Everything on the work laptop and on macOS, which the owner does in one visit after the fix is merged and pushed: the mask probe, and the reproduction probe run through `sbox` against a server started outside it; the browser's paste prompt and the Emacs helper against the owner's own server, including after a rotation; and seatbelt's read denial under `~/.ssh` for this file and `link(2)` creating it, neither of which these runs have exercised.
-Nobody has yet looked at the token field now that it shows what was pasted; the owner's look at it is still to come.
-The owner's outputs from those steps are to be added to this section.
+**The visible field** (`f6fbe7e1`).
+On 2026-11-13, after the change to a text field, the owner ran the branch's worktree on the home server outside any sandbox, made the browser ask for the token again, and pasted it; the verdict was that the visible field looks good.
+
+**The work laptop, on macOS** (2026-11-18, local time `-05:00`).
+The owner ran the laptop's clone of `main`, pulled after the merge `96ce442b`, outside any sandbox, on macOS 26.7.3 (`25G342`), with the `sbox` checkout at `4c19fad` (2026-10-28), the same commit as the home server's; the versions of `bun` and the backends were not recorded.
+The server was started with `bun run start` outside a sandbox, and had created the token file on 2026-11-16; the group below is the corporate directory group, elided:
+
+```
+$ ls -ld ~/.ssh
+0 drwxr-xr-x  17 asa0717  <group>  544 Nov 18 12:31 /Users/asa0717/.ssh/
+$ ls -l ~/.ssh/agentpane-token
+8 -rw-------@ 1 asa0717  <group>  43 Nov 16 10:03 /Users/asa0717/.ssh/agentpane-token
+```
+
+So on macOS the `link(2)` creation left the file at `600`, owned by the user, 43 bytes, as on Linux.
+`python3 resources/probes/sbox_token_mask_probe.py`, with `sbox` at `/Users/asa0717/.local/bin/sbox`, printed, apart from `sbox`'s usual "Common mount path not found" warnings and its banner:
+
+```
+cat: /Users/asa0717/.ssh/agentpane-token: Operation not permitted
+PASS: the sandboxed command ran, and the read failed (exit 1); it did not return the token in /Users/asa0717/.ssh/agentpane-token.
+```
+
+That shows seatbelt's read denial: unlike bwrap's tmpfs on the home server, where the file is absent inside `sbox`, on macOS it is present and unreadable.
+`sbox --profile none -- python3 resources/probes/loopback_token_repro_probe.py --base-url http://127.0.0.1:4173`, run from the checkout against that server, sent `POST /api/sessions` and the session's `GET`, both answered 401 `{"error":"unauthorized","detail":"this API needs its bearer token"}`, and it printed `create: HTTP 401; attach: HTTP 401; passes: both refused`, with its workspace removed and session cleaned up.
+The owner reported that the browser's paste prompt and the Emacs helper both worked against that server, and that rotation, by deleting the file and restarting the server, worked too.
 
 ## What a WebSocket does under Bun and in Chromium (D31)
 
