@@ -39,9 +39,12 @@ export async function editDraft(text: string): Promise<string> {
 	try {
 		await writeFile(filename, text, "utf8");
 		// Deliberately outside D7's agent sandbox: this is the trusted operator's own editor.
+		// The one read above, handed down, since `sh` would read the variable
+		// again after the awaits.
 		const exitCode = await new Promise<number>((resolve, reject) => {
 			const child = spawn("sh", ["-c", 'exec $EDITOR "$1"', "agentpane-edit-draft", filename], {
 				stdio: "inherit",
+				env: { ...process.env, EDITOR: editor },
 			});
 			child.once("error", reject);
 			child.once("close", (code) => resolve(code ?? 1));
