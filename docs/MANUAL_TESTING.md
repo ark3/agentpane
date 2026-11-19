@@ -5142,6 +5142,23 @@ A batch Emacs loaded `agentpane.el`, started `bun run src/emacs/main.ts` against
 The requests sent after the preview were one `sessions/prompt`, with no `handle` and the `token` 1, and the `models/list` the attached buffer reads; no `sessions/attach` went out.
 The buffer counted as attaching while the prompt was out, and at its answer was attached under the server's handle, with the turn-done watch armed there and the draft cleared; the turn's end, with no window showing the buffer, raised the indicator.
 
+## The socket through agentpane's own binding (ark3/agentpane#52)
+
+Run on the home server on 2026-11-19, on its system `bun 1.4.0`, against this checkout once `src/server/index.ts` bound the socket beside the HTTP routes (D31).
+A throwaway Bun script, kept outside the repo, started `bun src/server/index.ts` on a free loopback port with the production composition, read the token through `loadApiToken`, and drove the socket with Bun's own `WebSocket`; no session was attached, so no backend took part.
+
+**The upgrade, the token and the frames behaved as the in-process tests say.**
+A plain GET of `/api/socket` answered 426.
+An upgrade with `Origin: https://evil.example` was refused before the handshake, which Bun's client reported as close 1002, "Expected 101 status code".
+A `hello` with a wrong token closed the socket 4401 with no frame sent.
+After a good `hello` and a `sessions/list` sent behind it, the frames were the hello's reply and then the listing's, 141 sessions under the repo's workspace.
+A frame that was not JSON closed the socket 4400, and SIGTERM to the server closed a socket that had said hello with 1001.
+
+**The size limits held at 32 MB in and 64 MB buffered out.**
+A 31 MB `sessions/list` frame was answered; a 33 MB one closed the socket, 1006, with no reply.
+On a bare `Bun.serve` with the same `websocket` options, one 40 MB frame from the server returned -1 from `send()` and arrived.
+Six 20 MB frames sent in one synchronous run returned -1 four times and then 0 twice, and the client received none of them: the socket was closed, 1006, rather than left open with frames dropped.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
