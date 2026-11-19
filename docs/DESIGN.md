@@ -168,7 +168,7 @@ The reasoning matters more than the conclusion: if a premise turns out to be wro
 - [D21](decisions/D21.md). A re-established event stream asks for a session listing, and so does the first open
 - [D22](decisions/D22.md). The Emacs client is a native `agentpane-mode` over a JSON-RPC helper agentpane owns, not `agent-shell` over an ACP shim
 - [D23](decisions/D23.md). A conversation's model and effort are read back from its store's last turn, never kept by agentpane
-- [D24](decisions/D24.md). A live session is keyed by a handle agentpane mints, its mutations run one at a time, and a hydrate merges history with the live stream
+- [D24](decisions/D24.md). A live session is keyed by a handle agentpane mints, its mutations run one at a time, a hydrate merges history with the live stream, and a guard that misses a case means the state has the wrong owner
 - [D25](decisions/D25.md). Only an attach starts an agent, and a client that loses its connection holds nothing live
 - [D26](decisions/D26.md). The server says a handle has ended, and the preview says a ref is gone
 - [D27](decisions/D27.md). A session's row carries a name, a mark and its fork parent, and both clients label it by one rule
