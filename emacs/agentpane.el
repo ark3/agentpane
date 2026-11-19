@@ -569,7 +569,7 @@ handling failing partway -- so a flag that FAILED clears never outlives the
 request that set it.
 UNSENT, when given, runs with no arguments when the request reached no
 backend -- the server refused it, the helper answering with an error
-whose `data' carries the HTTP `status' (`toRpcError' in
+whose `data' carries the server's `error' code (`toRpcError' in
 src/emacs/helper.ts), sending it exited non-locally, or it was sent
 nowhere, its helper having exited -- before FAILED, and whether or not
 this buffer is still live: for state the request set outside the
@@ -577,7 +577,7 @@ buffer, which a buffer killed meanwhile must not strand, as a prompt's
 turn-done watch is (`agentpane--send-prompt').  A timeout, the helper's
 death, and a non-local exit running CALLBACK run FAILED alone, the
 request having perhaps been carried out; so, with ERRED, does an error
-reply carrying no status -- the helper's own -32603, a failure of the
+reply carrying no code -- the helper's own -32603, a failure of the
 request's transport or its abort, or its -32601 -- which says nothing
 of whether the server acted on it (OW-hiliti).  At a death the teardown
 settles a prompt's watch itself (`agentpane--helper-gone').
@@ -589,8 +589,8 @@ turn-done watch (`agentpane--send-prompt', OW-kejire).
 ERRED, when given, runs after FAILED with the `data' of the error the
 helper answered with, where CALLBACK would have run with a result: in
 this buffer, if it is still live or a merge has passed it on, and,
-unless ALWAYS, has sent no later request since.  That `data' is the HTTP
-error's `status', `error' and `detail' (`toRpcError' in
+unless ALWAYS, has sent no later request since.  That `data' is the
+server's refusal, its `error' code and `detail' (`toRpcError' in
 src/emacs/helper.ts), nil for an error the
 helper raised itself, so a caller can tell one error code from another,
 as `agentpane-refetch' tells a preview's `gone' (D26); a timeout, the
@@ -603,7 +603,7 @@ still has in `agentpane--requests-out', whether or not jsonrpc.el
 answered it (`agentpane--helper-gone', OW-mopuyi).  The \"Server died\"
 jsonrpc.el's sentinel calls every pending request's error handler with
 is no reply and answers nothing: it carries the code -1, which the
-helper never writes, its errors carrying an HTTP status, -32601 or
+helper never writes, its errors carrying the server's code, -32601 or
 -32603 (`toRpcError' and `respond' in src/emacs/helper.ts; jsonrpc.el
 1.0.29's `jsonrpc--process-sentinel', read 2026-09-29).  That error was
 once the death's answer, and failed three ways: the sentinel does not
@@ -698,7 +698,7 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                  (when (funcall answer)
                    (message "agentpane: %s failed: %s" method (plist-get error :message))
                    ;; Only the server's refusal says it reached no backend.
-                   (when (and unsent (plist-get (plist-get error :data) :status))
+                   (when (and unsent (plist-get (plist-get error :data) :error))
                      (funcall unsent))
                    (let ((buffer (funcall here)))
                      (agentpane--failed buffer failed)
@@ -3301,7 +3301,7 @@ out, after any attach it waited on, so under the handle that attach
 answered; see `agentpane--watch-submit'.  A detached buffer's prompt arms
 it at the reply instead (`agentpane--send-detached').
 A prompt the server refuses, the helper
-answering with an error whose `data' carries the HTTP status, even one
+answering with an error whose `data' carries the server's code, even one
 it wrote as it died, takes back its claim on the watch, which goes when
 no other prompt claims it, as the browser's `watchAbandon' does for a
 refused POST: refused, the prompt started nothing, and the next turn on
@@ -3568,7 +3568,8 @@ buffer."
   (interactive)
   (with-current-buffer (agentpane--transcript)
     (agentpane--request 'sessions/abort
-                        (list :session (agentpane--ref agentpane--session))
+                        (list :session (agentpane--ref agentpane--session)
+                              :handle agentpane--handle)
                         (lambda (answer)
                           (setq agentpane--held-queued
                                 (append agentpane--held-queued (plist-get answer :queued) nil))
@@ -3605,7 +3606,8 @@ close can still go out with the compact unanswered."
        (agentpane--set-status
         (plist-put (copy-sequence agentpane--status) :compaction "requesting"))
        (agentpane--request 'sessions/compact
-                           (list :session (agentpane--ref agentpane--session))
+                           (list :session (agentpane--ref agentpane--session)
+                                 :handle agentpane--handle)
                            #'ignore t
                            (lambda ()
                              (when (equal (plist-get agentpane--status :compaction)
@@ -3730,6 +3732,7 @@ answered (OW-desufa)."
       (user-error "No turn error to dismiss"))
     (agentpane--request 'sessions/dismissError
                         (list :session (agentpane--ref agentpane--session)
+                              :handle agentpane--handle
                               :errorId agentpane--error-id)
                         #'ignore t)
     (agentpane--hold-error nil)))
@@ -3816,7 +3819,8 @@ daf5f52, not run live)."
       (agentpane--attached-then
        (lambda ()
          (agentpane--request 'sessions/setModel
-                             (list :session (agentpane--ref agentpane--session) :model model)
+                             (list :session (agentpane--ref agentpane--session)
+                                   :handle agentpane--handle :model model)
                              (lambda (_) (when then (funcall then)))
                              t))))))
 
@@ -3868,7 +3872,8 @@ rename from this buffer leaves behind."
     (agentpane--check-renamable)
     (with-current-buffer (agentpane--transcript)
       (agentpane--request 'sessions/setName
-                          (list :session (agentpane--ref agentpane--session) :name name)
+                          (list :session (agentpane--ref agentpane--session)
+                                :handle agentpane--handle :name name)
                           #'ignore t))))
 
 (defun agentpane-set-effort (effort)
@@ -3898,7 +3903,8 @@ status has named one yet, it prompts for nothing and says so."
       (agentpane--attached-then
        (lambda ()
          (agentpane--request 'sessions/setEffort
-                             (list :session (agentpane--ref agentpane--session) :effort effort)
+                             (list :session (agentpane--ref agentpane--session)
+                                   :handle agentpane--handle :effort effort)
                              #'ignore t))))))
 
 (defvar-local agentpane--forking nil
@@ -4026,7 +4032,8 @@ meanwhile (`agentpane--request'), as a fork's chain does.
 See `agentpane-fork'."
   (agentpane--refuse-closing failed)
   (agentpane--request
-   'sessions/forkPoints (list :session (agentpane--ref agentpane--session))
+   'sessions/forkPoints (list :session (agentpane--ref agentpane--session)
+                              :handle agentpane--handle)
    (lambda (answer)
      (let ((point (seq-find (lambda (point) (eql (plist-get point :index) index))
                             (plist-get answer :points))))
@@ -4069,7 +4076,7 @@ should a merge kill it meanwhile, which takes the fork over with
              ;; has usually emptied it already, and what that one takes out
              ;; is the prompt region's to receive once the edit has ended
              ;; (`agentpane-abort', OW-seleri).
-             (agentpane--request 'sessions/abort (list :session parent)
+             (agentpane--request 'sessions/abort (list :session parent :handle agentpane--handle)
                                  (lambda (_) (agentpane--fork-at parent point window failed then))
                                  'follow failed))
          (agentpane--fork-at parent point window failed then)))
@@ -4081,7 +4088,8 @@ buffer of its own, shown in WINDOW if it is still live; FAILED runs if the
 fork fails, and THEN, if given, in the fork's buffer once its attach has
 gone out.  See `agentpane-fork'."
   (agentpane--request
-   'sessions/fork (list :session parent :entryId (plist-get point :id))
+   'sessions/fork (list :session parent :handle agentpane--handle
+                        :entryId (plist-get point :id))
    (lambda (forked)
      (setq agentpane--forking nil)
      (when (equal (plist-get parent :backend) "pi")
@@ -4366,6 +4374,7 @@ cancelled while it was in flight."
     (agentpane--request
      'sessions/forkAndPrompt
      (append (list :session (agentpane--ref agentpane--session)
+                   :handle agentpane--handle
                    :index (plist-get edit :index) :text text :token token)
              (and images (list :images (vconcat images))))
      (lambda (answer)

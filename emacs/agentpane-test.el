@@ -847,7 +847,7 @@ pressed, as the browser's banner goes (OW-desufa)."
          nil 'session/error (list :session ref :message "Turn failed upstream" :errorId "e4"))
         (goto-char (point-max))
         (call-interactively (key-binding (kbd "C-c C-d")))
-        (should (equal sent `((sessions/dismissError :session ,ref :errorId "e4"))))
+        (should (equal sent `((sessions/dismissError :session ,ref :handle nil :errorId "e4"))))
         (should (equal (agentpane-test--indices) '(0 1)))
         (should-not (agentpane-test--warnings))))))
 
@@ -863,7 +863,7 @@ carried beside it (OW-jokoto)."
                :error "Turn failed upstream" :errorId "e6" :notices []))
         (goto-char (point-max))
         (call-interactively (key-binding (kbd "C-c C-d")))
-        (should (equal sent `((sessions/dismissError :session ,ref :errorId "e6"))))))))
+        (should (equal sent `((sessions/dismissError :session ,ref :handle nil :errorId "e6"))))))))
 
 (ert-deftest agentpane-test-error-cleared-drops-its-line ()
   "A `session/errorCleared' drops the turn error's line, as the server says
@@ -1755,10 +1755,10 @@ the error's `data', in the buffer that absorbed it (OW-larele).  Through
            (list :session canonical :handle "h1" :token 1 :nodes []))
           (should-not (buffer-live-p holder))
           (funcall (plist-get (cdr (assq 'test/refused calls)) :error-fn)
-                   '(:code 409 :message "Refused" :data (:status 409)))
+                   '(:code 409 :message "Refused" :data (:error "not_attached")))
           (funcall (plist-get (cdr (assq 'test/timeout calls)) :timeout-fn))
           (should (equal (reverse ran)
-                         `((failed ,previewing) (erred ,previewing (:status 409))
+                         `((failed ,previewing) (erred ,previewing (:error "not_attached"))
                            (failed ,previewing)))))))))
 
 (ert-deftest agentpane-test-fork-failing-after-a-merge-frees-the-survivor ()
@@ -2752,8 +2752,8 @@ nil to fail the request as `agentpane--request' fails one on an error
 that carries no `data', running its FAILED alone, or with a plist, the
 error's `data', to fail it so and then run its ERRED with that plist, as
 `agentpane--request' does for an error the helper answered with that
-`data', running its UNSENT first when the plist carries an HTTP `status',
-as the server's refusal does (OW-hiliti).  ERRED runs with nil for a
+`data', running its UNSENT first when the plist carries the server's `error'
+code, as the server's refusal does (OW-hiliti).  ERRED runs with nil for a
 failure by nil.  A reply runs the request's REPLIED with it before its
 CALLBACK (OW-kejire).  Either way the answer runs in the buffer that sent the
 request, or, for a request sent with ALWAYS `follow', the buffer that has
@@ -2829,7 +2829,7 @@ BODY made is killed afterwards."
                                                 (when (buffer-live-p to)
                                                   (with-current-buffer to
                                                     (funcall callback reply))))
-                                       (when (and unsent (plist-get ok :status))
+                                       (when (and unsent (plist-get ok :error))
                                          (funcall unsent))
                                        (when (buffer-live-p to)
                                          (with-current-buffer to
@@ -2879,7 +2879,7 @@ leaving this one holding its session, and on Codex still attached."
           (agentpane-test--goto-index 0)
           (agentpane-fork)
           (should (equal (assq 'sessions/fork sent)
-                         `(sessions/fork :session ,ref :entryId "turn-0")))
+                         `(sessions/fork :session ,ref :handle nil :entryId "turn-0")))
           (should (equal (assq 'sessions/attach sent)
                          `(sessions/attach :session ,forked :token 1)))
           (let ((fork-buffer (agentpane--buffer-for forked)))
@@ -2929,7 +2929,7 @@ since the compact route answers only for an attached session."
           (with-current-buffer buffer (agentpane-compact))
           (should (equal (reverse sent)
                          `((sessions/attach :session ,ref :token 2)
-                           (sessions/compact :session ,ref)))))))))
+                           (sessions/compact :session ,ref :handle nil)))))))))
 
 (ert-deftest agentpane-test-pi-fork-leaves-the-parent-as-it-was ()
   "A Pi fork leaves the parent buffer showing the transcript it showed, and
@@ -3120,7 +3120,7 @@ the message it is on."
           (setq sent nil)
           (agentpane-fork)
           (should (equal (assq 'sessions/fork sent)
-                         `(sessions/fork :session ,ref :entryId "entry-fix"))))))))
+                         `(sessions/fork :session ,ref :handle nil :entryId "entry-fix"))))))))
 
 (ert-deftest agentpane-test-fork-while-attaching-sends-nothing ()
   "A second `agentpane-fork' on a previewed buffer while the first one's
@@ -3308,7 +3308,7 @@ where the parent was (D30)."
             (agentpane-send)
             (should (equal (mapcar #'car (reverse sent)) '(sessions/forkPoints sessions/forkAndPrompt)))
             (let ((params (cdr (assq 'sessions/forkAndPrompt sent))))
-              (should (equal params `(:session ,ref :index 0 :text "Fix the bug properly"
+              (should (equal params `(:session ,ref :handle nil :index 0 :text "Fix the bug properly"
                                                :token ,agentpane--attach-tokens
                                                :images [(:mimeType "image/png" :base64 "AAAA")]))))
             (should (equal (agentpane-test--draft) ""))
@@ -3504,7 +3504,7 @@ moves that edit nowhere, and the send ends it."
   "An edit's send that fails naming no fork -- the helper's own error, the
 message no longer a fork point, or any refusal before the fork -- frees
 the buffer and leaves the edit open, so the next send goes out (D30)."
-  (dolist (how (list nil '(:status 409 :error "not_a_fork_point") '(:status 409 :error "not_attached")))
+  (dolist (how (list nil '(:error "not_a_fork_point") '(:error "not_attached")))
     (agentpane-test--editing "codex"
       (setq hold '(sessions/forkAndPrompt))
       (agentpane-send)
@@ -3520,7 +3520,7 @@ the buffer and leaves the edit open, so the next send goes out (D30)."
   "An edit's send that fails naming no fork leaves the edit open, the
 edited text in the prompt region and the draft it displaced still the
 edit's, so Cancel puts back exactly that draft, once (OW-hakeno)."
-  (dolist (how (list nil '(:status 409 :error "not_a_fork_point")))
+  (dolist (how (list nil '(:error "not_a_fork_point")))
     (agentpane-test--with-helper
       (agentpane-test--forking
           [(:id "turn-0" :text "Fix the bug" :index 0)]
@@ -3574,7 +3574,7 @@ not.  A Pi parent detaches, as after a fork that lands."
               (set-window-buffer window parent)
               (agentpane-send)
               (funcall (cdr (pop held))
-                       (list :status 400 :error "backend_refused"
+                       (list :error "backend_refused"
                              :fork (list :ref forked :handle handle)))
               (should-not agentpane--editing)
               (should-not agentpane--sending)
@@ -4130,7 +4130,7 @@ not attached (D30)."
     (setq hold '(sessions/prompt))
     (agentpane-send)
     (funcall (cdr (pop held))
-             (list :status 400 :error "backend_refused" :detail "not now"
+             (list :error "backend_refused" :detail "not now"
                    :attached (list :ref ref :handle "h1")))
     (should (agentpane--attached-p))
     (should (equal agentpane--handle "h1"))
@@ -4141,7 +4141,7 @@ not attached (D30)."
   (agentpane-test--sending-detached
     (setq hold '(sessions/prompt))
     (agentpane-send)
-    (funcall (cdr (pop held)) (list :status 500 :error "internal_error" :detail "would not start"))
+    (funcall (cdr (pop held)) (list :error "internal_error" :detail "would not start"))
     (should-not (agentpane--attached-p))
     (should-not agentpane--sending)
     (should-not agentpane--attaching)
@@ -4541,11 +4541,11 @@ One answered with any other error leaves the buffer and its text."
             (insert "half a thought")
             (agentpane-refetch))
           (should (equal sent `((sessions/preview :session ,ref))))
-          (funcall (cdr (pop held)) '(:status 500 :error "internal"))
+          (funcall (cdr (pop held)) '(:error "internal"))
           (should (buffer-live-p buffer))
           (should-not kill-ring)
           (with-current-buffer buffer (agentpane-refetch))
-          (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+          (funcall (cdr (pop held)) '(:error "gone"))
           (should-not (buffer-live-p buffer))
           (should (equal (car kill-ring) "half a thought")))
         (setq sent nil)
@@ -4553,7 +4553,7 @@ One answered with any other error leaves the buffer and its text."
         (let ((buffer (agentpane--buffer-for ref)))
           (should buffer)
           (should (equal sent `((sessions/preview :session ,ref))))
-          (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+          (funcall (cdr (pop held)) '(:error "gone"))
           (should-not (buffer-live-p buffer))
           (should (equal (car kill-ring) "half a thought")))))))
 
@@ -4569,7 +4569,7 @@ one's `gone', carried in the error's `data', kills it."
         (sent nil)
         (ids 0)
         (said nil)
-        (gone '(:code 404 :message "No such session" :data (:status 404 :error "gone"))))
+        (gone '(:code 404 :message "No such session" :data (:error "gone"))))
     (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t))
               ((symbol-function 'jsonrpc-async-request)
                (lambda (_connection method _params &rest args)
@@ -4581,7 +4581,7 @@ one's `gone', carried in the error's `data', kills it."
       (agentpane-test--with-session ref
         (agentpane-refetch)
         (funcall (cdr (pop sent))
-                 '(:code 500 :message "Boom" :data (:status 500 :error "internal")))
+                 '(:code 500 :message "Boom" :data (:error "internal")))
         (should (buffer-live-p buffer))
         (should (seq-some (lambda (text) (string-search "sessions/preview failed" text)) said))
         (agentpane-refetch)
@@ -4766,7 +4766,7 @@ it could only attach in vain (OW-vetebu).  The kill sends no
     (setq hold '(sessions/preview))
     (with-current-buffer buffer
       (agentpane-close-session))
-    (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+    (funcall (cdr (pop held)) '(:error "gone"))
     (should-not (buffer-live-p buffer))
     (should (equal (reverse sent)
                    `((sessions/close :session ,ref :handle "h1" :tokens [1])
@@ -4785,7 +4785,7 @@ empty region puts nothing there."
       (setq hold '(sessions/preview))
       (with-current-buffer buffer
         (agentpane-close-session))
-      (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+      (funcall (cdr (pop held)) '(:error "gone"))
       (should-not (buffer-live-p buffer))
       (should-not kill-ring))
     (agentpane-test--closing
@@ -4794,7 +4794,7 @@ empty region puts nothing there."
         (goto-char (point-max))
         (insert "half a thought")
         (agentpane-close-session))
-      (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+      (funcall (cdr (pop held)) '(:error "gone"))
       (should-not (buffer-live-p buffer))
       (should (equal kill-ring '("half a thought")))
       (should (seq-some (lambda (text) (string-search "kill ring" text)) said)))))
@@ -4817,7 +4817,7 @@ so that `yank' brings back what the user was writing (OW-watawe)."
         (goto-char (point-max))
         (insert " now")
         (agentpane-close-session))
-      (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+      (funcall (cdr (pop held)) '(:error "gone"))
       (should-not (buffer-live-p buffer))
       (should (equal kill-ring '("my draft" "Fix the bug now"))))))
 
@@ -4842,7 +4842,7 @@ text is on the kill ring, as it does when only the composer held any
           (goto-char (point-max))
           (insert "half a thought")
           (agentpane-close-session))
-        (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+        (funcall (cdr (pop held)) '(:error "gone"))
         (should-not (buffer-live-p buffer))
         (should-not (buffer-live-p composer))
         (should (equal kill-ring '("half a thought" "composed")))
@@ -4856,7 +4856,7 @@ text is on the kill ring, as it does when only the composer held any
                         agentpane--composer)))
         (with-current-buffer composer (insert "composed"))
         (with-current-buffer buffer (agentpane-close-session))
-        (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+        (funcall (cdr (pop held)) '(:error "gone"))
         (should-not (buffer-live-p composer))
         (should (equal kill-ring '("composed")))
         (should (string-search "is gone" (car said)))
@@ -4873,7 +4873,7 @@ good; its prompt region keeps its text."
       (goto-char (point-max))
       (insert "hello")
       (agentpane-close-session)
-      (funcall (cdr (pop held)) '(:status 500 :error "internal")))
+      (funcall (cdr (pop held)) '(:error "internal")))
     (should (buffer-live-p buffer))
     (with-current-buffer buffer
       (should-not agentpane--closing)
@@ -5083,7 +5083,7 @@ for one (`renameSession' in src/client/App.svelte)."
     (with-current-buffer buffer
       (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Bug hunt")))
         (call-interactively #'agentpane-rename-session))
-      (should (equal sent `((sessions/setName :session ,ref :name "Bug hunt"))))
+      (should (equal sent `((sessions/setName :session ,ref :handle "h1" :name "Bug hunt"))))
       (setq sent nil)
       (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "  \t")))
         (call-interactively #'agentpane-rename-session))
@@ -6047,7 +6047,7 @@ then ends unseen raises nothing (OW-lohavi)."
   (agentpane-test--submitting
     (setq hold '(sessions/prompt))
     (funcall submit)
-    (funcall (cdr (pop held)) '(:status 409 :error "turn_active"))
+    (funcall (cdr (pop held)) '(:error "turn_active"))
     (funcall status t)
     (funcall status nil)
     (should-not (agentpane-test--turn-done-p))))
@@ -6060,7 +6060,7 @@ prompt armed, so the turn's end still raises the indicator (OW-lohavi)."
     (funcall status t)
     (setq hold '(sessions/prompt))
     (funcall submit)
-    (funcall (cdr (pop held)) '(:status 409 :error "turn_active"))
+    (funcall (cdr (pop held)) '(:error "turn_active"))
     (funcall status nil)
     (should (agentpane-test--turn-done-p))))
 
@@ -6418,7 +6418,7 @@ so a turn from elsewhere that then ends unseen raises nothing.  Through
                 (should-not (buffer-live-p holder))
                 (funcall (plist-get prompt :error-fn)
                          '(:code 409 :message "Refused"
-                           :data (:status 409 :error "turn_active" :detail "Refused"))))
+                           :data (:error "turn_active" :detail "Refused"))))
               (funcall status t)
               (funcall status nil)
               (should-not (agentpane-test--turn-done-p)))))))))
@@ -6516,7 +6516,7 @@ does."
                     ('handled (funcall (plist-get held :success-fn) '(:disposition "handled")))
                     ('refused (funcall (plist-get held :error-fn)
                                        '(:code 409 :message "Refused"
-                                         :data (:status 409 :error "turn_active"
+                                         :data (:error "turn_active"
                                                 :detail "Refused")))))
                   (funcall (plist-get joined :success-fn) nil)))
               (funcall status t)
@@ -7241,7 +7241,7 @@ answered it, read as unsent."
     (agentpane-test--outliving
         (list (list :jsonrpc "2.0" :id 1
                     :error (list :code 404 :message "no such session"
-                                 :data (list :status 404 :error "gone"
+                                 :data (list :error "gone"
                                              :detail "no such session"))))
       (agentpane-test--noting
         (agentpane--request 'sessions/preview nil #'ignore nil
@@ -7271,7 +7271,7 @@ there, raising the indicator."
                     :params (list :session ref :handle "h1" :isStreaming t))
               (list :jsonrpc "2.0" :id 1
                     :error (list :code 409 :message "a turn is already running"
-                                 :data (list :status 409 :error "turn_active"
+                                 :data (list :error "turn_active"
                                              :detail "a turn is already running"))))
       (let ((dead (agentpane--connection)))
         (setq agentpane--attached dead
@@ -7290,7 +7290,7 @@ there, raising the indicator."
 
 (ert-deftest agentpane-test-transport-error-before-a-death-keeps-the-watch ()
   "A prompt the helper answers, just before it exits, with an error that
-carries no HTTP status -- its own -32603, as when the server was killed
+carries no server code -- its own -32603, as when the server was killed
 with the prompt's POST in flight and the socket's error reached the
 helper before the stream's drop -- keeps the turn-done watch it armed,
 since nothing says whether the server had admitted it: after a status
@@ -7634,7 +7634,7 @@ ends unseen, and return whether the indicator is raised."
                 ('timeout (funcall (plist-get prompt :timeout-fn)))
                 ('error (funcall (plist-get prompt :error-fn)
                                  '(:code 409 :message "Refused"
-                                   :data (:status 409 :error "turn_active" :detail "Refused"))))
+                                   :data (:error "turn_active" :detail "Refused"))))
                 ('transport (funcall (plist-get prompt :error-fn)
                                      '(:code -32603 :message "fetch failed")))
                 ('reply-exit (should-error (funcall (plist-get prompt :success-fn) nil))))))
@@ -7646,7 +7646,7 @@ ends unseen, and return whether the indicator is raised."
 (ert-deftest agentpane-test-turn-done-kept-for-a-prompt-that-timed-out ()
   "A prompt whose reply outlasts its timeout, whose reply's handling
 signals, or that the helper answers with an error of its own, carrying no
-HTTP status, may have been admitted, so its watch stands and the turn's
+server code, may have been admitted, so its watch stands and the turn's
 end raises the indicator; one the server refused, or that never went
 out, abandons it, as the browser's `watchAbandon' does (OW-dunahe,
 OW-hiliti)."
