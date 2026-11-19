@@ -5127,6 +5127,21 @@ The server's listing then held the one session, `attached`, `onDisk: false`; not
 `POST /api/sessions` for Pi with `cwd` a fresh `/var/tmp` directory holding no `sbox` marker and no git root answered 500 `internal_error`, whose detail carried Pi's exit and `sbox`'s `Could not detect workspace`.
 The listing after it held no session in that directory, none with a `virtual:` id, and no session with a handle.
 
+## A prompt names a handle or a ref, on Claude Code and through agentpane-mode (ark3/agentpane#49)
+
+Run on the home server on 2026-11-19, on `claude 2.1.328` with `haiku` named to the create route, `bun 1.4.0` and Emacs 31.1, against this checkout once both clients addressed their prompts so (D30).
+Two throwaway drivers, kept outside the repo, used `resources/probes/agentpane_live_support.py` to start `bun run start` on a free port after `bun run build`, and drove Claude Code against its own state directory, which was writable in this session; the runs left two small sessions in the repo's project there.
+
+**A handle that a close ended was refused across a re-attach, and a prompt naming no handle started its session.**
+A create answered 201 under the handle `…:1`, and a prompt naming it answered 202 with no body, its turn streaming and ending.
+After a close (204) and an attach of the same ref (200, under `…:2`), a prompt naming `…:1` answered 409 `not_attached`, its detail naming the handle, and in the 8s after it the stream carried nothing under `…:2`.
+After a second close, a prompt naming no handle answered 202 with `disposition: "started"` and the session `attached` under a new handle `…:3`; the snapshot under `…:3` was on the stream before the reply, and the turn streamed and ended.
+
+**agentpane-mode sent from a detached buffer in one request.**
+A batch Emacs loaded `agentpane.el`, started `bun run src/emacs/main.ts` against that server, previewed a closed Claude Code session with `agentpane-refetch`, and sent a prompt with `agentpane-send`.
+The requests sent after the preview were one `sessions/prompt`, with no `handle` and the `token` 1, and the `models/list` the attached buffer reads; no `sessions/attach` went out.
+The buffer counted as attaching while the prompt was out, and at its answer was attached under the server's handle, with the turn-done watch armed there and the draft cleared; the turn's end, with no window showing the buffer, raised the indicator.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.

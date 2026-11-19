@@ -338,7 +338,7 @@ describe("client controller", () => {
 		const selecting = controller.setModel("opaque/next");
 		expect(controller.getView()).toMatchObject({ busy: "idle", modelSetting: true });
 		await controller.submit();
-		expect(api.prompt).toHaveBeenCalledWith(ref, { text: "send while setting", priorErrorId: null });
+		expect(api.prompt).toHaveBeenCalledWith(ref, { text: "send while setting", priorErrorId: null, handle: h(ref) });
 		setting.resolve();
 		await selecting;
 	});
@@ -778,8 +778,27 @@ describe("client controller", () => {
 
 		await controller.submit();
 
-		expect(api.prompt).toHaveBeenCalledWith(ref, { text: "send me", priorErrorId: null });
+		expect(api.prompt).toHaveBeenCalledWith(ref, { text: "send me", priorErrorId: null, handle: h(ref) });
 		expect(controller.getView().draft).toBe("");
+	});
+
+	/**
+	 * The browser draws no composer on a detached session, so a prompt always
+	 * names the handle its view holds (D30): one whose handle a close ended,
+	 * the session attached again elsewhere, is refused rather than going to a
+	 * session this tab does not show.
+	 */
+	it("names the handle of the live view it was sent from (D30)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref, "handle-again"));
+		controller.setDraft("send me");
+
+		await controller.submit();
+
+		expect(api.prompt).toHaveBeenCalledWith(ref, { text: "send me", priorErrorId: null, handle: "handle-again" });
 	});
 
 	/**
@@ -963,7 +982,7 @@ describe("client controller", () => {
 		prompt.resolve();
 		await submitted;
 
-		expect(api.prompt).toHaveBeenCalledWith(ref, { text: "send me", priorErrorId: null });
+		expect(api.prompt).toHaveBeenCalledWith(ref, { text: "send me", priorErrorId: null, handle: h(ref) });
 		expect(controller.getView().draft).toBe("the next thing I want to say");
 	});
 
@@ -2255,7 +2274,7 @@ describe("client controller", () => {
 		controller.setDraft("try again");
 		await controller.submit();
 
-		expect(api.prompt).toHaveBeenCalledExactlyOnceWith(ref, { text: "try again", priorErrorId: "e7" });
+		expect(api.prompt).toHaveBeenCalledExactlyOnceWith(ref, { text: "try again", priorErrorId: "e7", handle: h(ref) });
 	});
 
 	it("drops an error a snapshot redrew after its dismissal once the server says it cleared it (OW-jopifu)", async () => {

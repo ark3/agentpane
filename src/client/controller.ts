@@ -1314,11 +1314,15 @@ export function createController(
 				publish({ error: "Select a session before submitting a prompt." });
 				return null;
 			}
-			// Only to a session this tab holds live (OW-forinu). The pane draws no
-			// composer anywhere else, but the controller does not lean on that: a
-			// session with no view here is one the server may no longer hold, and
-			// the prompt route answers that with 409 `not_attached` (D25).
+			// Only to a session this tab holds live (OW-forinu), naming the handle
+			// its view holds (D30). The pane draws no composer anywhere else, but
+			// the controller does not lean on that: a session with no view here is
+			// one the server may no longer hold, and a prompt naming no handle
+			// would start it. One whose handle has ended, a close crossing it, is
+			// refused 409 `not_attached` (D25).
 			if (paneMode(view) !== "live") return null;
+			const handle = handleOf(view.state, selected);
+			if (handle === undefined) return null;
 			// One prompt at a time (OW-nasofa): a second Ctrl-Enter, or Enter then a
 			// click on Send, while the POST is in flight would issue a second
 			// identical prompt -- the server admits it and what the backend does
@@ -1331,11 +1335,10 @@ export function createController(
 			// The error on screen as the user sends, which is the only one
 			// admitting this prompt may clear: one raised while it is on its way
 			// is not one they saw (OW-jokoto).
-			const handle = handleOf(view.state, selected);
-			const priorErrorId = handle === undefined ? null : (view.state.sessions[handle]?.errorId ?? null);
+			const priorErrorId = view.state.sessions[handle]?.errorId ?? null;
 			publish({ busy: "submitting", sending: true, error: null });
 			try {
-				const response = await api.prompt(selected, { text, priorErrorId });
+				const response = await api.prompt(selected, { text, priorErrorId, handle });
 				if (!disposed) {
 					// The request cleared the global error before starting. Leaving it
 					// untouched here preserves any newer failure from concurrent work.
