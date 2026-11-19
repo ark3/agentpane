@@ -607,3 +607,19 @@ A root it cannot list prints one line naming the error code and exits 1.
 
 Verified with: `pi 1.2.0` and `bun 1.4.0` on the home server, 2026-10-14, against its 13-file store.
 What it showed is `docs/MANUAL_TESTING.md`, "The home server's Pi store, surveyed for what agentpane does not read (OW-tadoju)".
+
+## `websocket_runtime_probe.ts`
+
+Proves: **what a WebSocket does under Bun as server and client, and in Chromium as a client, in the three places D31 leans on it**: whether a client handles one message per task, what closes an idle socket, and how large a frame passes each way under the default `websocket` options.
+It drives no agentpane code and no backend; every server in it is a bare `Bun.serve` on a free loopback port.
+
+```bash
+bun resources/probes/websocket_runtime_probe.ts [--chromium <binary>] [--skip-chromium]
+```
+
+Needs `bun install`, for `@playwright/test`, unless run with `--skip-chromium`.
+`--chromium` names the browser binary where Playwright's own download is not the one installed, as in a claude.ai cloud container (`docs/ENVIRONMENT.md`, "Cloud containers").
+Costs nothing and takes about 20s.
+
+Verified with: `bun 1.4.4` and Chromium 157.0.8103.78 in a claude.ai cloud container, 2026-11-19; not yet run on the home server.
+What it showed is `docs/MANUAL_TESTING.md`, "What a WebSocket does under Bun and in Chromium (D31)".
