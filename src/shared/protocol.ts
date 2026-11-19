@@ -437,6 +437,30 @@ export interface ForkResponse {
 	ref: SessionRef;
 }
 
+/**
+ * POST /api/sessions/:backend/:id/fork-and-prompt -- an edit of an earlier
+ * message, as one server operation (D30): fork the session at the user
+ * message whose transcript index is `index`, attach the fork, and prompt it
+ * with `text` and `images`. Only an attached session forks (D25), and an
+ * index no fork point names is refused 409 `not_a_fork_point` with nothing
+ * forked (D20). Admitting the prompt clears no turn error: nobody has seen
+ * one on the fork (`PromptRequest.priorErrorId`).
+ *
+ * Answered 201 once the fork's prompt is admitted. A failure after the fork
+ * exists answers as that failure would on its own, and its body names the
+ * fork (`ApiError.fork`); the server removes nothing (D17).
+ */
+export interface ForkAndPromptRequest {
+	index: number;
+	text: string;
+	images?: { mimeType: string; base64: string }[];
+}
+export interface ForkAndPromptResponse {
+	/** The fork's, under its own handle. The reply can precede the fork's snapshot, as an attach's can (D2). */
+	session: LiveSessionSummary;
+	disposition: PromptDisposition;
+}
+
 /** GET /api/sessions/:backend/:id/fork-points */
 export interface ForkPoint {
 	id: string;
@@ -543,6 +567,13 @@ export interface ModelsResponse {
 export interface ApiError {
 	error: string;
 	detail?: string;
+	/**
+	 * Only from fork-and-prompt, for a failure after the fork was created: the
+	 * fork, by its ref, and by its handle where it was attached, null where its
+	 * own start failed (D30). A client moves to it, so that sending again
+	 * prompts that fork rather than forking the parent a second time.
+	 */
+	fork?: { ref: SessionRef; handle: string | null };
 }
 
 // ---------------------------------------------------------------------------
@@ -569,6 +600,8 @@ export const ROUTES = {
 	fork: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork`,
 	forkPoints: (ref: SessionRef) =>
 		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork-points`,
+	forkAndPrompt: (ref: SessionRef) =>
+		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork-and-prompt`,
 	model: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/model`,
 	effort: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/effort`,
 	name: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/name`,

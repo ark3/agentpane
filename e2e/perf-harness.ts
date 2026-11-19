@@ -210,6 +210,10 @@ const api: AgentpaneApi = {
 		});
 		return { points, forkStopsTurn: false };
 	},
+	/** No client sends it yet (ark3/agentpane#51). */
+	async forkAndPrompt(): Promise<never> {
+		throw new Error("the browser sends no fork-and-prompt yet");
+	},
 	async fork(ref: SessionRef) {
 		return ref;
 	},

@@ -28,6 +28,8 @@ import {
 	type DismissErrorRequest,
 	type EditDraftRequest,
 	type EditDraftResponse,
+	type ForkAndPromptRequest,
+	type ForkAndPromptResponse,
 	type ForkRequest,
 	type ForkResponse,
 	type ForkPointsResponse,
@@ -48,6 +50,8 @@ import { Broadcaster, type SseClient } from "./broadcaster.ts";
 import type { AppDeps } from "./deps.ts";
 import {
 	EffortNotOfferedError,
+	ForkNotPromptedError,
+	NotAForkPointError,
 	ServerShuttingDownError,
 	SessionManager,
 	UnknownBackendError,
@@ -416,6 +420,24 @@ export function createApp(deps: AppDeps): App {
 				const response: ForkResponse = { ref: forked };
 				return json(response, 201);
 			}
+			case "fork-and-prompt": {
+				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
+				const body = await readJson<ForkAndPromptRequest>(request);
+				if (!body.ok) return body.response;
+				if (!Number.isInteger(body.value.index)) return error(400, "bad_request", "index must be an integer");
+				if (typeof body.value.text !== "string") return error(400, "bad_request", "text is required");
+				// Only an attached session forks (D25). The manager runs the rest as
+				// one operation (D30): the fork at the index, its attach and its
+				// prompt; a failure after the fork exists names it, in `fetch` below.
+				if (!sessions.isAttached(ref)) return notAttached(ref);
+				const response: ForkAndPromptResponse = await sessions.forkAndPrompt(
+					ref,
+					body.value.index,
+					body.value.text,
+					body.value.images,
+				);
+				return json(response, 201);
+			}
 			case "fork-points": {
 				if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
 				const adapter = sessions.adapterFor(ref);
@@ -536,17 +558,22 @@ export function createApp(deps: AppDeps): App {
 		async fetch(request: Request): Promise<Response> {
 			try {
 				return await handle(request);
-			} catch (err) {
-				if (err instanceof UnknownSessionError) return error(404, "not_found", err.message);
-				if (err instanceof UnknownBackendError) return error(501, "no_backend", err.message);
+			} catch (thrown) {
+				// A fork-and-prompt that failed after its fork was created answers as
+				// its cause would, and names the fork beside it (D30).
+				const err = thrown instanceof ForkNotPromptedError ? thrown.cause : thrown;
+				const fork = thrown instanceof ForkNotPromptedError ? thrown.fork : undefined;
+				if (err instanceof UnknownSessionError) return error(404, "not_found", err.message, fork);
+				if (err instanceof UnknownBackendError) return error(501, "no_backend", err.message, fork);
 				if (err instanceof ServerShuttingDownError) {
-					return error(503, "server_shutting_down", err.message);
+					return error(503, "server_shutting_down", err.message, fork);
 				}
-				if (err instanceof BackendRefusedError) return error(400, "backend_refused", err.message);
-				if (err instanceof EffortNotOfferedError) return error(400, "bad_request", err.message);
+				if (err instanceof BackendRefusedError) return error(400, "backend_refused", err.message, fork);
+				if (err instanceof EffortNotOfferedError) return error(400, "bad_request", err.message, fork);
+				if (err instanceof NotAForkPointError) return error(409, "not_a_fork_point", err.message, fork);
 				const ref = sessionRefFromRequest(request);
 				logError(`${ref ? `session ${sessionKey(ref)}: ` : ""}${describe(err)}`);
-				return error(500, "internal_error", describe(err));
+				return error(500, "internal_error", describe(err), fork);
 			}
 		},
 		sessions,
@@ -708,8 +735,12 @@ function accepted(): Response {
 	return new Response(null, { status: 202 });
 }
 
-function error(status: number, code: string, detail?: string): Response {
-	const body: ApiError = detail === undefined ? { error: code } : { error: code, detail };
+function error(status: number, code: string, detail?: string, fork?: ApiError["fork"]): Response {
+	const body: ApiError = {
+		error: code,
+		...(detail === undefined ? {} : { detail }),
+		...(fork === undefined ? {} : { fork }),
+	};
 	return json(body, status);
 }
 

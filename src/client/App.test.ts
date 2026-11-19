@@ -24,6 +24,10 @@ import { openToolCards } from "./render/tools/test-support.ts";
 
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
 const codexSession: SessionRef = { backend: "codex", id: "codex-1" };
+/** No client sends fork-and-prompt yet (ark3/agentpane#51), so a fake that is asked to fails the test. */
+const forkAndPromptUnsent = async (): Promise<never> => {
+	throw new Error("the browser sends no fork-and-prompt yet");
+};
 
 function summary(
 	ref: SessionRef,
@@ -505,6 +509,7 @@ describe("App", () => {
 			},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -956,6 +961,7 @@ describe("App", () => {
 				named.push({ ref, name });
 			},
 			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -2381,6 +2387,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -2819,6 +2826,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -3411,6 +3419,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => {
 				forks += 1;
 				if (forks > 1) throw new Error("fork refused");
@@ -3499,6 +3508,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
 			}),
@@ -3580,6 +3590,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -3645,6 +3656,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
 			}),
@@ -3741,6 +3753,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
 			}),
@@ -3826,6 +3839,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -3895,6 +3909,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -4114,6 +4129,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
 			}),
@@ -4201,6 +4217,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -4343,6 +4360,7 @@ describe("App", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -4879,6 +4897,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 			setEffort: async () => {},
 			setName: async () => {},
 			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
+			forkAndPrompt: forkAndPromptUnsent,
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {

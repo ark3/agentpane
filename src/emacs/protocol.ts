@@ -335,10 +335,23 @@
  *   "Stop and fork" reads (D30). Until ark3/agentpane#47 the result was the
  *   array alone.
  * - `sessions/fork` -- `{ session, entryId }` -> the fork's ref.
+ * - `sessions/forkAndPrompt` -- `{ session, index, text, images? }` ->
+ *   `{ session, disposition }`. An edit of an earlier message as one server
+ *   operation (D30): fork at the user message whose transcript `index` this
+ *   is, attach the fork, and prompt it with `text`, clearing no turn error.
+ *   `session` in the result is the fork's summary, with its `handle`, and
+ *   `disposition` is `"started"` or `"handled"`, as `sessions/prompt`'s.
+ *   An index no fork point names is refused with a 409 `not_a_fork_point`
+ *   and nothing forked. A failure after the fork was created carries `fork`,
+ *   `{ ref, handle }`, in its `data`, `handle` being `null` where the fork's
+ *   own start failed; the server removes nothing. Like `sessions/fork`, it
+ *   attaches nothing for this buffer: the fork's notifications come once a
+ *   `sessions/attach` of it is answered.
  *
  * Errors: a request the server refused answers with the HTTP status as
  * `code`, the server's text as `message`, and `{ status, error, detail }` as
- * `data`, `error` and `detail` being the HTTP body's own fields, so a
+ * `data`, `error` and `detail` being the HTTP body's own fields, and `fork`
+ * beside them where the body has one (`sessions/forkAndPrompt`), so a
  * mid-turn prompt rejection reads in Emacs as it does in the browser. Any
  * other failure is `-32603` with its message and no `data`, and says nothing
  * of whether the server acted on the request; an unknown method is
@@ -441,6 +454,8 @@ import type {
 	BackendId,
 	CreateSessionRequest,
 	DismissErrorRequest,
+	ForkAndPromptRequest,
+	ForkAndPromptResponse,
 	ForkPointsResponse,
 	ForkRequest,
 	ModelInfo,
@@ -473,6 +488,7 @@ export interface HelperRequests {
 	"sessions/setName": { params: SessionParams & { name: string }; result: null };
 	"sessions/forkPoints": { params: SessionParams; result: ForkPointsResponse };
 	"sessions/fork": { params: SessionParams & ForkRequest; result: SessionRef };
+	"sessions/forkAndPrompt": { params: SessionParams & ForkAndPromptRequest; result: ForkAndPromptResponse };
 }
 
 export interface SessionStatusParams {

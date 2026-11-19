@@ -13,8 +13,15 @@ import { FakeClaudeProcess } from "../adapters/claude/test-support.ts";
 import { CodexAdapterFactory } from "../adapters/codex/adapter.ts";
 import type { CodexProcess } from "../adapters/codex/process.ts";
 import { FakeCodexProcess } from "../adapters/codex/test-support.ts";
+import { BackendRefusedError } from "../adapters/types.ts";
 import { Broadcaster } from "./broadcaster.ts";
-import { SessionManager, UnknownBackendError, UnknownSessionError } from "./session-manager.ts";
+import {
+	ForkNotPromptedError,
+	NotAForkPointError,
+	SessionManager,
+	UnknownBackendError,
+	UnknownSessionError,
+} from "./session-manager.ts";
 import type { SessionIndex } from "./deps.ts";
 import {
 	deferred,
@@ -1211,6 +1218,160 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		await expect(sessions.fork({ backend: "pi", id: "/nope" }, "e1")).rejects.toBeInstanceOf(
 			UnknownSessionError,
 		);
+	});
+});
+
+describe("fork and prompt, one operation (D30)", () => {
+	const POINTS = [
+		{ id: "e1", text: "first", index: 0 },
+		{ id: "e3", text: "second", index: 2 },
+	];
+	const IMAGES = [{ mimeType: "image/png", base64: "AAAA" }];
+
+	/** A manager whose one backend, under `backend`, builds every adapter from `options`. */
+	function managing(backend: "pi" | "codex" | "claude", options: FakeAdapterOptions): { ref: SessionRef } {
+		const ref: SessionRef = backend === "pi" ? REF : { backend, id: "parent" };
+		index = new FakeSessionIndex([storedSession(ref, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { [backend]: new FakeAdapterFactory(options) } }, broadcaster);
+		return { ref };
+	}
+
+	// Codex's fork shape is "shared" since OW-lajehi; Claude Code's is the recipe.
+	it.each([
+		["claude", "claude"],
+		["codex", "shared"],
+	] as const)("forks a %s session (%s) at the point the index names, then attaches and prompts the fork, not the parent", async (backend, forkMode) => {
+		const { ref } = managing(backend, { forkPoints: POINTS, forkMode });
+		const parent = (await sessions.attach(ref)) as FakeAdapter;
+
+		const result = await sessions.forkAndPrompt(ref, 2, "again", IMAGES);
+
+		const forkRef: SessionRef = { backend, id: "parent#fork-e3" };
+		expect(parent.forks).toEqual(["e3"]);
+		expect(parent.prompts).toEqual([]);
+		expect((sessions.adapterFor(forkRef) as FakeAdapter).prompts).toEqual([{ text: "again", images: IMAGES }]);
+		expect(result).toEqual({ session: sessions.summaryOf(forkRef), disposition: "started" });
+		expect(result.session).toMatchObject({ ref: forkRef, status: "attached" });
+		expect(result.session.handle).not.toBe(sessions.summaryOf(ref)?.handle);
+	});
+
+	it("forks a Pi session onto a container of its own and prompts it there", async () => {
+		const { ref } = managing("pi", { forkPoints: POINTS });
+		await sessions.attach(ref);
+		const parentHandle = sessions.summaryOf(ref)?.handle;
+		const adapter = sessions.adapterFor(ref) as FakeAdapter;
+
+		const result = await sessions.forkAndPrompt(ref, 2, "again");
+
+		const forkRef: SessionRef = { backend: "pi", id: `${REF.id}#fork-e3` };
+		expect(adapter.forks).toEqual(["e3"]);
+		expect(adapter.prompts).toEqual([{ text: "again", images: undefined }]);
+		expect(result.session).toMatchObject({ ref: forkRef, status: "attached" });
+		expect(result.session.handle).not.toBe(parentHandle);
+		expect(sessions.isAttached(ref)).toBe(false);
+	});
+
+	it("answers a prompt the backend handled without a turn with that disposition", async () => {
+		const { ref } = managing("claude", { forkPoints: POINTS, forkMode: "claude", onSubmit: () => "handled" });
+		await sessions.attach(ref);
+
+		await expect(sessions.forkAndPrompt(ref, 0, "/command")).resolves.toMatchObject({ disposition: "handled" });
+	});
+
+	it("lets no other client's prompt reach the adapter between a Pi fork's stop and the fork", async () => {
+		const held = deferred();
+		const log: string[] = [];
+		const { ref } = managing("pi", { forkPoints: POINTS, onFork: () => held.promise });
+		await sessions.attach(ref);
+		const adapter = sessions.adapterFor(ref) as FakeAdapter;
+		const abort = adapter.abort.bind(adapter);
+		adapter.abort = async () => {
+			log.push("stop");
+			return abort();
+		};
+		const fork = adapter.fork.bind(adapter);
+		adapter.fork = async (entryId) => {
+			const forked = await fork(entryId);
+			log.push("fork");
+			return forked;
+		};
+		const submit = adapter.submit.bind(adapter);
+		adapter.submit = async (text, images) => {
+			log.push(`prompt ${text}`);
+			return submit(text, images);
+		};
+
+		const editing = sessions.forkAndPrompt(ref, 2, "the edit");
+		await settle();
+		expect(log).toEqual(["stop"]);
+		const other = sessions.submit(ref, "another client's prompt");
+		await settle();
+		held.resolve();
+
+		await editing;
+		// The other prompt was queued on the parent behind the operation, and the
+		// fork took the adapter off the parent: it fails as a prompt to any
+		// detached session does, and never reaches the fork (OW-suyinu).
+		await expect(other).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(log).toEqual(["stop", "fork", "prompt the edit"]);
+	});
+
+	it("refuses an index no fork point names, and forks nothing (D20)", async () => {
+		const { ref } = managing("codex", { forkPoints: POINTS, forkMode: "codex" });
+		const parent = (await sessions.attach(ref)) as FakeAdapter;
+
+		await expect(sessions.forkAndPrompt(ref, 1, "again")).rejects.toBeInstanceOf(NotAForkPointError);
+		expect(parent.forks).toEqual([]);
+		expect(parent.prompts).toEqual([]);
+		expect(sessions.liveRefs()).toEqual([ref]);
+	});
+
+	it("refuses a session with no live adapter, and forks nothing", async () => {
+		const { ref } = managing("codex", { forkPoints: POINTS, forkMode: "codex" });
+
+		await expect(sessions.forkAndPrompt(ref, 0, "again")).rejects.toBeInstanceOf(UnknownSessionError);
+	});
+
+	it("refuses a prompt the fork refused with an error naming the fork, and leaves the fork attached (D17)", async () => {
+		const options: FakeAdapterOptions = { forkPoints: POINTS, forkMode: "claude" };
+		const { ref } = managing("claude", options);
+		await sessions.attach(ref);
+		options.onSubmit = () => {
+			throw new BackendRefusedError("not now");
+		};
+
+		const error = await sessions.forkAndPrompt(ref, 0, "again").catch((e: unknown) => e);
+
+		const forkRef: SessionRef = { backend: "claude", id: "parent#fork-e1" };
+		expect(error).toBeInstanceOf(ForkNotPromptedError);
+		expect((error as ForkNotPromptedError).cause).toBeInstanceOf(BackendRefusedError);
+		expect((error as ForkNotPromptedError).fork).toEqual({ ref: forkRef, handle: sessions.summaryOf(forkRef)?.handle });
+		expect(sessions.isAttached(forkRef)).toBe(true);
+		expect(sessions.isAttached(ref)).toBe(true);
+	});
+
+	it("refuses a fork whose own start failed with an error naming the fork by its ref alone", async () => {
+		const options: FakeAdapterOptions = { forkPoints: POINTS, forkMode: "claude" };
+		const { ref } = managing("claude", options);
+		await sessions.attach(ref);
+		options.failStart = "fork would not start";
+
+		const error = await sessions.forkAndPrompt(ref, 0, "again").catch((e: unknown) => e);
+
+		expect(error).toBeInstanceOf(ForkNotPromptedError);
+		expect((error as ForkNotPromptedError).message).toBe("fork would not start");
+		expect((error as ForkNotPromptedError).fork).toEqual({ ref: { backend: "claude", id: "parent#fork-e1" }, handle: null });
+	});
+
+	it("clears no error the fork's start raised: nobody has seen one on the fork (OW-jokoto)", async () => {
+		const options: FakeAdapterOptions = { forkPoints: POINTS, forkMode: "claude" };
+		const { ref } = managing("claude", options);
+		await sessions.attach(ref);
+		options.onStart = (adapter) => adapter.emitError("resumed with a warning");
+
+		const { session } = await sessions.forkAndPrompt(ref, 0, "again");
+
+		expect(sessions.errorIdOf(session.ref)).not.toBeNull();
 	});
 });
 

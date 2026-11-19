@@ -12,6 +12,7 @@ import {
 	type AttachSessionResponse,
 	type CreateSessionResponse,
 	type EditDraftResponse,
+	type ForkAndPromptResponse,
 	type ForkPointsResponse,
 	type ForkResponse,
 	type ListSessionsResponse,
@@ -28,6 +29,7 @@ import {
 	assistantMessage,
 	deferred,
 	FakeAdapterFactory,
+	type FakeAdapterOptions,
 	FakeSessionIndex,
 	storedSession,
 	userMessage,
@@ -589,6 +591,10 @@ describe("only the attach route starts an agent (D25, OW-sirofi)", () => {
 		await expectRefused(await post(ROUTES.fork(PI_SESSION), { entryId: "e1" }));
 	});
 
+	it("refuses a fork-and-prompt of a session not attached", async () => {
+		await expectRefused(await post(ROUTES.forkAndPrompt(PI_SESSION), { index: 0, text: "again" }));
+	});
+
 	it("refuses the fork points of a session not attached", async () => {
 		await expectRefused(await get(ROUTES.forkPoints(PI_SESSION)));
 	});
@@ -1088,6 +1094,84 @@ describe("fork, model, and enumeration routes", () => {
 			detail: "Invalid entry ID for forking",
 		});
 		expect(refusing.forRef(PI_SESSION)?.forks).toEqual([]);
+	});
+
+	describe("fork-and-prompt, one request for an edit (D30)", () => {
+		const POINTS = [{ id: "e1", text: "first ask", index: 0 }];
+
+		it("forks at the index, prompts the fork, and answers 201 with the fork's summary and the disposition", async () => {
+			pi = new FakeAdapterFactory({ forkPoints: POINTS });
+			app = createTestApp({ index, adapters: { pi } });
+			await get(ROUTES.session(PI_SESSION));
+			const parentHandle = ((await (await get(ROUTES.session(PI_SESSION))).json()) as AttachSessionResponse).session.handle;
+
+			const response = await post(ROUTES.forkAndPrompt(PI_SESSION), { index: 0, text: "again" });
+
+			expect(response.status).toBe(201);
+			const body = (await response.json()) as ForkAndPromptResponse;
+			expect(body.disposition).toBe("started");
+			expect(body.session).toMatchObject({ ref: { backend: "pi", id: `${PI_SESSION.id}#fork-e1` }, status: "attached" });
+			expect(body.session.handle).not.toBe(parentHandle);
+			expect(pi.forRef(PI_SESSION)?.prompts).toEqual([{ text: "again" }]);
+		});
+
+		it("refuses 409 not_a_fork_point for an index no fork point names, and forks nothing (D20)", async () => {
+			pi = new FakeAdapterFactory({ forkPoints: POINTS });
+			app = createTestApp({ index, adapters: { pi } });
+			await get(ROUTES.session(PI_SESSION));
+
+			const response = await post(ROUTES.forkAndPrompt(PI_SESSION), { index: 3, text: "again" });
+
+			expect(response.status).toBe(409);
+			expect(((await response.json()) as ApiError).error).toBe("not_a_fork_point");
+			expect(pi.forRef(PI_SESSION)?.forks).toEqual([]);
+		});
+
+		it.each([
+			[{ text: "again" }, "index must be an integer"],
+			[{ index: 0.5, text: "again" }, "index must be an integer"],
+			[{ index: 0 }, "text is required"],
+		])("refuses 400 a body of %j", async (body, detail) => {
+			await get(ROUTES.session(PI_SESSION));
+			const response = await post(ROUTES.forkAndPrompt(PI_SESSION), body);
+			expect(response.status).toBe(400);
+			expect((await response.json()) as ApiError).toEqual({ error: "bad_request", detail });
+		});
+
+		it("answers a prompt the fork refused as that refusal, naming the fork beside it", async () => {
+			const options: FakeAdapterOptions = { forkPoints: POINTS, forkMode: "claude" };
+			app = createTestApp({ index, adapters: { claude: new FakeAdapterFactory(options) } });
+			await get(ROUTES.session(CLAUDE_SESSION));
+			options.onSubmit = () => {
+				throw new BackendRefusedError("not now");
+			};
+
+			const response = await post(ROUTES.forkAndPrompt(CLAUDE_SESSION), { index: 0, text: "again" });
+
+			const forkRef = { backend: "claude", id: `${CLAUDE_SESSION.id}#fork-e1` };
+			expect(response.status).toBe(400);
+			const body = (await response.json()) as ApiError;
+			expect(body).toEqual({ error: "backend_refused", detail: "not now", fork: { ref: forkRef, handle: expect.any(String) } });
+			// The fork stays, attached under the handle the refusal names (D17).
+			const attached = (await (await get(ROUTES.session(forkRef as SessionRef))).json()) as AttachSessionResponse;
+			expect(attached.session.handle).toBe(body.fork?.handle);
+		});
+
+		it("answers a fork whose start failed with that failure, naming the fork by its ref and no handle", async () => {
+			const options: FakeAdapterOptions = { forkPoints: POINTS, forkMode: "claude" };
+			app = createTestApp({ index, adapters: { claude: new FakeAdapterFactory(options) } });
+			await get(ROUTES.session(CLAUDE_SESSION));
+			options.failStart = "fork would not start";
+
+			const response = await post(ROUTES.forkAndPrompt(CLAUDE_SESSION), { index: 0, text: "again" });
+
+			expect(response.status).toBe(500);
+			expect((await response.json()) as ApiError).toEqual({
+				error: "internal_error",
+				detail: "fork would not start",
+				fork: { ref: { backend: "claude", id: `${CLAUDE_SESSION.id}#fork-e1` }, handle: null },
+			});
+		});
 	});
 
 	it("sets the model", async () => {
@@ -1635,6 +1719,7 @@ describe("token", () => {
 				["POST", ROUTES.compact(PI_SESSION)],
 				["DELETE", ROUTES.error(PI_SESSION), { errorId: "e1" }],
 				["POST", ROUTES.fork(PI_SESSION), { entryId: "e1" }],
+				["POST", ROUTES.forkAndPrompt(PI_SESSION), { index: 0, text: "again" }],
 				["GET", ROUTES.forkPoints(PI_SESSION)],
 				["POST", ROUTES.model(PI_SESSION), { model: "pi-1" }],
 				["POST", ROUTES.name(PI_SESSION), { name: "renamed" }],

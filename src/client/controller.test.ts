@@ -116,6 +116,10 @@ class FakeApi implements AgentpaneApi {
 	readonly setName = vi.fn(async (_session: SessionRef, _name: string) => {});
 	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPointsResponse> => ({ points: [], forkStopsTurn: false }));
 	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
+	/** No client sends it yet (ark3/agentpane#51). */
+	readonly forkAndPrompt = vi.fn(async (): Promise<never> => {
+		throw new Error("the browser sends no fork-and-prompt yet");
+	});
 	readonly dismissError = vi.fn(async (_session: SessionRef, _errorId: string) => {});
 	readonly listSessions = vi.fn(async (_cwd?: string): Promise<SessionSummary[]> => [summary(ref)]);
 	readonly connection: EventConnection = { close: vi.fn() };

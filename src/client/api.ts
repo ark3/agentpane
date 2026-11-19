@@ -8,6 +8,8 @@ import {
 	type DismissErrorRequest,
 	type EditDraftRequest,
 	type EditDraftResponse,
+	type ForkAndPromptRequest,
+	type ForkAndPromptResponse,
 	type ForkPointsResponse,
 	type ForkRequest,
 	type ForkResponse,
@@ -60,13 +62,16 @@ export class ApiClientError extends Error {
 	readonly status: number;
 	readonly code: string | undefined;
 	readonly detail: string | undefined;
+	/** The fork a fork-and-prompt created before it failed (`ApiError.fork`, D30). */
+	readonly fork: ApiError["fork"];
 
-	constructor(status: number, code?: string, detail?: string) {
+	constructor(status: number, code?: string, detail?: string, fork?: ApiError["fork"]) {
 		super(detail ?? code ?? `HTTP ${status}`);
 		this.name = "ApiClientError";
 		this.status = status;
 		this.code = code;
 		this.detail = detail;
+		this.fork = fork;
 	}
 }
 
@@ -125,6 +130,12 @@ export interface AgentpaneApi {
 	forkPoints(ref: SessionRef): Promise<ForkPointsResponse>;
 	/** Fork at `entryId`; the ref it answers with is the new conversation, and the original survives. */
 	fork(ref: SessionRef, body: ForkRequest): Promise<SessionRef>;
+	/**
+	 * Fork at the user message `body.index` names, attach the fork and prompt
+	 * it, as one server operation (D30). A refusal after the fork exists
+	 * rejects with an `ApiClientError` whose `fork` names it.
+	 */
+	forkAndPrompt(ref: SessionRef, body: ForkAndPromptRequest): Promise<ForkAndPromptResponse>;
 	/**
 	 * Dismiss the session's turn error on the server, so no later snapshot
 	 * brings it back (OW-bipume). `errorId` names the error dismissed, as the
@@ -232,6 +243,9 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		fork(ref, body) {
 			return request(ROUTES.fork(ref), jsonRequest(body), (response) => (response as ForkResponse).ref);
 		},
+		forkAndPrompt(ref, body) {
+			return request(ROUTES.forkAndPrompt(ref), jsonRequest(body), (response) => response as ForkAndPromptResponse);
+		},
 		dismissError(ref, errorId) {
 			const body: DismissErrorRequest = { errorId };
 			return requestNoContent(ROUTES.error(ref), { ...jsonRequest(body), method: "DELETE" });
@@ -263,7 +277,7 @@ async function toApiClientError(response: Response): Promise<ApiClientError> {
 		return new ApiClientError(response.status);
 	}
 
-	if (isApiError(body)) return new ApiClientError(response.status, body.error, body.detail);
+	if (isApiError(body)) return new ApiClientError(response.status, body.error, body.detail, body.fork);
 	return new ApiClientError(response.status);
 }
 

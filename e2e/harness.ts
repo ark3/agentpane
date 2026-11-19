@@ -279,6 +279,10 @@ const api: AgentpaneApi = {
 	 * action row, not the backends' fork asymmetry -- which is the server's, and
 	 * is settled live in MANUAL_TESTING.md.
 	 */
+	/** No client sends it yet (ark3/agentpane#51). */
+	async forkAndPrompt(): Promise<never> {
+		throw new Error("the browser sends no fork-and-prompt yet");
+	},
 	async fork() {
 		return REF;
 	},

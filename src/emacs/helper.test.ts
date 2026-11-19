@@ -195,6 +195,7 @@ describe("requests", () => {
 			[`POST ${ROUTES.effort(pi)}`]: noContent,
 			[`GET ${ROUTES.forkPoints(pi)}`]: () => json({ points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }),
 			[`POST ${ROUTES.fork(pi)}`]: () => json({ ref: codex }),
+			[`POST ${ROUTES.forkAndPrompt(pi)}`]: () => json({ session: { ref: codex, handle: "h9" }, disposition: "started" }, 201),
 			[`DELETE ${ROUTES.error(pi)}`]: noContent,
 		});
 		const requests = [
@@ -210,6 +211,7 @@ describe("requests", () => {
 			// The whole answer, so agentpane-mode can label a fork from it (D30).
 			["sessions/forkPoints", { session: pi }, { points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }],
 			["sessions/fork", { session: pi, entryId: "e1" }, codex],
+			["sessions/forkAndPrompt", { session: pi, index: 2, text: "again" }, { session: { ref: codex, handle: "h9" }, disposition: "started" }],
 			["sessions/dismissError", { session: pi, errorId: "e4" }, null],
 		] as const;
 		requests.forEach(([method, params], index) => io.send({ jsonrpc: "2.0", id: index + 10, method, params }));
@@ -223,6 +225,7 @@ describe("requests", () => {
 		expect(calls.find((call) => call.url === ROUTES.model(pi))?.body).toEqual({ model: "m" });
 		expect(calls.find((call) => call.url === ROUTES.effort(pi))?.body).toEqual({ effort: "low" });
 		expect(calls.find((call) => call.url === ROUTES.fork(pi))?.body).toEqual({ entryId: "e1" });
+		expect(calls.find((call) => call.url === ROUTES.forkAndPrompt(pi))?.body).toEqual({ index: 2, text: "again" });
 		// Named by id, so the server clears it only while it is still the one held,
 		// even against a newer one with the same text (OW-desufa, OW-jokoto).
 		expect(calls.find((call) => call.url === ROUTES.error(pi))?.body).toEqual({ errorId: "e4" });
@@ -267,6 +270,20 @@ describe("requests", () => {
 				message: "a turn is already running",
 				data: { status: 409, error: "turn_active", detail: "a turn is already running" },
 			},
+		});
+	});
+
+	it("carries the fork a refused fork-and-prompt names in the error's data (D30)", async () => {
+		const fork = { ref: codex, handle: "h9" };
+		const { io } = start({
+			[`POST ${ROUTES.forkAndPrompt(pi)}`]: () => json({ error: "backend_refused", detail: "not now", fork }, 400),
+		});
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, handle: h(pi), index: 0, text: "again" } });
+		await io.until(1);
+		expect(io.response(4)).toEqual({
+			jsonrpc: "2.0",
+			id: 4,
+			error: { code: 400, message: "not now", data: { status: 400, error: "backend_refused", detail: "not now", fork } },
 		});
 	});
 

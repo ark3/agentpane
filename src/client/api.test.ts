@@ -196,6 +196,30 @@ describe("agentpane API", () => {
 		});
 	});
 
+	it("forks and prompts in one request, answering the fork's summary and the prompt's disposition (D30)", async () => {
+		const fork = { ...summary, ref: { backend: "pi" as const, id: "fork-1" }, handle: "h2" };
+		const fetch = fetchRecorder(response({ session: fork, disposition: "started" }, 201));
+		const api = createAgentpaneApi({ fetch });
+		const body = { index: 2, text: "again", images: [{ mimeType: "image/png", base64: "AAAA" }] };
+
+		expect(await api.forkAndPrompt(ref, body)).toEqual({ session: fork, disposition: "started" });
+		expect(fetch).toHaveBeenCalledWith(ROUTES.forkAndPrompt(ref), {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	});
+
+	it("names the fork on the error a fork-and-prompt refused after forking answers with (D30)", async () => {
+		const fork = { ref: { backend: "pi" as const, id: "fork-1" }, handle: "h2" };
+		const fetch = fetchRecorder(response({ error: "backend_refused", detail: "no", fork }, 400));
+		const api = createAgentpaneApi({ fetch });
+
+		const error = await api.forkAndPrompt(ref, { index: 0, text: "again" }).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(ApiClientError);
+		expect(error).toMatchObject({ status: 400, code: "backend_refused", detail: "no", fork });
+	});
+
 	it("dismisses a session's error by DELETE, naming the error it dismisses (OW-bipume)", async () => {
 		const fetch = fetchRecorder(new Response(null, { status: 204 }));
 		const api = createAgentpaneApi({ fetch });
@@ -349,6 +373,7 @@ const everyRequest: Record<Exclude<keyof AgentpaneApi, "connect">, (api: Agentpa
 	setName: (api) => api.setName(ref, "a name"),
 	forkPoints: (api) => api.forkPoints(ref),
 	fork: (api) => api.fork(ref, { entryId: "entry-1" }),
+	forkAndPrompt: (api) => api.forkAndPrompt(ref, { index: 0, text: "again" }),
 	dismissError: (api) => api.dismissError(ref, "e1"),
 };
 

@@ -57,6 +57,29 @@ export class UnknownSessionError extends Error {
 	}
 }
 
+/** `forkAndPrompt` named a transcript index no fork point of the session names (D20). */
+export class NotAForkPointError extends Error {
+	constructor(readonly index: number) {
+		super(`the message at index ${index} is not a fork point of this session`);
+		this.name = "NotAForkPointError";
+	}
+}
+
+/**
+ * `forkAndPrompt` created the fork and then failed: its attach or its prompt
+ * was refused. `cause` is that refusal, which the caller answers as it would
+ * on its own, naming `fork` beside it; the fork stays (D17, D30).
+ */
+export class ForkNotPromptedError extends Error {
+	constructor(
+		override readonly cause: unknown,
+		readonly fork: { ref: SessionRef; handle: string | null },
+	) {
+		super(cause instanceof Error ? cause.message : String(cause));
+		this.name = "ForkNotPromptedError";
+	}
+}
+
 /** `setEffort` named a level the session's model does not list (OW-tewofe). */
 export class EffortNotOfferedError extends Error {
 	constructor(message: string) {
@@ -638,7 +661,8 @@ export class SessionManager {
 	/**
 	 * Run one of a session's mutating verbs once every verb queued on it before
 	 * has settled (D24, OW-sewewe). Six verbs join: `submit`, `fork`,
-	 * `setModel`, `setEffort`, `setName` and `compact`. Every route is a
+	 * `setModel`, `setEffort`, `setName` and `compact`, and `forkAndPrompt`
+	 * joins as a fork and then as a `submit` on the fork. Every route is a
 	 * concurrent `Bun.serve` handler and any number of clients can drive one
 	 * session, so without this two of them overlap on one adapter -- two
 	 * `setModel`s sharing Pi's one `settingModel` flag (OW-woyifu), or an
@@ -792,16 +816,64 @@ export class SessionManager {
 	 * id must not become a name for the fork (`#forkOnto`, OW-kekoji).
 	 */
 	fork(ref: SessionRef, entryId: string): Promise<SessionRef> {
-		return this.#serially(ref, async (_session, adapter) => {
-			const forked = await adapter.fork(entryId);
-			if (forked.start) {
-				this.#pendingForks.set(sessionKey(forked.ref), {
-					start: forked.start,
-					...(forked.adapter ? { adapter: forked.adapter } : {}),
-				});
-			}
-			return forked.ref;
+		return this.#serially(ref, (_session, adapter) => this.#forkOn(adapter, entryId));
+	}
+
+	/** The body of a queued fork: fork, and park what the fork's attach will need. */
+	async #forkOn(adapter: BackendAdapter, entryId: string): Promise<SessionRef> {
+		const forked = await adapter.fork(entryId);
+		if (forked.start) {
+			this.#pendingForks.set(sessionKey(forked.ref), {
+				start: forked.start,
+				...(forked.adapter ? { adapter: forked.adapter } : {}),
+			});
+		}
+		return forked.ref;
+	}
+
+	/**
+	 * An edit of an earlier message, as one operation (D30): fork at the user
+	 * message whose transcript index is `index`, attach the fork, and prompt it.
+	 *
+	 * The index is resolved against the adapter's fork points and the fork is
+	 * made in one item on the parent's queue (`#serially`), so nothing queued
+	 * on the session lands between the two, nor between the stop a Pi fork
+	 * makes and the fork itself (`BackendAdapter.forkStopsTurn`). An index no
+	 * point names is refused with nothing forked (D20).
+	 *
+	 * The attach and the prompt come after that item has settled, not inside
+	 * it: a Pi fork's container shares the parent's queue (`#forkOnto`), so a
+	 * prompt queued inside the item would wait on the item itself.
+	 *
+	 * Admitting the prompt clears no turn error, since nobody has seen one on
+	 * the fork: one its start raised stays up (OW-jokoto). A failure after the
+	 * fork exists is `ForkNotPromptedError`, naming it; nothing is removed
+	 * (D17).
+	 */
+	async forkAndPrompt(
+		ref: SessionRef,
+		index: number,
+		text: string,
+		images?: ImageInput[],
+	): Promise<{ session: LiveSessionSummary; disposition: PromptDisposition }> {
+		const forked = await this.#serially(ref, async (_session, adapter) => {
+			const point = (await adapter.listForkPoints()).find((candidate) => candidate.index === index);
+			if (!point) throw new NotAForkPointError(index);
+			return this.#forkOn(adapter, point.id);
 		});
+		try {
+			await this.attach(forked);
+			const disposition = await this.submit(forked, text, images, null);
+			const session = this.summaryOf(forked);
+			if (!session) throw new UnknownSessionError(forked);
+			return { session, disposition };
+		} catch (cause) {
+			const held = this.summaryOf(forked);
+			throw new ForkNotPromptedError(cause, {
+				ref: held?.ref ?? this.canonicalRef(forked),
+				handle: held?.status === "attached" ? held.handle : null,
+			});
+		}
 	}
 
 	setModel(ref: SessionRef, model: string): Promise<void> {

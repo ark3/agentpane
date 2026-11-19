@@ -691,6 +691,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		"sessions/forkPoints": ({ session }) => api.forkPoints(session),
 		"sessions/fork": ({ session, handle: _handle, ...body }) => api.fork(session, body),
+		"sessions/forkAndPrompt": ({ session, handle: _handle, ...body }) => api.forkAndPrompt(session, body),
 	};
 
 	const respond = async (request: JsonRpcRequest): Promise<void> => {
@@ -731,7 +732,7 @@ function toRpcError(error: unknown): { code: number; message: string; data?: unk
 		return {
 			code: error.status,
 			message: error.message,
-			data: { status: error.status, error: error.code, detail: error.detail },
+			data: { status: error.status, error: error.code, detail: error.detail, ...(error.fork ? { fork: error.fork } : {}) },
 		};
 	}
 	return { code: -32603, message: error instanceof Error ? error.message : String(error) };
