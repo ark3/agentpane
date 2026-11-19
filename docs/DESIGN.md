@@ -174,6 +174,8 @@ The reasoning matters more than the conclusion: if a premise turns out to be wro
 - [D27](decisions/D27.md). A session's row carries a name, a mark and its fork parent, and both clients label it by one rule
 - [D28](decisions/D28.md). The event stream owns session state, and a reply only ends its request
 - [D29](decisions/D29.md). Every `/api` route but the event stream needs a bearer token, and every request must name a loopback host
+- [D30](decisions/D30.md). A chain of requests that must all complete is one server operation
+- [D31](decisions/D31.md). One WebSocket carries commands, replies and events
 
 ## The backend adapter contract
 

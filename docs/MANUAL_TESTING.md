@@ -5030,6 +5030,35 @@ Everything on the work laptop and on macOS, which the owner does in one visit af
 Nobody has yet looked at the token field now that it shows what was pasted; the owner's look at it is still to come.
 The owner's outputs from those steps are to be added to this section.
 
+## What a WebSocket does under Bun and in Chromium (D31)
+
+Run in a claude.ai cloud container on 2026-11-19, on `bun 1.4.4` and Chromium 157.0.8103.78 (the container's `chromium_headless_shell-1243`), with `bun resources/probes/websocket_runtime_probe.ts --chromium <that binary>`.
+Not run on the home server, whose Bun was 1.4.0 when last recorded, so each line below is to be read again there before D31's build leans on it.
+No agentpane code and no backend took part: each server was a bare `Bun.serve` on a free loopback port.
+
+**Both clients handled one message per task.**
+The server wrote six frames in one synchronous run, the third of 200 kB.
+In each `message` handler the client started a `then` and an `async` function awaiting twice, and logged all three.
+In Bun's client and in Chromium's the log read `msg0, then0, await0, msg1, ...` through `msg5`: every continuation a message started ran before the next message's handler.
+
+**Default pings kept an idle socket open, and `Bun.serve`'s own `idleTimeout` did not reach it.**
+With `websocket: { idleTimeout: 4 }` and `sendPings` left at its default, a client that sent nothing was still open after 14s, and the server's `pong` handler had run three times.
+With `sendPings: false` beside it, the same client was closed with 1006 after 8.0s.
+With `Bun.serve`'s `idleTimeout: 3` and the `websocket` options at their defaults, the client was still open after 14s and the server saw no pong.
+
+**Frames, under the default `websocket` options.**
+
+| Size | Server to client | Client to server |
+|---|---|---|
+| 1 MB | `send()` returned 1048576; received | received |
+| 15 MB | `send()` returned -1; received | received |
+| 17 MB | `send()` returned -1; received | the server closed the socket, 1006 "Received too big message" |
+| 40 MB | `send()` returned -1; received | closed, the same |
+| 130 MB | `send()` returned -1; the client saw close 1006 | closed, the same |
+
+So an inbound frame past 16 MB costs the whole connection, not that one request, and an outbound one somewhere between 40 MB and 130 MB does too.
+Which end refused the 130 MB outbound frame was not determined.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
