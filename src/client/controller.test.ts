@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
 	AbortResponse,
 	BackendId,
-	ForkPoint,
+	ForkPointsResponse,
 	ForkRequest,
 	LiveSessionSummary,
 	ModelInfo,
@@ -114,7 +114,7 @@ class FakeApi implements AgentpaneApi {
 	readonly setModel = vi.fn(async (_session: SessionRef, _model: string) => {});
 	readonly setEffort = vi.fn(async (_session: SessionRef, _effort: string) => {});
 	readonly setName = vi.fn(async (_session: SessionRef, _name: string) => {});
-	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPoint[]> => []);
+	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPointsResponse> => ({ points: [], forkStopsTurn: false }));
 	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
 	readonly dismissError = vi.fn(async (_session: SessionRef, _errorId: string) => {});
 	readonly listSessions = vi.fn(async (_cwd?: string): Promise<SessionSummary[]> => [summary(ref)]);
@@ -715,7 +715,7 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		const editing = deferred<{ text: string }>();
 		api.editDraft.mockReturnValue(editing.promise);
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -1980,7 +1980,7 @@ describe("client controller", () => {
 	// answers `gone`.
 	it("clears the selection onto the startup view when the detached fork has run no turn", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		api.attach.mockImplementation(async (session: SessionRef) =>
 			sessionKey(session) === sessionKey(forkedRef) ? { ...summary(session), onDisk: false } : summary(session),
 		);
@@ -2382,11 +2382,11 @@ describe("client controller", () => {
 	 */
 	it("forks at the point naming that transcript index and only then prompts, into the ref the fork returned (OW-hezidi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([
+		api.forkPoints.mockResolvedValue({ points: [
 			{ id: "turn-1", text: "same words", index: 0 },
 			{ id: "turn-2", text: "same words", index: 2 },
 			{ id: "turn-3", text: "same words", index: 4 },
-		]);
+		], forkStopsTurn: false });
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2407,7 +2407,7 @@ describe("client controller", () => {
 	/** The fork's prompt answers the same two ways a plain one does (OW-yobayi). */
 	it("resolves a landed fork with its prompt's disposition (OW-yobayi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2438,10 +2438,10 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		// T1: prompt at 0, reply at 1, steered prompt at 2, reply at 3.
 		// T2: prompt at 4, reply at 5. Two turns, three user messages.
-		api.forkPoints.mockResolvedValue([
+		api.forkPoints.mockResolvedValue({ points: [
 			{ id: "turn-1", text: "first", index: 0 },
 			{ id: "turn-2", text: "second", index: 4 },
-		]);
+		], forkStopsTurn: false });
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2465,11 +2465,11 @@ describe("client controller", () => {
 		// Three turns, so a positional lookup finds *something* at every position
 		// a click can produce -- which is the silent half of the defect: no error,
 		// and a fork at a turn the user never pointed at.
-		api.forkPoints.mockResolvedValue([
+		api.forkPoints.mockResolvedValue({ points: [
 			{ id: "turn-1", text: "first", index: 0 },
 			{ id: "turn-2", text: "second", index: 4 },
 			{ id: "turn-3", text: "third", index: 6 },
-		]);
+		], forkStopsTurn: false });
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2486,7 +2486,7 @@ describe("client controller", () => {
 
 	it("ends selected and attached to a Codex-shaped fork, which renames nothing (OW-hezidi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2511,7 +2511,7 @@ describe("client controller", () => {
 	 */
 	it("stops a running Pi turn before forking it (D15, OW-bakosi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2535,7 +2535,7 @@ describe("client controller", () => {
 		async (backend) => {
 			const parent: SessionRef = { backend, id: `${backend}-parent` };
 			const api = new FakeApi();
-			api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+			api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 			const controller = createController(api);
 			await controller.start();
 			await controller.select(parent);
@@ -2561,7 +2561,7 @@ describe("client controller", () => {
 	it("lands a fork whose selection was overtaken by a click mid-flight, without moving the user (D17, OW-miyemo)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		const forking = deferred<SessionRef>();
 		api.fork.mockReturnValueOnce(forking.promise);
 		const controller = createController(api);
@@ -2592,7 +2592,7 @@ describe("client controller", () => {
 	it("lands a fork whose selection was overtaken while the abort was in flight (D17, OW-miyemo)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		const aborting = deferred<void>();
 		api.abort.mockReturnValueOnce(aborting.promise);
 		const controller = createController(api);
@@ -2619,7 +2619,7 @@ describe("client controller", () => {
 	it("lands a fork whose selection was overtaken while fork points were being read (D17, OW-miyemo)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		const points = deferred<ForkPoint[]>();
+		const points = deferred<ForkPointsResponse>();
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -2634,7 +2634,7 @@ describe("client controller", () => {
 		await settle();
 		expect(api.forkPoints).toHaveBeenCalledWith(ref);
 		await controller.select(other);
-		points.resolve([{ id: "turn-1", text: "first", index: 0 }]);
+		points.resolve({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 
 		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-1" });
@@ -2654,7 +2654,7 @@ describe("client controller", () => {
 	it("publishes fork points for a session renamed while the refresh was in flight (OW-lizohe)", async () => {
 		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
 		const api = new FakeApi();
-		const points = deferred<ForkPoint[]>();
+		const points = deferred<ForkPointsResponse>();
 		api.forkPoints.mockReturnValueOnce(points.promise);
 		const controller = createController(api);
 		await controller.start();
@@ -2663,7 +2663,7 @@ describe("client controller", () => {
 
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 		api.emit({ type: "status", session: renamed, handle: h(ref), seq: 2, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
-		points.resolve([{ id: "turn-1", text: "first", index: 0 }]);
+		points.resolve({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		await settle();
 
 		expect(controller.getView().state.selected).toEqual(renamed);
@@ -2681,7 +2681,7 @@ describe("client controller", () => {
 	it("does not bump the selection intent past the click it declined to overtake (D17, OW-miyemo)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		const forking = deferred<SessionRef>();
 		api.fork.mockReturnValueOnce(forking.promise);
 		const controller = createController(api);
@@ -2718,7 +2718,7 @@ describe("client controller", () => {
 	it("reports the fork it landed on, and clears the draft, when the click comes after the prompt (OW-mifuki)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		api.fork.mockResolvedValue(forkedRef);
 		api.attach.mockImplementation(async (target: SessionRef) => summary(target));
 		const prompt = deferred<void>();
@@ -2753,7 +2753,7 @@ describe("client controller", () => {
 	 */
 	it("goes live over the preview the declined click opened on the fork itself, once the fork's snapshot lands (OW-tatebi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		api.fork.mockResolvedValue(forkedRef);
 		api.preview.mockResolvedValue({ ref: forkedRef, turns: [previewAssistant("stale")] });
 		const controller = createController(api);
@@ -2788,7 +2788,7 @@ describe("client controller", () => {
 	 */
 	it("forks once when the fork path is entered twice while the first is still in flight (OW-kelede)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		const forking = deferred<SessionRef>();
 		api.fork.mockReturnValue(forking.promise);
 		const controller = createController(api);
@@ -2822,7 +2822,7 @@ describe("client controller", () => {
 	 */
 	it("keeps a draft typed while the fork was in flight (OW-kelede)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		api.attach.mockImplementation(async (target: SessionRef) => summary(target));
 		const prompt = deferred<void>();
 		api.prompt.mockReturnValue(prompt.promise);
@@ -2875,7 +2875,7 @@ describe("client controller", () => {
 
 	it("keeps the draft, and reports, when no fork point names that index (OW-hezidi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -3212,7 +3212,7 @@ describe("client controller", () => {
 		for (const path of ["select", "create", "forkAndSubmit"] as const) {
 			it(`lands an attach reply that follows a stream drop on a pane that is not live, through ${path} (OW-wazija)`, async () => {
 				const api = new FakeApi();
-				api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+				api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 				const created: SessionRef = { backend: "pi", id: "virtual:created" };
 				api.createSession.mockResolvedValue(created);
 				const controller = createController(api);

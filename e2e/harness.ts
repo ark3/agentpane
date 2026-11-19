@@ -271,7 +271,7 @@ const api: AgentpaneApi = {
 		messages.forEach((message, index) => {
 			if (message.role === "user") points.push({ id: `entry-${index}`, text: "", index });
 		});
-		return points;
+		return { points, forkStopsTurn: false };
 	},
 	/**
 	 * A self-fork: this harness drives one session, and what the browser is here

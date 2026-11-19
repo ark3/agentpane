@@ -4500,7 +4500,7 @@ The question came from the source, read before the run.
 As of `pi 0.87.1` a new session's file was written only once its first turn's reply ended (OW-bohodu, above), the runtime's `fork` threw `This session has not been saved yet` when the current file was not on disk, and `createBranchedSession` wrote a new branch at once only when it kept an assistant message.
 In the `1.2.0` source the refusal is still there, and both the first write and `createBranchedSession` wait for a user or assistant message instead.
 The `0.99.0` CHANGELOG says "The session file is now created when the first user message is sent".
-The server's fork route aborts nothing (both clients abort a streaming Pi turn first), so a raw request reaches whatever Pi answers.
+The server's fork route aborted nothing then (both clients abort a streaming Pi turn first), so a raw request reached whatever Pi answers; since ark3/agentpane#47 `PiAdapter.fork` stops the session first.
 
 ### When the file appears
 
@@ -5086,6 +5086,19 @@ Every row was the same on both Bun versions except the 130 MB frame from the ser
 
 So an inbound frame past 16 MB costs the whole connection, not that one request, and an outbound one somewhere between 40 MB and 130 MB does too.
 Which end refused the 130 MB outbound frame was not determined.
+
+## A Pi stop with no turn running answers both commands, and the fork after it succeeds (ark3/agentpane#47)
+
+Run on the home server on 2026-11-19, on `pi 1.5.2` with `--model openrouter/deepseek/deepseek-v4.1-flash:high`, with `python3 pi_idle_stop_fork_probe.py` from `resources/probes/`, which exited 0 with `result: pass`.
+Pi ran under a throwaway `PI_CODING_AGENT_DIR` holding copies of `auth.json`, `models-store.json` and `settings.json`, with `--session-dir` in a scratch workspace; no agentpane code took part.
+The question was whether `PiAdapter.fork` may stop the session before every fork, a turn running or not, as D30 moves the stop there.
+
+One short turn ran and settled, and `get_state` then read `isStreaming: false`.
+`clear_queue` answered `success: true` with `steering: []` and `followUp: []`, and `abort` answered `success: true`.
+From the `clear_queue` until two seconds after the `abort`'s answer Pi wrote three lines: a `queue_update` with both queues empty, then the two responses.
+`reduce` in `src/server/adapters/pi/reducer.ts` returns its state unchanged for a `queue_update`, so the adapter emits nothing for it.
+A `fork` at the first user message then answered `success: true`, `cancelled: false`, and the `get_state` after it named a `sessionFile` other than the one before the stop.
+A first run of the same script, before its check allowed the `queue_update`, read the same lines and reported `fail` on that check alone.
 
 ## HANDOFF findings 1–49
 

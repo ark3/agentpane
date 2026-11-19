@@ -420,7 +420,7 @@ export function createApp(deps: AppDeps): App {
 				if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
 				const adapter = sessions.adapterFor(ref);
 				if (!adapter) return notAttached(ref);
-				const response: ForkPointsResponse = { points: await adapter.listForkPoints() };
+				const response: ForkPointsResponse = { points: await adapter.listForkPoints(), forkStopsTurn: adapter.forkStopsTurn };
 				return json(response);
 			}
 			case "model": {

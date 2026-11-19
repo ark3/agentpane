@@ -699,6 +699,9 @@ export class CodexAdapter implements BackendAdapter {
 
 	// -- fork-from-past -----------------------------------------------------
 
+	/** A mid-stream `thread/fork` leaves the parent's turn running (`codex-cli` 0.154.0, OW-gojado); D15 stops nothing here. */
+	readonly forkStopsTurn = false;
+
 	/**
 	 * One fork point per turn, labelled with that turn's *first* user message
 	 * and carrying that message's index in the flat transcript.

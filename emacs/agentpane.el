@@ -3750,7 +3750,8 @@ forkable, and nothing is forked, as the browser offers no Edit there.
 A Pi fork of a streaming session stops the turn whether or not anything
 aborts it, so the turn is aborted first, the loss made deliberate, as the
 browser's `forkAndSubmit' does; that abort is the client's under D15, and
-the server's fork route aborts nothing.  It goes after the points are
+the Pi adapter's fork stops the session again, usually taking nothing out
+\(ark3/agentpane#47).  It goes after the points are
 matched, so a message that is not forkable costs the turn nothing.  The
 turn-done watch on the parent's handle ends as the abort goes out,
 raising nothing (`agentpane--watch-turn'), since the aborted turn's last
@@ -3853,8 +3854,9 @@ See `agentpane-fork'."
   (agentpane--refuse-closing failed)
   (agentpane--request
    'sessions/forkPoints (list :session (agentpane--ref agentpane--session))
-   (lambda (points)
-     (let ((point (seq-find (lambda (point) (eql (plist-get point :index) index)) points)))
+   (lambda (answer)
+     (let ((point (seq-find (lambda (point) (eql (plist-get point :index) index))
+                            (plist-get answer :points))))
        (if point
            (funcall then point)
          (when failed (funcall failed))

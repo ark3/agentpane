@@ -1052,7 +1052,15 @@ describe("fork, model, and enumeration routes", () => {
 		await get(ROUTES.session(PI_SESSION));
 
 		const body = (await (await get(ROUTES.forkPoints(PI_SESSION))).json()) as ForkPointsResponse;
-		expect(body.points).toEqual([{ id: "e1", text: "first ask", index: 0 }]);
+		expect(body).toEqual({ points: [{ id: "e1", text: "first ask", index: 0 }], forkStopsTurn: true });
+	});
+
+	it("says a fork stops a running turn only where the adapter's fork does (D30)", async () => {
+		app = createTestApp({ index, adapters: { codex: new FakeAdapterFactory({ forkMode: "codex" }) } });
+		await get(ROUTES.session(CODEX_SESSION));
+
+		const body = (await (await get(ROUTES.forkPoints(CODEX_SESSION))).json()) as ForkPointsResponse;
+		expect(body.forkStopsTurn).toBe(false);
 	});
 
 	it("forks and hands back the new ref", async () => {

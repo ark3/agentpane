@@ -500,9 +500,10 @@ export class PiAdapter implements BackendAdapter {
 	 * waits for the stop to settle and then goes out to the idle Pi the abort
 	 * leaves -- on the runs above Pi answered `abort` after `agent_settled` --
 	 * so Stop then Send starts a fresh turn. Each stop follows the one before
-	 * it, because two can overlap: the one "Stop and edit" sends at the click
-	 * and the one `forkAndSubmit` sends ahead of the fork. The second clears
-	 * once the first's abort has answered, and usually takes nothing out.
+	 * it, because several can overlap: the one "Stop and edit" sends at the
+	 * click, the one `forkAndSubmit` sends ahead of the fork, and the one
+	 * `fork` sends itself. Each later one clears once the one before has
+	 * answered, and usually takes nothing out.
 	 *
 	 * Nothing times Pi out. As of `pi 1.2.0` `AgentSession.abort` ends in
 	 * `waitForIdle` (read at the source), so a turn that never settles leaves
@@ -600,7 +601,22 @@ export class PiAdapter implements BackendAdapter {
 		return entries.map((m, i) => ({ id: m.entryId, text: m.text, index: userIndices[i] as number }));
 	}
 
+	/** Pi abandons a running turn at a fork whatever agentpane does (D15), so `fork` stops it first. */
+	readonly forkStopsTurn = true;
+
 	async fork(entryId: string): Promise<ForkResult> {
+		// The stop D15 makes deliberate, here rather than in each client, and
+		// inside the fork so that nothing queued on the session can land between
+		// the two (D30). Sent whether or not a turn is running: a prompt admitted
+		// a moment ago can be running before its `agent_start` has arrived, and on
+		// an idle `pi 1.5.2` the stop answered both commands and said nothing but
+		// a `queue_update` with both queues empty (`pi_idle_stop_fork_probe.py`,
+		// docs/BACKENDS.md). What it takes out of Pi's queue is dropped: it was
+		// steered into the turn the fork abandons, after the message it rewinds
+		// to, and is in no file. Taking it out still matters, since whether Pi's
+		// queue survives a `fork` was never measured, and a survivor could reach
+		// the fork's first turn.
+		await this.abort();
 		const parent = { model: this.model, level: this.thinkingLevel };
 		// Pi refusing the fork itself -- an entry id it does not know, say -- is
 		// the caller's 400, not ours (OW-rasiwa). Only this command: once it has

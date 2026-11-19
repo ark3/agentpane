@@ -136,6 +136,20 @@ const assistantMessage = (text: string): AgentMessage =>
 const userMessage = (text: string): AgentMessage =>
 	({ role: "user", content: [{ type: "text", text }] }) as AgentMessage;
 
+/**
+ * Answer the stop `fork` sends ahead of itself, and `abort` sends: `clear_queue`
+ * with `queued` in it, then `abort`. A macrotask between each, since the stop
+ * first waits out every stop and prompt still unanswered (OW-jifibo).
+ */
+async function answerStop(h: Harness, queued: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] }): Promise<void> {
+	const macrotask = () => new Promise((resolve) => setTimeout(resolve, 0));
+	await macrotask();
+	h.child.respondTo("clear_queue", queued);
+	await macrotask();
+	h.child.respondTo("abort");
+	await macrotask();
+}
+
 // ---------------------------------------------------------------------------
 
 describe("PiAdapter.start", () => {
@@ -785,6 +799,7 @@ describe("PiAdapter session name (D27, OW-jamaha)", () => {
 		await startAdapter(h, { sessionName: "parent" });
 
 		const forked = h.adapter.fork("e1");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await Promise.resolve();
 		h.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
@@ -1057,6 +1072,7 @@ describe("PiAdapter.fork", () => {
 		// OW-pifowo). The adapter re-queries get_state and adopts that moved file.
 		const MOVED = "/home/u/.pi/agent/sessions/s-fork.jsonl";
 		const forked = h.adapter.fork("e1");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await Promise.resolve();
 		h.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: MOVED });
@@ -1098,6 +1114,7 @@ describe("PiAdapter.fork", () => {
 		expect(h.adapter.getState().messages).toHaveLength(4);
 
 		const forked = h.adapter.fork("e-count");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "Count to 400", cancelled: false });
 		h.child.emitLine(delta("2\n"));
 		await Promise.resolve();
@@ -1115,11 +1132,36 @@ describe("PiAdapter.fork", () => {
 		expect(h.adapter.getState().isStreaming).toBe(false);
 	});
 
+	it("stops the session before it forks, with no turn running too, and drops what the stop took out of Pi's queue (D15, D30)", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		const types = () => h.child.sent().map((c) => c.type);
+
+		const forked = h.adapter.fork("e1");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		// Nothing forks until the stop has answered.
+		expect(types()).toEqual(["get_state", "clear_queue"]);
+		await answerStop(h, { steering: ["steered into the abandoned turn"], followUp: [] });
+		expect(types()).toEqual(["get_state", "clear_queue", "abort", "fork"]);
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		await Promise.resolve();
+		h.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
+		await Promise.resolve();
+		h.child.respondTo("get_messages", { messages: [] });
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [] });
+
+		expect(await forked).toEqual({ ref: { backend: "pi", id: "/home/u/.pi/agent/sessions/s-fork.jsonl" } });
+		expect(h.child.sent().filter((c) => c.type === "prompt")).toEqual([]);
+		expect(h.adapter.forkStopsTurn).toBe(true);
+	});
+
 	it("rejects when an extension vetoes the fork, which Pi reports as success:true", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
 
 		const forked = h.adapter.fork("e1");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "original prompt", cancelled: true });
 
 		await expect(forked).rejects.toThrow(/cancelled by an extension/);
@@ -1132,6 +1174,7 @@ describe("PiAdapter.fork", () => {
 		await startAdapter(h);
 
 		const forked = h.adapter.fork("no-such-entry");
+		await answerStop(h);
 		h.child.failCommand("fork", "Invalid entry ID for forking");
 		const error = await forked.catch((e: unknown) => e);
 
@@ -1380,6 +1423,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		await startAdapter(h, { model: PLAIN, thinkingLevel: "off" });
 
 		const forked = h.adapter.fork("e1");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await flush();
 		h.child.respondTo("get_state", { model: FLASH, thinkingLevel: "max", isStreaming: false });
@@ -1403,6 +1447,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		await set;
 
 		const forked = h.adapter.fork("e1");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await flush();
 		// Measured on 0.87.1 and 1.2.0: the fork rebuilds the session from the
@@ -1438,6 +1483,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		await set;
 
 		const forked = h.adapter.fork("u2");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await flush();
 		// Measured on 0.87.1 and 1.2.0: the fork rebuilds the session from the
@@ -1490,6 +1536,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		h.adapter.onUpdate((state) => seen.push(`update ${state.model} ${state.messages.length}`));
 
 		const forked = h.adapter.fork("u2");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await flush();
 		h.child.respondTo("get_state", { model: SPAWNED, thinkingLevel: "medium", isStreaming: false, sessionFile: MOVED });
@@ -1524,6 +1571,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		await set;
 
 		const forked = h.adapter.fork("u2");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await flush();
 		h.child.respondTo("get_state", { model: SPAWNED, thinkingLevel: "medium", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
@@ -1586,6 +1634,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		await started;
 
 		const forked = h.adapter.fork("u1");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "hi", cancelled: false });
 		await flush();
 		// Measured on 0.87.1 and 1.2.0: a fork at the first user message of a
@@ -1748,6 +1797,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 			expect(efforts(h)).toEqual(["user", "high", "user", "low", "user"]);
 
 			const forked = h.adapter.fork("u3");
+			await answerStop(h);
 			h.child.respondTo("fork", { text: "third", cancelled: false });
 			await flush();
 			h.child.respondTo("get_state", { model: FLASH, thinkingLevel: "low", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
@@ -1980,6 +2030,7 @@ describe("PiAdapter recorded model a resume could not restore (OW-jitoni)", () =
 
 		// Cut after the turn that ran on the fallback: that branch records it.
 		const forked = h.adapter.fork("u3");
+		await answerStop(h);
 		h.child.respondTo("fork", { text: "hi", cancelled: false });
 		await flush();
 		h.child.respondTo("get_state", { model: FALLBACK, thinkingLevel: "high", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });

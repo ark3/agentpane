@@ -329,7 +329,11 @@
  *   the session's model's `efforts` ids, taking effect from the next turn;
  *   the server refuses any other with a 400, and any at all while that
  *   model lists none or is not yet known.
- * - `sessions/forkPoints` -- `{ session }` -> array of `{ id, text, index }`.
+ * - `sessions/forkPoints` -- `{ session }` -> `{ points, forkStopsTurn }`:
+ *   `points` an array of `{ id, text, index }`, and `forkStopsTurn` whether
+ *   a fork of the session stops a turn running when it lands, which is what
+ *   "Stop and fork" reads (D30). Until ark3/agentpane#47 the result was the
+ *   array alone.
  * - `sessions/fork` -- `{ session, entryId }` -> the fork's ref.
  *
  * Errors: a request the server refused answers with the HTTP status as
@@ -437,7 +441,7 @@ import type {
 	BackendId,
 	CreateSessionRequest,
 	DismissErrorRequest,
-	ForkPoint,
+	ForkPointsResponse,
 	ForkRequest,
 	ModelInfo,
 	PromptRequest,
@@ -467,7 +471,7 @@ export interface HelperRequests {
 	"sessions/setModel": { params: SessionParams & { model: string }; result: null };
 	"sessions/setEffort": { params: SessionParams & { effort: string }; result: null };
 	"sessions/setName": { params: SessionParams & { name: string }; result: null };
-	"sessions/forkPoints": { params: SessionParams; result: ForkPoint[] };
+	"sessions/forkPoints": { params: SessionParams; result: ForkPointsResponse };
 	"sessions/fork": { params: SessionParams & ForkRequest; result: SessionRef };
 }
 

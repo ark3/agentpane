@@ -17,6 +17,9 @@ A fork at the first user message keeps no user or assistant message, and on `pi 
 As of `pi 0.87.1`, and in three runs on `pi 1.2.0`, the abandoned turn's last events, `agent_settled` among them, all arrived before the `fork` response, and nothing arrived between it and the `get_messages` answer that followed (OW-dutute), which is why `hydrateMessages` may replace the transcript.
 See `docs/MANUAL_TESTING.md` OW-sededi, OW-gajesu and OW-vijine, and OW-yudoni for what the earliest run did and did not show.
 
+On `pi 1.5.2` (home server, 2026-11-19, `deepseek/deepseek-v4.1-flash`), a stop sent to a session with no turn running, `clear_queue` and then `abort`, answered both with `success: true`, `clear_queue` with both queues empty, and Pi wrote nothing else but one `queue_update` naming both queues empty; a `fork` at the first user message after it succeeded and moved `sessionFile`.
+That is the stop `PiAdapter.fork` sends ahead of every fork (D30), and `resources/probes/pi_idle_stop_fork_probe.py` repeats the run; see `docs/MANUAL_TESTING.md`, "A Pi stop with no turn running".
+
 ### RPC framing
 
 **Pi RPC framing is LF-only.**

@@ -173,12 +173,12 @@ describe("agentpane API", () => {
 		});
 	});
 
-	it("lists a session's fork points and unwraps them (OW-hezidi)", async () => {
+	it("lists a session's fork points, with whether a fork stops a running turn (OW-hezidi, D30)", async () => {
 		const points = [{ id: "entry-1", text: "first", index: 0 }, { id: "entry-2", text: "second", index: 2 }];
-		const fetch = fetchRecorder(response({ points }));
+		const fetch = fetchRecorder(response({ points, forkStopsTurn: true }));
 		const api = createAgentpaneApi({ fetch });
 
-		expect(await api.forkPoints(ref)).toEqual(points);
+		expect(await api.forkPoints(ref)).toEqual({ points, forkStopsTurn: true });
 		expect(fetch).toHaveBeenCalledWith(ROUTES.forkPoints(ref), { method: "GET" });
 	});
 

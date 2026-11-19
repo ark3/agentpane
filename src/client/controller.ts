@@ -714,7 +714,7 @@ export function createController(
 		forkPointsInFlight.add(handle);
 		void api
 			.forkPoints(ref)
-			.then((points) => {
+			.then(({ points }) => {
 				if (disposed) return;
 				// Only while it is still the session on screen: a reply that lands
 				// after the user clicked away describes a transcript nobody is
@@ -1490,7 +1490,7 @@ export function createController(
 					await api.abort(selected);
 				}
 				if (disposed) return null;
-				const points = await api.forkPoints(selected);
+				const { points } = await api.forkPoints(selected);
 				if (disposed) return null;
 				const point = points.find((candidate) => candidate.index === index);
 				if (!point) throw new Error("That message is no longer a fork point in this session.");

@@ -192,10 +192,18 @@ export interface BackendAdapter {
 	// -- fork-from-past -----------------------------------------------------
 	listForkPoints(): Promise<ForkPoint[]>;
 	/**
+	 * Whether `fork` stops a turn running when it is called, which both clients
+	 * read from the fork-points answer to say "Stop and fork" (D30). True only
+	 * for `PiAdapter`, whose backend abandons the turn at a fork whatever
+	 * agentpane does (D15).
+	 */
+	readonly forkStopsTurn: boolean;
+	/**
 	 * Branch a second conversation off this one at `entryId`. This adapter keeps
 	 * driving the session it already has -- except on Pi, whose fork moves the
 	 * live process's own file, so its `ref` changes and `onRefChanged` fires
-	 * with `"fork"`.
+	 * with `"fork"`. Where `forkStopsTurn` is true it stops the session first,
+	 * as `abort` does, and drops what that took out of the backend's queue.
 	 */
 	fork(entryId: string): Promise<ForkResult>;
 

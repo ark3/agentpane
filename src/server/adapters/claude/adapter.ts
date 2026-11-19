@@ -413,6 +413,9 @@ export class ClaudeAdapter implements BackendAdapter {
 
 	// -- fork-from-past -----------------------------------------------------
 
+	/** A fork leaves the parent's child and its turn running (OW-razoki); D15 stops nothing here. */
+	readonly forkStopsTurn = false;
+
 	/**
 	 * One fork point per human prompt, labelled with that prompt's text and
 	 * carrying that prompt's index in the flat transcript (OW-roveze).

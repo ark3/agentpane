@@ -19,6 +19,17 @@ Since OW-yezeya, after the run recorded below, it passes `--model openrouter/dee
 
 Verified with: `pi` 0.84.1.
 
+## `pi_idle_stop_fork_probe.py`
+
+Proves: **a Pi stop with no turn running is harmless, and a fork after it succeeds** — the stop `PiAdapter.fork` sends ahead of every fork (D30, ark3/agentpane#47): `clear_queue` and `abort` both answer `success: true`, Pi writes nothing but their responses and a `queue_update` naming both queues empty, and the `fork` that follows moves `sessionFile`.
+It drives `pi --mode rpc` directly, through `PiRpc` from `agentpane_pi_prompt_window_probe.py`, under a throwaway `PI_CODING_AGENT_DIR`.
+
+```bash
+python3 pi_idle_stop_fork_probe.py
+```
+
+Verified with: `pi` 1.5.2 on 2026-11-19 (`docs/MANUAL_TESTING.md`, "A Pi stop with no turn running").
+
 ## `codex_turn_probe.py`
 
 Proves: **`codex app-server` runs a full turn over stdio** —

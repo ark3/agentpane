@@ -208,7 +208,7 @@ const api: AgentpaneApi = {
 		sessionOf(id).messages.forEach((message, index) => {
 			if (message.role === "user") points.push({ id: `entry-${index}`, text: "", index });
 		});
-		return points;
+		return { points, forkStopsTurn: false };
 	},
 	async fork(ref: SessionRef) {
 		return ref;

@@ -460,6 +460,13 @@ export interface ForkPoint {
 }
 export interface ForkPointsResponse {
 	points: ForkPoint[];
+	/**
+	 * Whether a fork of this session stops a turn running when it lands, which
+	 * is what "Stop and fork" and its equivalents read (D30). True on Pi alone,
+	 * whose backend abandons the turn at a fork whatever agentpane does (D15);
+	 * whether a turn is running is the session's status, not this.
+	 */
+	forkStopsTurn: boolean;
 }
 
 /** POST /api/sessions/:backend/:id/model */

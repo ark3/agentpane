@@ -2766,7 +2766,7 @@ BODY made is killed afterwards."
                     (setq snapshotted (delq (current-buffer) snapshotted)))
                   (let* ((from (current-buffer))
                          (reply (pcase method
-                                  ('sessions/forkPoints ,points)
+                                  ('sessions/forkPoints (list :points ,points :forkStopsTurn :json-false))
                                   ('sessions/fork ,forked)
                                   ('sessions/attach (or attached (list :ref (plist-get params :session))))
                                   ('sessions/preview agentpane-test--nodes)

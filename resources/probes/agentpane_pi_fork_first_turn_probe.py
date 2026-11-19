@@ -8,8 +8,10 @@ a session's file was first written once an assistant message existed
 whose current file is not on disk ("This session has not been saved yet"),
 and `createBranchedSession` defers writing a branch that keeps no
 conversation. `pi 0.99.0`'s CHANGELOG says the file is now created when the
-first user message is sent. The server's fork route aborts nothing before it
-forks, so a raw request during a first turn reaches whatever Pi answers.
+first user message is sent. The server's fork route aborted nothing before it
+forked when this ran, so a raw request during a first turn reached whatever Pi
+answers; since ark3/agentpane#47 `PiAdapter.fork` sends `clear_queue` and
+`abort` first, so a re-run's `fork_first_turn` forks a stopped turn.
 
 ## Part `rpc`: Pi alone
 

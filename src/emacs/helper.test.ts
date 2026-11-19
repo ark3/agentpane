@@ -193,7 +193,7 @@ describe("requests", () => {
 			[`DELETE ${ROUTES.session(pi)}`]: noContent,
 			[`POST ${ROUTES.model(pi)}`]: noContent,
 			[`POST ${ROUTES.effort(pi)}`]: noContent,
-			[`GET ${ROUTES.forkPoints(pi)}`]: () => json({ points: [{ id: "e1", text: "hi", index: 0 }] }),
+			[`GET ${ROUTES.forkPoints(pi)}`]: () => json({ points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }),
 			[`POST ${ROUTES.fork(pi)}`]: () => json({ ref: codex }),
 			[`DELETE ${ROUTES.error(pi)}`]: noContent,
 		});
@@ -207,7 +207,8 @@ describe("requests", () => {
 			["sessions/close", { session: pi }, null],
 			["sessions/setModel", { session: pi, model: "m" }, null],
 			["sessions/setEffort", { session: pi, effort: "low" }, null],
-			["sessions/forkPoints", { session: pi }, [{ id: "e1", text: "hi", index: 0 }]],
+			// The whole answer, so agentpane-mode can label a fork from it (D30).
+			["sessions/forkPoints", { session: pi }, { points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }],
 			["sessions/fork", { session: pi, entryId: "e1" }, codex],
 			["sessions/dismissError", { session: pi, errorId: "e4" }, null],
 		] as const;

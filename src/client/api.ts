@@ -8,7 +8,6 @@ import {
 	type DismissErrorRequest,
 	type EditDraftRequest,
 	type EditDraftResponse,
-	type ForkPoint,
 	type ForkPointsResponse,
 	type ForkRequest,
 	type ForkResponse,
@@ -121,8 +120,9 @@ export interface AgentpaneApi {
 	 * `snapshot.messages` carries. `ForkPoint.id` is the backend's own cut
 	 * token (a Pi entry id, a Codex turn id, a Claude Code store-line uuid) and
 	 * `PaneMessage` carries none of them, which is why the index exists.
+	 * Beside them, whether a fork of the session stops a running turn (D30).
 	 */
-	forkPoints(ref: SessionRef): Promise<ForkPoint[]>;
+	forkPoints(ref: SessionRef): Promise<ForkPointsResponse>;
 	/** Fork at `entryId`; the ref it answers with is the new conversation, and the original survives. */
 	fork(ref: SessionRef, body: ForkRequest): Promise<SessionRef>;
 	/**
@@ -227,9 +227,7 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 			return requestNoContent(ROUTES.name(ref), jsonRequest(body));
 		},
 		forkPoints(ref) {
-			return request(ROUTES.forkPoints(ref), { method: "GET" }, (body) => {
-				return (body as ForkPointsResponse).points;
-			});
+			return request(ROUTES.forkPoints(ref), { method: "GET" }, (body) => body as ForkPointsResponse);
 		},
 		fork(ref, body) {
 			return request(ROUTES.fork(ref), jsonRequest(body), (response) => (response as ForkResponse).ref);

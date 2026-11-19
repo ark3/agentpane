@@ -504,7 +504,7 @@ describe("App", () => {
 				effortSets.push(effort);
 			},
 			setName: async () => {},
-			forkPoints: async () => [],
+			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -955,7 +955,7 @@ describe("App", () => {
 			setName: async (ref, name) => {
 				named.push({ ref, name });
 			},
-			forkPoints: async () => [],
+			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -2380,7 +2380,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [],
+			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -2818,7 +2818,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [],
+			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -3410,7 +3410,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
 			fork: async () => {
 				forks += 1;
 				if (forks > 1) throw new Error("fork refused");
@@ -3498,7 +3498,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
 			}),
@@ -3579,7 +3579,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -3644,7 +3644,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
 			}),
@@ -3740,7 +3740,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
 			}),
@@ -3825,7 +3825,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -3894,7 +3894,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -4113,7 +4113,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
 			}),
@@ -4200,7 +4200,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -4342,7 +4342,7 @@ describe("App", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			forkPoints: async () => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: false }),
 			fork: async () => forkRef,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
@@ -4878,7 +4878,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 			setModel: async () => {},
 			setEffort: async () => {},
 			setName: async () => {},
-			forkPoints: async () => [],
+			forkPoints: async () => ({ points: [], forkStopsTurn: false }),
 			fork: async () => piSession,
 			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {

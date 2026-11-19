@@ -122,7 +122,8 @@ export interface FakeAdapterOptions {
 	 * How `fork()` behaves, so the backends' asymmetric forks can be modelled:
 	 *  - "pi" (default): the process's active file MOVES, so the adapter adopts a
 	 *    new id (`${ref.id}#fork-${entryId}`), announces it as a `"fork"`, and
-	 *    returns it.
+	 *    returns it. It stops the session first, as `PiAdapter.fork` does, and
+	 *    says so in `forkStopsTurn`.
 	 *  - "codex": a new thread is minted that this adapter is NOT driving, so its
 	 *    own `ref` is left unchanged while `fork()` returns the new thread's ref.
 	 *  - "claude": like "codex", except that nothing has recorded the fork yet,
@@ -273,7 +274,12 @@ export class FakeAdapter implements BackendAdapter {
 		return this.options.forkPoints ?? [];
 	}
 
+	get forkStopsTurn(): boolean {
+		return (this.options.forkMode ?? "pi") === "pi";
+	}
+
 	async fork(entryId: string): Promise<ForkResult> {
+		if (this.forkStopsTurn) await this.abort();
 		await this.options.onFork?.(entryId);
 		this.forks.push(entryId);
 		const parentId = this.ref.id;
