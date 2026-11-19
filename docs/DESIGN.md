@@ -80,7 +80,7 @@ D12 is decided but not yet built (OW-33, OW-34, OW-35); today only shutdown reap
 ### The shared interfaces
 
 - `src/shared/protocol.ts` — the wire contract (D11).
-  SSE event union, REST request/response types, `ROUTES`, `SessionRef`, `SessionSummary`.
+  SSE event union, REST request/response types, the socket's frames (D31), `ROUTES`, `SessionRef`, `SessionSummary`.
 - `src/server/adapters/types.ts` — `BackendAdapter`, which all adapters implement identically.
 
 Change these interfaces deliberately: each one joins several slices.
