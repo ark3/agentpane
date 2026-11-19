@@ -497,15 +497,27 @@ export class SessionManager {
 	}
 
 	/**
-	 * D9: a `virtual` session is a workspace choice and nothing more. Nothing
-	 * touches the backend's store until its first turn, whatever id attach
-	 * gives it, so browsing never litters it with empty sessions.
+	 * Create a session and start its agent, as one operation (D30). It is
+	 * `virtual` (D9): nothing touches the backend's store until its first
+	 * turn, whatever id the start gives it, so browsing never litters it with
+	 * empty sessions. A start that fails leaves nothing behind: the container
+	 * goes with every name it took, at the failure itself (`#start`), as every
+	 * container does whose start fails, so no attach under one of them can find
+	 * it afterwards, and a retry is a new create. Answers the `virtual:` ref it minted, which stays one of the
+	 * container's names whatever the start renames it to.
 	 */
-	createVirtual(cwd: string, backend: BackendId, model?: string): SessionRef {
+	async create(cwd: string, backend: BackendId, model?: string): Promise<SessionRef> {
+		if (this.#shuttingDown) throw new ServerShuttingDownError();
 		if (!this.#adapters[backend]) throw new UnknownBackendError(backend);
 		const ref: SessionRef = { backend, id: `virtual:${this.#newId()}` };
 		this.#add(this.#container(ref, { cwd, model, virtual: true, fromStore: false, onDisk: false, createdAt: this.#now() }));
-		this.broadcaster.sessionsChanged();
+		try {
+			await this.attach(ref);
+		} catch (err) {
+			// A listing taken during the start may have shown it.
+			this.broadcaster.sessionsChanged();
+			throw err;
+		}
 		return ref;
 	}
 
@@ -691,9 +703,9 @@ export class SessionManager {
 	 *    and its answer can be stale by the time a client acts on it whether or
 	 *    not it waits.
 	 *  - `attach`. It creates the adapter this queues on, and `#attaching`
-	 *    already collapses concurrent attaches. Only the attach route calls it
-	 *    (D25); every other route queues on an adapter already there, or is
-	 *    refused.
+	 *    already collapses concurrent attaches. Only the attach route and
+	 *    `create` call it (D25, D30); every other route queues on an adapter
+	 *    already there, or is refused.
 	 *  - `close` and `disposeAll`. Teardown is ordered by `#disposing`,
 	 *    `PendingStart.torndown` and `#terminate`, and waits behind nothing. A
 	 *    verb still queued when it runs reaches the disposed adapter, as an
@@ -1128,13 +1140,11 @@ export class SessionManager {
 		}
 
 		const bound = session;
-		// What a failed start restores: a container that outlives it -- a
-		// `virtual` one -- must not keep an id its adapter announced and never
-		// stored, or a retry would resume it. One that does not outlive it is
-		// restored too, since a `close()` during its reaping resumes the attaches
-		// it holds back under the container's ref.
+		// What a failed start restores, though the container does not outlive
+		// it: a `close()` during its reaping resumes the attaches it holds back
+		// under the container's ref, which must not be an id its adapter
+		// announced and never stored.
 		const refBeforeStart = bound.ref;
-		const namesBeforeStart = new Set(bound.names);
 		// The container this adapter drives, which every handler below reaches
 		// through: `bound`, until a Pi fork moves the adapter onto a container of
 		// its own (`#forkOnto`), after which its events, and a later rename or
@@ -1225,15 +1235,12 @@ export class SessionManager {
 			// or one still in its index lookup, which joins this one in turn at
 			// `#start`'s arbitration once the lookup names this file. Either way
 			// nothing spawns beside that adapter (OW-yufazo, OW-kamave).
-			if (existing) {
-				for (const name of [...bound.names]) {
-					if (namesBeforeStart.has(name)) continue;
-					bound.names.delete(name);
-					if (this.#names.get(name) === bound.handle) this.#names.delete(name);
-				}
-			} else {
-				this.#remove(bound);
-			}
+			//
+			// The container goes with every name it has. Only a container
+			// `create` made is in the table without an adapter, and it does not
+			// outlive a failed start (D30): a container that has started never
+			// starts again, since a close and a Pi fork each take it out.
+			this.#remove(bound);
 			bound.ref = refBeforeStart;
 			// The adapter spawns before it decides it has started -- PiAdapter
 			// spawns, then round-trips a readiness probe -- so a rejection can

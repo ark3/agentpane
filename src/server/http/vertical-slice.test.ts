@@ -6,7 +6,6 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
-	type AttachSessionResponse,
 	type CreateSessionResponse,
 	type ForkResponse,
 	ROUTES,
@@ -90,12 +89,9 @@ describe("offline vertical slice", () => {
 		app = createOfflineApp(codex);
 		const events = await openEvents();
 
-		const created = (await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "codex" })).json()) as CreateSessionResponse;
+		const created = ((await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "codex" })).json()) as CreateSessionResponse).session;
 		expect(created.ref).toEqual({ backend: "codex", id: "virtual:offline-virtual-id" });
-
-		const attached = (await (await request(ROUTES.session(created.ref))).json()) as AttachSessionResponse;
-		expect(attached.session.ref).toEqual(created.ref);
-		await events.until(() => events.typed("snapshot").length === 1, "the attach snapshot");
+		await events.until(() => events.typed("snapshot").length === 1, "the create's snapshot");
 
 		expect((await post(ROUTES.prompt(created.ref), { text: "hello" })).status).toBe(202);
 		await events.until(
@@ -129,9 +125,8 @@ describe("offline vertical slice", () => {
 		app = createOfflineApp(codex);
 		const events = await openEvents();
 
-		const created = (await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "codex" })).json()) as CreateSessionResponse;
-		await request(ROUTES.session(created.ref));
-		await events.until(() => events.typed("snapshot").length === 1, "the virtual attach snapshot");
+		const created = ((await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "codex" })).json()) as CreateSessionResponse).session;
+		await events.until(() => events.typed("snapshot").length === 1, "the create's snapshot");
 		const { handle } = events.typed("snapshot")[0]!;
 
 		expect((await post(ROUTES.prompt(created.ref), { text: "materialise" })).status).toBe(202);

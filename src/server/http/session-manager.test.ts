@@ -35,6 +35,8 @@ import {
 } from "./testing/fakes.ts";
 
 const REF: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/a.jsonl" };
+/** The ref `create` mints on a manager given `newId: () => "created"`. */
+const CREATED: SessionRef = { backend: "pi", id: "virtual:created" };
 const WORKSPACE = "/home/u/src/agentpane";
 
 let index: FakeSessionIndex;
@@ -141,7 +143,7 @@ describe("attach", () => {
 		await expect(sessions.attach({ backend: "codex", id: "x" })).rejects.toBeInstanceOf(
 			UnknownBackendError,
 		);
-		expect(() => sessions.createVirtual(WORKSPACE, "codex")).toThrow(UnknownBackendError);
+		await expect(sessions.create(WORKSPACE, "codex")).rejects.toBeInstanceOf(UnknownBackendError);
 	});
 
 	it("rejects a session no store knows about", async () => {
@@ -339,9 +341,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 	it("adopts the id a virtual session takes on its first prompt when attach named none (D9)", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
-
-		await sessions.attach(virtualRef);
+		const virtualRef = await sessions.create(WORKSPACE, "pi");
 		expect(sessions.canonicalRef(virtualRef)).toEqual(virtualRef);
 
 		await sessions.submit(virtualRef, "first");
@@ -359,8 +359,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 	it("keeps the pre-rename id working for a client that still holds it", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
-		await sessions.attach(virtualRef);
+		const virtualRef = await sessions.create(WORKSPACE, "pi");
 		await sessions.submit(virtualRef, "first");
 
 		// The browser POSTed against the id it created and has not refetched yet.
@@ -392,8 +391,8 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			newSessionId: () => "minted",
 		});
 		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
-		const virtualRef = sessions.createVirtual(WORKSPACE, "claude");
-		const adapter = await sessions.attach(virtualRef);
+		const virtualRef = await sessions.create(WORKSPACE, "claude");
+		const adapter = sessions.adapterFor(virtualRef);
 		const minted: SessionRef = { backend: "claude", id: "minted" };
 		expect(sessions.canonicalRef(virtualRef)).toEqual(minted);
 		const handle = sessions.summaryOf(minted)?.handle;
@@ -512,20 +511,19 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			expect((await sessions.list()).map((summary) => summary.ref)).toEqual([REF]);
 		});
 
-		it("undoes the rename on a virtual container that outlives a failed start", async () => {
-			// The container stays for a retry, which must not resume an id the
-			// failed adapter announced and never stored.
+		it("takes a created container out with the name its failed start took as well as its own (D30)", async () => {
 			const factory = renamingInsideStart(async () => {
 				throw new Error("get_messages failed");
 			});
-			sessions = new SessionManager({ index, adapters: { pi: factory } }, broadcaster);
-			const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
-			const handle = sessions.summaryOf(virtualRef)?.handle;
+			sessions = new SessionManager({ index, adapters: { pi: factory }, newId: () => "created" }, broadcaster);
 
-			await expect(sessions.attach(virtualRef)).rejects.toThrow("get_messages failed");
+			await expect(sessions.create(WORKSPACE, "pi")).rejects.toThrow("get_messages failed");
 
-			expect(sessions.summaryOf(virtualRef)).toEqual(expect.objectContaining({ ref: virtualRef, handle, status: "virtual" }));
-			expect(sessions.summaryOf(real)).toBeNull();
+			for (const name of [CREATED, real]) {
+				expect(sessions.summaryOf(name)).toBeNull();
+				expect(sessions.holds(name)).toBe(false);
+			}
+			expect((await sessions.list()).map((summary) => summary.ref)).toEqual([REF]);
 		});
 
 		it("holds back an attach under either name while a start that failed after the rename reaps its adapter (OW-yufazo)", async () => {
@@ -585,9 +583,9 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			expect(factory.created[1]?.startOptions).toEqual({ cwd: WORKSPACE, resumeId: REF.id });
 		});
 
-		it("holds back an attach under the name a virtual session's failed start took, once closed under its own during the reaping (OW-kamave)", async () => {
-			// The failure takes `real` back off the virtual container, which stays
-			// in the table; the startup still answers to it until it is retired.
+		it("holds back an attach under the name a created session's failed start took, once closed under its own during the reaping (OW-kamave)", async () => {
+			// The failure takes the created container out of the table with
+			// `real` (D30); the startup still answers to it until it is retired.
 			let releaseDispose: (() => void) | undefined;
 			const reaping = deferred();
 			const factory = renamingInsideStart(async (adapter) => {
@@ -597,10 +595,10 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 				throw new Error("get_messages failed");
 			});
 			index.summaries = [storedSession(REF, WORKSPACE), storedSession(real, WORKSPACE)];
-			sessions = new SessionManager({ index, adapters: { pi: factory } }, broadcaster);
-			const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
+			sessions = new SessionManager({ index, adapters: { pi: factory }, newId: () => "created" }, broadcaster);
+			const virtualRef = CREATED;
 
-			const failing = sessions.attach(virtualRef);
+			const failing = sessions.create(WORKSPACE, "pi");
 			await reaping.promise;
 			await settle();
 			let closed = false;
@@ -625,6 +623,39 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			expect(factory.created[0]?.disposals).toBe(1);
 			expect(sessions.liveRefs()).toEqual([]);
 		});
+	});
+});
+
+describe("create (D30)", () => {
+	it("starts the session's agent and answers the virtual ref it minted, attached", async () => {
+		const ref = await sessions.create(WORKSPACE, "pi");
+
+		expect(ref.id).toMatch(/^virtual:/);
+		expect(pi.created).toHaveLength(1);
+		expect(sessions.isAttached(ref)).toBe(true);
+		expect(sessions.summaryOf(ref)).toEqual(expect.objectContaining({ ref, status: "attached", onDisk: false }));
+	});
+
+	it("leaves no container, no name and no row when the start fails, and says so to a client that listed it", async () => {
+		const gate = deferred();
+		const flaky = new FakeAdapterFactory({ holdStart: gate.promise, failStart: "sbox: no git root" });
+		sessions = new SessionManager({ index, adapters: { pi: flaky }, newId: () => "created" }, broadcaster);
+		const creating = sessions.create(WORKSPACE, "pi");
+		await settle();
+		const events = broadcastEvents();
+
+		gate.resolve();
+		await expect(creating).rejects.toThrow("sbox: no git root");
+
+		expect(sessions.summaryOf(CREATED)).toBeNull();
+		expect(sessions.holds(CREATED)).toBe(false);
+		expect(sessions.liveHandles()).toEqual([]);
+		expect((await sessions.list()).map((summary) => summary.ref)).toEqual([REF]);
+		expect(events).toContainEqual(expect.objectContaining({ type: "sessions-changed" }));
+		// No name: an attach under the minted ref finds nothing to start.
+		await expect(sessions.attach(CREATED)).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(flaky.created).toHaveLength(1);
+		expect(flaky.created[0]?.disposals).toBe(1);
 	});
 });
 
@@ -1197,8 +1228,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 			materialiseOnSubmit: "/home/u/.pi/agent/sessions/materialised.jsonl",
 		});
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
-		await sessions.attach(virtualRef);
+		const virtualRef = await sessions.create(WORKSPACE, "pi");
 		await sessions.submit(virtualRef, "first");
 		const parentAdapter = renaming.forRef(virtualRef);
 
@@ -1387,10 +1417,10 @@ describe("a container keyed by a handle", () => {
 	// A browser tab and the Emacs helper outlive a server restart, and key their
 	// live views by the handle (OW-kimaya), so a second process's first handle
 	// must not be the first process's.
-	it("mints a first handle no other manager mints, as a restarted server's would be", () => {
+	it("mints a first handle no other manager mints, as a restarted server's would be", async () => {
 		const restarted = new SessionManager({ index, adapters: { pi } }, new Broadcaster());
-		const before = handleOf(sessions.createVirtual(WORKSPACE, "pi"));
-		const after = restarted.summaryOf(restarted.createVirtual(WORKSPACE, "pi"))?.handle;
+		const before = handleOf(await sessions.create(WORKSPACE, "pi"));
+		const after = restarted.summaryOf(await restarted.create(WORKSPACE, "pi"))?.handle;
 		expect(before).toEqual(expect.any(String));
 		expect(after).toEqual(expect.any(String));
 		expect(after).not.toBe(before);
@@ -1399,11 +1429,10 @@ describe("a container keyed by a handle", () => {
 	it("is reachable by all three names after two renames, and holds one handle throughout", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
+		const virtualRef = await sessions.create(WORKSPACE, "pi");
 		const handle = handleOf(virtualRef);
 		expect(handle).toEqual(expect.any(String));
-
-		const adapter = await sessions.attach(virtualRef);
+		const adapter = sessions.adapterFor(virtualRef);
 		const later: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/later.jsonl" };
 		renaming.forRef(virtualRef)?.materialiseAs(later.id);
 
@@ -1770,10 +1799,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 
 describe("lifecycle", () => {
 	it("keeps virtual sessions out of the backend store until prompted (D9)", async () => {
-		const ref = sessions.createVirtual(WORKSPACE, "pi", "pi-1");
-		expect(pi.created).toHaveLength(0);
-
-		await sessions.attach(ref);
+		const ref = await sessions.create(WORKSPACE, "pi", "pi-1");
 		expect(pi.forRef(ref)?.startOptions).toEqual({ cwd: WORKSPACE, model: "pi-1" });
 
 		const before = await sessions.list();
@@ -1793,8 +1819,7 @@ describe("lifecycle", () => {
 		index = new FakeSessionIndex([storedSession(real, WORKSPACE)]);
 		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: real.id });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = sessions.createVirtual(WORKSPACE, "pi", "openrouter/deepseek/deepseek-v4.1-flash:high");
-		await sessions.attach(virtualRef);
+		const virtualRef = await sessions.create(WORKSPACE, "pi", "openrouter/deepseek/deepseek-v4.1-flash:high");
 		await sessions.submit(virtualRef, "first");
 		await sessions.close(real);
 
@@ -1823,10 +1848,8 @@ describe("lifecycle", () => {
 		// holding its workspace, so one casualty must not spare the rest.
 		const brittle = new FakeAdapterFactory({ failDispose: "kill: no such process" });
 		sessions = new SessionManager({ index, adapters: { pi: brittle } }, broadcaster);
-		const a = sessions.createVirtual(WORKSPACE, "pi");
-		const b = sessions.createVirtual(WORKSPACE, "pi");
-		await sessions.attach(a);
-		await sessions.attach(b);
+		await sessions.create(WORKSPACE, "pi");
+		await sessions.create(WORKSPACE, "pi");
 
 		await expect(sessions.disposeAll()).resolves.toBeUndefined();
 		expect(brittle.created.map((c) => c.disposed)).toEqual([true, true]);
@@ -2100,8 +2123,7 @@ describe("onDisk", () => {
 	it("stays false for a session renamed at attach until the index lists it, and then sticks", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
-		await sessions.attach(virtualRef);
+		const virtualRef = await sessions.create(WORKSPACE, "pi");
 		const real: SessionRef = { backend: "pi", id: REAL };
 		expect(sessions.canonicalRef(virtualRef)).toEqual(real);
 
@@ -2146,7 +2168,7 @@ describe("onDisk", () => {
 
 describe("holds, what the preview route asks before it answers gone (D26 point 5)", () => {
 	it("holds a name in the table, and nothing it never heard of", async () => {
-		const ref = sessions.createVirtual(WORKSPACE, "pi");
+		const ref = await sessions.create(WORKSPACE, "pi");
 		expect(sessions.holds(ref)).toBe(true);
 		expect(sessions.holds(REF)).toBe(false);
 	});
@@ -2212,10 +2234,10 @@ describe("teardown racing a startup", () => {
 	it("disposes an adapter that was still starting when its session closed", async () => {
 		const gate = deferred();
 		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
-		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
-		const ref = sessions.createVirtual(WORKSPACE, "pi");
+		sessions = new SessionManager({ index, adapters: { pi: slow }, newId: () => "created" }, broadcaster);
+		const ref = CREATED;
 
-		const attaching = sessions.attach(ref);
+		const attaching = sessions.create(WORKSPACE, "pi");
 		await settle();
 		expect(slow.created).toHaveLength(1);
 
@@ -2231,10 +2253,10 @@ describe("teardown racing a startup", () => {
 	it("disposes an adapter that was still starting when the server shut down", async () => {
 		const gate = deferred();
 		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
-		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
-		const ref = sessions.createVirtual(WORKSPACE, "pi");
+		sessions = new SessionManager({ index, adapters: { pi: slow }, newId: () => "created" }, broadcaster);
+		const ref = CREATED;
 
-		const attaching = sessions.attach(ref);
+		const attaching = sessions.create(WORKSPACE, "pi");
 		await settle();
 
 		await sessions.disposeAll();
@@ -2283,10 +2305,10 @@ describe("teardown racing a startup", () => {
 			holdStart: gate.promise,
 			materialiseOnStart: RENAMED,
 		});
-		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const ref = sessions.createVirtual(WORKSPACE, "pi");
+		sessions = new SessionManager({ index, adapters: { pi: renaming }, newId: () => "created" }, broadcaster);
+		const ref = CREATED;
 
-		const attaching = sessions.attach(ref);
+		const attaching = sessions.create(WORKSPACE, "pi");
 		await settle();
 		await sessions.close(ref);
 		gate.resolve();
@@ -2310,9 +2332,8 @@ describe("teardown racing a startup", () => {
 		const gate = deferred();
 		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
 		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
-		const first = sessions.createVirtual(WORKSPACE, "pi");
 
-		const attaching = sessions.attach(first);
+		const attaching = sessions.create(WORKSPACE, "pi");
 		await settle();
 		const shutdown = sessions.disposeAll();
 
@@ -2337,10 +2358,10 @@ describe("teardown racing a startup", () => {
 			holdStart: gate.promise,
 			failStart: "sbox: no git root",
 		});
-		sessions = new SessionManager({ index, adapters: { pi: flaky } }, broadcaster);
-		const ref = sessions.createVirtual(WORKSPACE, "pi");
+		sessions = new SessionManager({ index, adapters: { pi: flaky }, newId: () => "created" }, broadcaster);
+		const ref = CREATED;
 
-		const attaching = sessions.attach(ref);
+		const attaching = sessions.create(WORKSPACE, "pi");
 		await settle();
 		await sessions.close(ref);
 		gate.resolve();
@@ -2785,9 +2806,9 @@ describe("teardown racing a startup", () => {
 		// still inside the kill's grace has not finished letting go.
 		const gate = deferred();
 		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
-		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
-		const ref = sessions.createVirtual(WORKSPACE, "pi");
-		const attaching = sessions.attach(ref);
+		sessions = new SessionManager({ index, adapters: { pi: slow }, newId: () => "created" }, broadcaster);
+		const ref = CREATED;
+		const attaching = sessions.create(WORKSPACE, "pi");
 		await settle();
 		const adapter = slow.created[0];
 		if (!adapter) throw new Error("no adapter");
@@ -3499,8 +3520,7 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 			onSubmit: (adapter) => adapter.emitError("turn failed"),
 		});
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
-		await sessions.attach(virtualRef);
+		const virtualRef = await sessions.create(WORKSPACE, "pi");
 		const adapter = renaming.forRef(virtualRef)!;
 		adapter.emitNotice(notice);
 		const events = connect();

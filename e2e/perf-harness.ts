@@ -152,8 +152,9 @@ const api: AgentpaneApi = {
 	async listSessions() {
 		return summaries;
 	},
+	// A create starts the session and answers as an attach does (D30).
 	async createSession() {
-		return refFor("a");
+		return api.attach(refFor("a"));
 	},
 	async attach(ref: SessionRef) {
 		const id = ref.id.split("/").pop()!.replace(".jsonl", "");

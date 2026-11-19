@@ -314,20 +314,28 @@ export interface ListSessionsResponse {
 	sessions: SessionSummary[];
 }
 
-/** POST /api/sessions -- creates a `virtual` session; nothing hits disk until its first turn (D9). */
+/**
+ * POST /api/sessions -- creates a `virtual` session and starts its agent, as
+ * one operation (D30): it answers once the session is attached, with its live
+ * summary, as the attach route below does, and nothing hits disk until its
+ * first turn (D9). A start that fails is refused as an attach's would be and
+ * leaves nothing behind -- no session, no name, no row -- so a retry is a new
+ * create.
+ */
 export interface CreateSessionRequest {
 	cwd: string;
 	backend: BackendId;
 	model?: string;
 }
 export interface CreateSessionResponse {
-	ref: SessionRef;
+	session: LiveSessionSummary;
 }
 
 /**
  * GET /api/sessions/:backend/:id -- "open this session": spawns if needed and
- * snapshots over SSE. It is the only route that spawns (D25): every other
- * session route acts on a session already attached, or refuses. The
+ * snapshots over SSE. It and the create above are the only routes that spawn
+ * (D25, D30): every other session route acts on a session already attached,
+ * or refuses. The
  * transcript is deliberately not in this body (D3); what is here is the
  * summary, whose `ref` is *authoritative*. It can differ from the ref in the
  * URL, because a session adopts its backend id on attach -- see

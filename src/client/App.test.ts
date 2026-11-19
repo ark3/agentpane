@@ -501,7 +501,7 @@ describe("App", () => {
 		];
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession, null)],
-			createSession: async () => piSession,
+			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
 			attach: async () => ({ ...summary(piSession, null), handle: "h-1" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
@@ -955,7 +955,7 @@ describe("App", () => {
 		const named: Array<{ ref: SessionRef; name: string }> = [];
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession, "P")],
-			createSession: async () => piSession,
+			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
 			attach: async () => ({ ...summary(piSession, "P"), handle: "h-1" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
@@ -2383,7 +2383,7 @@ describe("App", () => {
 		let emit: (event: ServerEvent) => void = () => {};
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
-			createSession: async () => piSession,
+			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
 			attach: async () => ({ ...summary(piSession), handle: "h-1" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
@@ -2817,7 +2817,7 @@ describe("App", () => {
 		let emit: (event: ServerEvent) => void = () => {};
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
-			createSession: async () => piSession,
+			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
 			attach: async () => ({ ...summary(piSession), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async (_ref, body) => {
@@ -3440,7 +3440,7 @@ describe("App", () => {
 		let emit: (event: ServerEvent) => void = () => {};
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
-			createSession: async () => piSession,
+			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
 			attach: async (ref) => ({ ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
@@ -3524,7 +3524,7 @@ describe("App", () => {
 		});
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(parentRef)],
-			createSession: async () => parentRef,
+			createSession: async () => ({ ...summary(parentRef), handle: "h-created" }),
 			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
@@ -3610,7 +3610,7 @@ describe("App", () => {
 		});
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(codexSession)],
-			createSession: async () => codexSession,
+			createSession: async () => ({ ...summary(codexSession), handle: "h-created" }),
 			attach: async (ref) => {
 				const handle = ref.id === forkRef.id ? "h-fork" : "h-parent";
 				emit(snapshot(ref, handle));
@@ -3706,7 +3706,7 @@ describe("App", () => {
 		});
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(parentRef)],
-			createSession: async () => parentRef,
+			createSession: async () => ({ ...summary(parentRef), handle: "h-created" }),
 			attach: async (ref) => {
 				const handle = ref.id === forkRef.id ? "h-fork" : "h-parent";
 				emit(snapshot(ref, handle));
@@ -3795,7 +3795,7 @@ describe("App", () => {
 		});
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(codexSession)],
-			createSession: async () => codexSession,
+			createSession: async () => ({ ...summary(codexSession), handle: "h-created" }),
 			attach: async (ref) => {
 				emit(snapshot(ref, "h-parent"));
 				return { ...summary(ref), handle: "h-parent" };
@@ -3868,7 +3868,7 @@ describe("App", () => {
 		});
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(parentRef)],
-			createSession: async () => parentRef,
+			createSession: async () => ({ ...summary(parentRef), handle: "h-created" }),
 			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
@@ -4087,7 +4087,7 @@ describe("App", () => {
 		});
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(parentRef)],
-			createSession: async () => parentRef,
+			createSession: async () => ({ ...summary(parentRef), handle: "h-created" }),
 			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
@@ -4172,7 +4172,7 @@ describe("App", () => {
 		});
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(parentRef)],
-			createSession: async () => parentRef,
+			createSession: async () => ({ ...summary(parentRef), handle: "h-created" }),
 			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
@@ -4300,7 +4300,7 @@ describe("App", () => {
 		});
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
-			createSession: async () => piSession,
+			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
 			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: (_ref, body) => {
@@ -4837,7 +4837,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 		let emit: (event: ServerEvent) => void = () => {};
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
-			createSession: async () => piSession,
+			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
 			attach: async (ref) => ({ ...summary(ref), handle: sessionKey(ref) }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},

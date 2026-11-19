@@ -711,9 +711,8 @@ def run_agentpane(
         status, created = http.json("POST", "/api/sessions", {"cwd": str(workspace), "backend": "pi", "model": args.model})
         if status != 201:
             raise RuntimeError(f"create failed: HTTP {status} {created}")
-        status, attached = http.json("GET", ref_path(created["ref"]))
-        if status != 200:
-            raise RuntimeError(f"attach failed: HTTP {status} {attached}")
+        # The create starts the session and answers as an attach does (D30).
+        attached = created
         ref = attached["session"]["ref"]
         handle = attached["session"]["handle"]
         tree = descendants(server.pid)

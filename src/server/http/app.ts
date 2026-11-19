@@ -249,8 +249,11 @@ export function createApp(deps: AppDeps): App {
 			return error(400, "bad_request", "cwd must name an existing directory");
 		}
 		if (!isBackendId(backend)) return error(400, "bad_backend", `unknown backend "${backend}"`);
-		const ref = sessions.createVirtual(cwd, backend, model);
-		const response: CreateSessionResponse = { ref };
+		// Starts the agent too, and a start that fails leaves nothing (D30).
+		const ref = await sessions.create(cwd, backend, model);
+		const session = sessions.summaryOf(ref);
+		if (!session) return error(404, "not_found", `no such session: ${sessionKey(ref)}`);
+		const response: CreateSessionResponse = { session };
 		return json(response, 201);
 	}
 
@@ -316,7 +319,7 @@ export function createApp(deps: AppDeps): App {
 				// `SessionManager.submit`. A sender that names none gets the error
 				// held now.
 				const priorError = priorErrorId === undefined ? sessions.errorIdOf(ref) : priorErrorId;
-				// Only the GET above starts a session (D25): a prompt that arrives
+				// Only the GET above and a create start a session (D25, D30): a prompt that arrives
 				// for one not attached, a close under way included, is refused.
 				if (!sessions.isAttached(ref)) return notAttached(ref);
 				// Through the manager, not straight at the adapter: it queues the

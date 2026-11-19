@@ -147,18 +147,33 @@ describe("sessions", () => {
 		expect(body.sessions[0]?.cwd).toBe(WORKSPACE);
 	});
 
-	it("creates a virtual session that touches no backend store", async () => {
+	it("creates a session and starts its agent, answering its live summary (D30)", async () => {
 		const response = await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" });
 		expect(response.status).toBe(201);
-		const { ref } = (await response.json()) as CreateSessionResponse;
+		const { session } = (await response.json()) as CreateSessionResponse;
 
-		expect(ref.backend).toBe("pi");
-		expect(pi.created).toHaveLength(0);
+		expect(session).toEqual(
+			expect.objectContaining({ status: "attached", cwd: WORKSPACE, onDisk: false, handle: expect.any(String) }),
+		);
+		expect(session.ref.id).toMatch(/^virtual:/);
+		expect(pi.forRef(session.ref)?.startOptions).toEqual({ cwd: WORKSPACE });
 
 		const body = (await (await get(ROUTES.sessions)).json()) as ListSessionsResponse;
-		const created = body.sessions.find((s) => sessionKey(s.ref) === sessionKey(ref));
-		expect(created?.status).toBe("virtual");
-		expect(created?.cwd).toBe(WORKSPACE);
+		const created = body.sessions.find((s) => sessionKey(s.ref) === sessionKey(session.ref));
+		expect(created?.status).toBe("attached");
+	});
+
+	it("leaves no session behind when a create's start fails (D30)", async () => {
+		const flaky = new FakeAdapterFactory({ failStart: "sbox: no git root" });
+		app = createTestApp({ index, adapters: { pi: flaky } });
+
+		const response = await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" });
+
+		expect(response.status).toBe(500);
+		expect((await response.json()) as ApiError).toMatchObject({ error: "internal_error", detail: "sbox: no git root" });
+		const body = (await (await get(ROUTES.sessions)).json()) as ListSessionsResponse;
+		expect(body.sessions.map((s) => sessionKey(s.ref))).not.toContainEqual(expect.stringContaining("virtual:"));
+		expect(body.sessions).toHaveLength(3);
 	});
 
 	it("rejects a relative or nonexistent workspace", async () => {
@@ -314,16 +329,10 @@ describe("preview (OW-38, read-only, non-attaching)", () => {
 			expect(((await response.json()) as SessionPreviewResponse).turns).toEqual([]);
 		}
 
-		it("a virtual session before its first prompt", async () => {
-			const { ref } = (await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" })).json()) as CreateSessionResponse;
-			await expectEmpty(ref);
-		});
-
-		it("an attached session with nothing on disk yet", async () => {
-			const { ref } = (await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" })).json()) as CreateSessionResponse;
-			await get(ROUTES.session(ref));
-			expect(app.sessions.isAttached(ref)).toBe(true);
-			await expectEmpty(ref);
+		it("a created session before its first prompt", async () => {
+			const { session } = (await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" })).json()) as CreateSessionResponse;
+			expect(app.sessions.isAttached(session.ref)).toBe(true);
+			await expectEmpty(session.ref);
 		});
 
 		it("a parked fork before its attach, which the table does not hold", async () => {
@@ -707,12 +716,12 @@ describe("prompting", () => {
 		await client.close();
 	});
 
-	it("spawns a virtual session on its attach with no resumeId, and prompts it", async () => {
-		const { ref } = (await (
+	it("starts a created session with its model and no resumeId, and prompts it", async () => {
+		const { session } = (await (
 			await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi", model: "pi-1" })
 		).json()) as CreateSessionResponse;
+		const { ref } = session;
 
-		expect((await get(ROUTES.session(ref))).status).toBe(200);
 		expect((await post(ROUTES.prompt(ref), { text: "first" })).status).toBe(202);
 
 		const adapter = pi.forRef(ref);
@@ -739,12 +748,11 @@ describe("prompting", () => {
 		app = createTestApp({ index, adapters: { pi: renaming }, newId: () => "n1" });
 		const client = await openStream();
 
-		const { ref } = (await (
-			await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" })
-		).json()) as CreateSessionResponse;
+		const { ref } = (
+			(await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" })).json()) as CreateSessionResponse
+		).session;
 		expect(ref.id).toContain("virtual:");
 
-		await get(ROUTES.session(ref));
 		expect((await post(ROUTES.prompt(ref), { text: "first" })).status).toBe(202);
 
 		const real: SessionRef = { backend: "pi", id: REAL };

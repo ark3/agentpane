@@ -73,6 +73,9 @@
  * ark3/agentpane#51 raised it a twentieth, under D30: `sessions/forkAndPrompt`
  * carries a `token` and attaches the fork for the buffer that minted it, as
  * `sessions/attach` does, so an edit sends one request.
+ * ark3/agentpane#48 raised it a twenty-first, under D30: `sessions/create`
+ * starts the session's agent, carries a `token` and answers the session's
+ * summary, attaching it for the token as `sessions/attach` does.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -224,7 +227,19 @@
  *   server does not hold and no file backs answers an error whose `data`
  *   carries `error: "gone"` (D26 point 5); one it holds with nothing on
  *   disk yet answers no nodes.
- * - `sessions/create` -- `{ cwd, backend, model? }` -> the new ref.
+ * - `sessions/create` -- `{ cwd, backend, model?, token }` -> the new
+ *   session's `SessionSummary`, carrying its `handle`. Creates the session
+ *   and starts its agent, as one server operation (D30), and answers once it
+ *   is attached; nothing hits disk until its first turn (D9). A start that
+ *   fails is refused as an attach's would be and leaves no session behind,
+ *   so a retry is a new create. It is also an attach, as
+ *   `sessions/forkAndPrompt` is, for whoever minted `token` (integer,
+ *   always, from the count `sessions/attach`'s come from): the session is
+ *   attached from the `session/snapshot` under the reply's handle that
+ *   carries `token`, sent as for `sessions/attach` and before the reply, and
+ *   released by a `sessions/detach` or `sessions/close` carrying it. Until
+ *   ark3/agentpane#48 it carried no token, started nothing, and answered the
+ *   bare ref.
  * - `models/list` -- `{ backend }` -> array of `{ id, label, efforts,
  *   defaultEffort }`, the HTTP listing unchanged. `efforts` is an array of
  *   `{ id, description }`, the reasoning efforts that model accepts, empty
@@ -484,7 +499,7 @@ export interface SessionParams {
 export interface HelperRequests {
 	"sessions/list": { params: { cwd?: string }; result: SessionSummary[] };
 	"sessions/preview": { params: SessionParams; result: TranscriptNode[] };
-	"sessions/create": { params: CreateSessionRequest; result: SessionRef };
+	"sessions/create": { params: CreateSessionRequest & { token: number }; result: SessionSummary };
 	"models/list": { params: { backend: BackendId }; result: ModelInfo[] };
 	"sessions/attach": { params: SessionParams & { token: number }; result: SessionSummary };
 	"sessions/prompt": { params: SessionParams & PromptRequest; result: PromptResponse | null };

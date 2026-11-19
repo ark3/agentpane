@@ -407,7 +407,7 @@ export function createController(
 	let selectionIntent = 0;
 	/**
 	 * The selection intent the `"attaching"` on the view was published under:
-	 * `attachAndSelect` and `create`, its only writers, set it as they write it,
+	 * `attachAndSelect`, its only writer, which `create` goes through too, sets it as it writes it,
 	 * and `publish` returns `busy` to idle once a newer intent ends that claim
 	 * (OW-nizemu).
 	 */
@@ -1040,19 +1040,26 @@ export function createController(
 		syncPoll();
 	}
 
-	async function attachAndSelect(ref: SessionRef, intent: number): Promise<void> {
+	/**
+	 * Select the session `request` attaches: an attach of `ref`, or a create,
+	 * which starts the new session's agent and answers as an attach does
+	 * (D30). `ref` is null for a create, since nothing names the session until
+	 * the reply.
+	 */
+	async function attachAndSelect(ref: SessionRef | null, intent: number, request: () => Promise<LiveSessionSummary>): Promise<void> {
 		attachingIntent = intent;
 		publish({ busy: "attaching", error: null, models: [], forkIndices: null, modelSetting: modelSettingForSession(ref), effortSetting: effortSettingForSession(ref) });
 		try {
-			const attached = await api.attach(ref);
+			const attached = await request();
+			const requested = ref ?? attached.ref;
 			if (!disposed && intent === selectionIntent) {
-				applyAttached(attached, true, ref);
+				applyAttached(attached, true, requested);
 				publish({ modelSetting: modelSettingForSession(view.state.selected), effortSetting: effortSettingForSession(view.state.selected) });
 				await loadModelsForSelected(intent);
 			} else if (!disposed) {
 				// An older attach is still useful list state, but it no longer owns
 				// selection after a newer user intent.
-				publish({ state: replaceSummary(attached, ref) });
+				publish({ state: replaceSummary(attached, requested) });
 			}
 		} catch (error: unknown) {
 			if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
@@ -1255,22 +1262,10 @@ export function createController(
 		},
 		async create(cwd, backend) {
 			if (!validWorkspace(cwd)) return;
-			const intent = ++selectionIntent;
-			attachingIntent = intent;
-			publish({ busy: "attaching", error: null });
-			try {
-				const created = await api.createSession({ cwd, backend });
-				if (!disposed && intent === selectionIntent) await attachAndSelect(created, intent);
-			} catch (error: unknown) {
-				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
-			} finally {
-				if (!disposed && intent === selectionIntent && view.busy === "attaching") {
-					publish({ busy: "idle" });
-				}
-			}
+			await attachAndSelect(null, ++selectionIntent, () => api.createSession({ cwd, backend }));
 		},
 		async select(ref) {
-			await attachAndSelect(ref, ++selectionIntent);
+			await attachAndSelect(ref, ++selectionIntent, () => api.attach(ref));
 		},
 		async setName(name) {
 			const selected = view.state.selected;

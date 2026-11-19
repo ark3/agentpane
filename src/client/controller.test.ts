@@ -102,7 +102,7 @@ function deferred<T>() {
 }
 
 class FakeApi implements AgentpaneApi {
-	readonly createSession = vi.fn(async (_body: { cwd: string; backend: BackendId }) => ref);
+	readonly createSession = vi.fn(async (_body: { cwd: string; backend: BackendId }) => summary(ref));
 	readonly attach = vi.fn(async (session: SessionRef) => summary(session));
 	readonly preview = vi.fn(
 		async (session: SessionRef, _signal?: AbortSignal): Promise<SessionPreviewResponse> => ({ ref: session, turns: [] }),
@@ -388,15 +388,15 @@ describe("client controller", () => {
 		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
 	});
 
-	it("creates, attaches, and selects the authoritative response ref without prompting", async () => {
+	it("creates with one request, which attaches, and selects the authoritative response ref without prompting (D30)", async () => {
 		const api = new FakeApi();
-		api.attach.mockResolvedValue(summary(attachedRef));
+		api.createSession.mockResolvedValue(summary(attachedRef));
 		const controller = createController(api);
 
 		await controller.create("/work", "pi");
 
 		expect(api.createSession).toHaveBeenCalledWith({ cwd: "/work", backend: "pi" });
-		expect(api.attach).toHaveBeenCalledWith(ref);
+		expect(api.attach).not.toHaveBeenCalled();
 		expect(controller.getView().state.selected).toEqual(attachedRef);
 		expect(api.prompt).not.toHaveBeenCalled();
 	});
@@ -496,7 +496,7 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		const createdRef: SessionRef = { backend: "pi", id: "virtual-created" };
 		const selectedRef: SessionRef = { backend: "codex", id: "thread-selected" };
-		const created = deferred<SessionRef>();
+		const created = deferred<LiveSessionSummary>();
 		api.createSession.mockReturnValue(created.promise);
 		const controller = createController(api);
 
@@ -505,7 +505,7 @@ describe("client controller", () => {
 		expect(controller.getView().state.selected).toEqual(selectedRef);
 		expect(controller.getView().busy).toBe("idle");
 
-		created.resolve(createdRef);
+		created.resolve(summary(createdRef));
 		await creating;
 
 		expect(api.attach).toHaveBeenCalledTimes(1);
@@ -1856,8 +1856,7 @@ describe("client controller", () => {
 	const createdRef: SessionRef = { backend: "pi", id: "/sessions/created.jsonl" };
 
 	function createRenamedAtAttach(api: FakeApi, onDisk: boolean): void {
-		api.createSession.mockResolvedValue({ backend: "pi", id: "virtual:a" });
-		api.attach.mockResolvedValue({ ...summary(createdRef), onDisk });
+		api.createSession.mockResolvedValue({ ...summary(createdRef), onDisk });
 	}
 
 	// A detached session with nothing on disk is gone everywhere -- no file, and
@@ -3210,7 +3209,6 @@ describe("client controller", () => {
 				const api = new FakeApi();
 				api.forkPoints.mockResolvedValue({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 				const created: SessionRef = { backend: "pi", id: "virtual:created" };
-				api.createSession.mockResolvedValue(created);
 				const controller = createController(api);
 				await controller.start();
 				api.open();
@@ -3223,7 +3221,8 @@ describe("client controller", () => {
 				const attaching = deferred<LiveSessionSummary>();
 				if (path === "forkAndSubmit") {
 					api.forkAndPrompt.mockReturnValueOnce(attaching.promise.then((session) => ({ session, disposition: "started" as const })));
-				} else api.attach.mockReturnValueOnce(attaching.promise);
+				} else if (path === "create") api.createSession.mockReturnValueOnce(attaching.promise);
+				else api.attach.mockReturnValueOnce(attaching.promise);
 
 				const landing = path === "select"
 					? controller.select(ref)
@@ -3232,6 +3231,7 @@ describe("client controller", () => {
 						: controller.forkAndSubmit(0);
 				await settle();
 				if (path === "forkAndSubmit") expect(api.forkAndPrompt).toHaveBeenLastCalledWith(ref, { index: 0, text: "reworded" });
+				else if (path === "create") expect(api.createSession).toHaveBeenLastCalledWith({ cwd: "/work", backend: "pi" });
 				else expect(api.attach).toHaveBeenLastCalledWith(target);
 				api.drop();
 				attaching.resolve({ ...summary(target), onDisk: path === "select" });
@@ -3746,13 +3746,12 @@ describe("client controller", () => {
 		// longer holds it.
 		it("lands on the startup view when an attach reply that followed a drop names a session the reconnect's preview answers gone", async () => {
 			const api = new FakeApi();
-			api.createSession.mockResolvedValue(createdRef);
 			const controller = createController(api);
 			await controller.start();
 			api.open();
 			await settle();
 			const attaching = deferred<LiveSessionSummary>();
-			api.attach.mockReturnValueOnce(attaching.promise);
+			api.createSession.mockReturnValueOnce(attaching.promise);
 
 			const creating = controller.create("/work", "pi");
 			await settle();

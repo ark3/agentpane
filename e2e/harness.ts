@@ -204,8 +204,9 @@ const api: AgentpaneApi = {
 	async listSessions() {
 		return [summary()];
 	},
+	// A create starts the session and answers as an attach does (D30).
 	async createSession() {
-		return REF;
+		return api.attach(REF);
 	},
 	async attach() {
 		// The snapshot an attach triggers arrives over SSE, not in the response.

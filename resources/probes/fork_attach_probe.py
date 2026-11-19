@@ -334,12 +334,9 @@ def run_backend(backend: str, workspace: Path, port: int, args: argparse.Namespa
         )
         if create_status != 201:
             raise RuntimeError(f"create failed: HTTP {create_status} {created}")
-        ref = created["ref"]
-        attach_status, attached = http.json("GET", ref_path(ref))
-        if attach_status != 200:
-            raise RuntimeError(f"attach failed: HTTP {attach_status} {attached}")
-        ref = attached["session"]["ref"]
-        handle = attached["session"]["handle"]
+        # The create starts the session and answers as an attach does (D30).
+        ref = created["session"]["ref"]
+        handle = created["session"]["handle"]
         evidence["steps"]["session"] = {"create_http": create_status, "ref": ref, "handle": handle}
 
         # Two turns, so the last fork point is not also the first.

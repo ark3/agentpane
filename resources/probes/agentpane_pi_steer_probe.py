@@ -659,14 +659,12 @@ def main() -> int:
         )
         if create_status != 201:
             raise RuntimeError(f"create failed: HTTP {create_status} {created}")
-        virtual_ref = created["ref"]
-        attach_status, attached = http.json("GET", ref_path(virtual_ref))
-        if attach_status != 200:
-            raise RuntimeError(f"attach failed: HTTP {attach_status} {attached}")
-        # D9: Pi's id is its JSONL path, adopted at attach or on the first
+        # The create starts the session and answers as an attach does (D30).
+        attached = created
+        # D9: Pi's id is its JSONL path, adopted at the start or on the first
         # prompt, so the ref moves under this probe. Every reading below is
         # keyed by the handle instead, which a rename never changes (D24), and
-        # every request goes to the attach reply's ref, which the server keeps
+        # every request goes to the create reply's ref, which the server keeps
         # honouring whatever the session is called later.
         attached_ref = attached["session"]["ref"]
         handle = attached["session"]["handle"]
@@ -678,7 +676,7 @@ def main() -> int:
             raise RuntimeError(f"Pi was not spawned through the sandbox chain: {chain}")
         evidence["checks"]["startup"] = {
             "result": "pass",
-            "http": [create_status, attach_status],
+            "http": [create_status],
             "process_chain": chain,
             "process_tree": tree,
         }
@@ -870,14 +868,14 @@ def main() -> int:
         evidence["final_max_assistant_chars"] = max_assistant_length(stream.snapshot(), handle)
 
         # What the session was called, recorded rather than required: a rename
-        # at attach and one on the first prompt are both D9's contract.
+        # at the start and one on the first prompt are both D9's contract.
         refs = refs_under(stream.snapshot(), handle)
         current = refs[-1] if refs else attached_ref
         evidence["session"] = {
             "handle": handle,
             "refs": refs,
             "renamed_during": (
-                "attach"
+                "create"
                 if not attached_ref["id"].startswith("virtual:")
                 else "first prompt"
                 if not current["id"].startswith("virtual:")

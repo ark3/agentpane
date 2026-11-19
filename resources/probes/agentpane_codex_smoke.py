@@ -160,14 +160,11 @@ def main() -> int:
         )
         if create_status != 201:
             raise RuntimeError(f"create failed: HTTP {create_status} {created}")
-        virtual_ref = created["ref"]
-
-        attach_status, attached = http.json("GET", ref_path(virtual_ref))
-        if attach_status != 200:
-            raise RuntimeError(f"attach failed: HTTP {attach_status} {attached}")
+        # The create starts the session and answers as an attach does (D30).
+        attached = created
         real_ref = attached["session"]["ref"]
         if real_ref["backend"] != "codex" or real_ref["id"].startswith("virtual:"):
-            raise RuntimeError(f"attach did not adopt a Codex thread id: {real_ref}")
+            raise RuntimeError(f"the create did not adopt a Codex thread id: {real_ref}")
 
         tree, workers = process_evidence(server.pid)
         evidence["initial_process_tree"] = tree
@@ -181,7 +178,7 @@ def main() -> int:
         evidence["checks"]["create"] = {
             "timestamp": now(),
             "result": "pass",
-            "http": [create_status, attach_status],
+            "http": [create_status],
             "virtual_id_adopted": True,
             "process_tree": tree,
             "codex_worker_pids": sorted(launched_workers),

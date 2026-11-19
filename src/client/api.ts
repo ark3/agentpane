@@ -77,7 +77,7 @@ export class ApiClientError extends Error {
 
 export interface AgentpaneApi {
 	listSessions(cwd?: string): Promise<SessionSummary[]>;
-	createSession(body: CreateSessionRequest): Promise<SessionRef>;
+	createSession(body: CreateSessionRequest): Promise<LiveSessionSummary>;
 	attach(ref: SessionRef): Promise<LiveSessionSummary>;
 	/**
 	 * Read-only, non-attaching transcript preview (OW-38): spawns nothing.
@@ -186,7 +186,7 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 			return request(
 				ROUTES.sessions,
 				jsonRequest(body),
-				(response) => (response as CreateSessionResponse).ref,
+				(response) => (response as CreateSessionResponse).session,
 			);
 		},
 		attach(ref) {

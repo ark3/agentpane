@@ -531,9 +531,10 @@ but succeeded reads as a failure and leaves the buffer unattached though
 its session is live.  jsonrpc.el's default is 10s, and the one attach
 measured took 1.138s, a re-attach on `pi 0.85.1' on 2026-09-16, driven at
 the HTTP route (docs/MANUAL_TESTING.md, OW-jamoyi); no cold spawn has been
-timed.  60s is what `agentpane-new-session''s synchronous attach already
-allowed, where waiting blocks Emacs; here it blocks nothing, and a hung
-helper costs only a minute before a refused second send is accepted again.")
+timed.  60s is what `agentpane-new-session''s synchronous create, which
+attaches too, allows, where waiting blocks Emacs; here it blocks
+nothing, and a hung helper costs only a minute before a refused second
+send is accepted again.")
 
 (defvar agentpane--absorbed (make-hash-table :test #'eq :weakness 'key)
   "Each transcript buffer a merge has killed, mapped to the buffer that
@@ -866,6 +867,20 @@ another status and that holds no handle, so no watch reads it; see
 (defvar agentpane--attach-sent)
 (defvar agentpane--fork-sent)
 
+(defvar agentpane--creates-sent nil
+  "Each `sessions/create' this Emacs sent whose snapshot has made no buffer
+yet, newest first, as a cons (TOKEN . CWD) of the request's `token' and
+workspace.  The snapshot carrying TOKEN is about a buffer no one has
+made yet, since no transcript buffer sent the request, and is made for
+it (`agentpane--create-answered').  An entry stays when
+`agentpane-new-session' stops waiting on its request, by a quit or a
+timeout, so a snapshot that comes after still finds it; one whose create
+was refused stays too, and nothing ever matches it.")
+
+(defvar agentpane--creating nil
+  "The `token' of the `sessions/create' `agentpane-new-session' is waiting
+on, while it waits; else nil.")
+
 (defun agentpane--notified-buffer (method params)
   "The transcript buffer the notification METHOD, with PARAMS, is about.
 The buffer holding the notification's handle, save a snapshot's that
@@ -896,6 +911,10 @@ holds as `agentpane--fork-sent' (ark3/agentpane#51), and is about the
 fork's own buffer, which no one has made yet: it is made for the
 snapshot's ref, holding the token as the attach it sent, so its detach
 releases it (`agentpane--fork-buffer').
+So does the snapshot that attaches a session `agentpane-new-session''s
+`sessions/create' made, whose `token' `agentpane--creates-sent' holds
+\(ark3/agentpane#48): it is made in the create's workspace
+\(`agentpane--create-answered').
 
 A snapshot whose `token' no buffer holds -- that of an attach its buffer
 gave up waiting for and has sent another since, or a killed buffer's --
@@ -937,6 +956,7 @@ them, which shows it, streaming and all."
       ('session/snapshot
        (or (and token (agentpane--buffer-sent token))
            (and token (agentpane--fork-answered token ref))
+           (and token (agentpane--create-answered token ref))
            (and handle (agentpane--buffer-holding handle))
            (and (not token)
                 (or (agentpane--buffer-for ref (lambda () agentpane--handle))
@@ -2630,10 +2650,34 @@ sent its `sessions/forkAndPrompt' with (`agentpane--fork-sent'); else nil."
 there is none, in PARENT's project, holding TOKEN, its request's, as the
 attach it sent: the helper answers that request as an attach of the fork
 for this buffer, and holds the attachment until a detach releases the
-token (`sessions/forkAndPrompt' in src/emacs/protocol.ts).  A buffer
-made here is drawn empty under its header, as `agentpane--fork-at'
-draws the fork it opens, until a snapshot draws it."
-  (let* ((summary (list :ref ref :cwd (plist-get (buffer-local-value 'agentpane--session parent) :cwd)))
+token (`sessions/forkAndPrompt' in src/emacs/protocol.ts); see
+`agentpane--token-buffer'."
+  (agentpane--token-buffer
+   (plist-get (buffer-local-value 'agentpane--session parent) :cwd) ref token))
+
+(defun agentpane--create-answered (token ref)
+  "The buffer for REF, made, where TOKEN is that of a `sessions/create'
+in `agentpane--creates-sent', which it then leaves; else nil.
+It is made in the create's workspace holding TOKEN as the attach it sent:
+the helper answers that request as an attach for this buffer
+\(`sessions/create' in src/emacs/protocol.ts).  One made once
+`agentpane-new-session' has stopped waiting on the request, quit or
+timed out, is not shown, and the echo area says where it is."
+  (let ((sent (assq token agentpane--creates-sent)))
+    (when sent
+      (setq agentpane--creates-sent (delq sent agentpane--creates-sent))
+      (let ((buffer (agentpane--token-buffer (cdr sent) ref token)))
+        (unless (eql token agentpane--creating)
+          (message "agentpane: the new session is ready in %s" (buffer-name buffer)))
+        buffer))))
+
+(defun agentpane--token-buffer (cwd ref token)
+  "The transcript buffer for REF, made if there is none, in CWD, holding
+TOKEN as the attach it sent, so its detach releases it: that of a request
+the helper answers as an attach for the buffer, though no buffer sent it.
+A buffer made here is drawn empty under its header, as
+`agentpane--fork-at' draws the fork it opens, until a snapshot draws it."
+  (let* ((summary (list :ref ref :cwd cwd))
          (buffer (agentpane--transcript-buffer summary)))
     (with-current-buffer buffer
       (unless (eql agentpane--attach-sent token)
@@ -3061,7 +3105,7 @@ standing is a buffer that holds the handle or will once it handles the
 snapshot on its way, or an attach of a buffer still to release it.  The
 handle it carries beside them stops nothing.  So it is sent from any
 buffer that has sent an attach, whatever this buffer believes of it: one
-that failed here -- timed out, or quit in `agentpane-new-session' -- may
+that failed here -- timed out, or quit in `agentpane--attach-now' -- may
 still have succeeded in the helper, and one whose snapshot this buffer
 was killed before handling left the helper sending under that handle.
 The helper forgets a claim wherever the attachment goes, so from a
@@ -3678,8 +3722,8 @@ when the request fails, which is reported in the echo area.  It is how
 `agentpane-new-session' holds the effort back until the model is taken.
 
 Interactively a session not yet attached is attached before the models
-are read, and synchronously, as `agentpane-new-session' does and for its
-reason: the server answers `models/list' from a live adapter of the
+are read, and synchronously, as `agentpane-new-session' creates, and for
+its reason: the server answers `models/list' from a live adapter of the
 backend, or else from an unstarted one, which for Codex or Pi fails.
 Read first, they were unreadable for a created session never prompted
 whenever no other session of its backend was live, as after a server
@@ -4305,17 +4349,20 @@ live, else in the selected one, and returned."
   "Create a session on BACKEND in the current buffer's project, open its
 buffer attached, and read its model from `models/list' with completion,
 then its effort, when that model offers any.
-The model is read after the attach, as the browser reads it: at 118a46a
-`sessions/create' records the session without spawning anything, and the
-server answers `models/list' for Codex or Pi only from a live adapter,
-failing with \"codex adapter not started\" before one exists (measured
-2026-09-22).  The attach is synchronous for the same reason the model
-list is; see `agentpane--read-model'.
-
-The buffer is shown before the attach, so one that fails or is quit
-leaves the new session in view, unattached, where a send attaches it
-again and `M-x agentpane-set-model' still applies; shown only after, it
-stayed hidden, holding the session.
+`sessions/create' starts the session's agent as it creates it, as one
+server operation (D30), and answers once the session is attached: the
+snapshot carrying its `token' makes the buffer and attaches it, which
+the helper writes before the reply (`agentpane--create-answered').  The
+model is read after that, as the browser reads it: the server answers
+`models/list' for Codex or Pi only from a live adapter, failing with
+\"codex adapter not started\" before one exists (measured 2026-09-22).
+The create is synchronous for the same reason the model list is; see
+`agentpane--read-model'.  A create the server refused leaves no session
+behind, and no buffer; one quit or timed out leaves its token waiting,
+so the session's buffer is made when its snapshot comes, though not
+shown.  A reply with no snapshot having attached a buffer, which the
+helper sends only once it expects none, shows the session's buffer, not
+attached, and signals.
 
 The efforts offered are the model's just chosen, since the status naming
 it may not have arrived, or with an empty choice those of the model the
@@ -4329,14 +4376,19 @@ checked against the old one (OW-zayefe).  A model that fails is reported
 in the echo area, and the effort read for it is never sent."
   (interactive (list (completing-read "Backend: " '("codex" "claude" "pi") nil t)))
   (let* ((cwd (agentpane--current-cwd))
-         (ref (jsonrpc-request (agentpane--connection) 'sessions/create
-                               (list :cwd cwd :backend backend)))
-         (summary (list :ref ref :cwd cwd))
-         (buffer (agentpane--transcript-buffer summary)))
+         (token (agentpane--attach-token))
+         (summary (progn
+                    (push (cons token cwd) agentpane--creates-sent)
+                    (let ((agentpane--creating token))
+                      (jsonrpc-request (agentpane--connection) 'sessions/create
+                                       (list :cwd cwd :backend backend :token token)
+                                       :timeout agentpane--spawn-timeout))))
+         (buffer (or (agentpane--buffer-sent token)
+                     (agentpane--token-buffer cwd (plist-get summary :ref) token))))
+    (setq agentpane--creates-sent (assq-delete-all token agentpane--creates-sent))
     (pop-to-buffer buffer '(display-buffer-same-window))
-    (with-current-buffer buffer
-      (agentpane--draw [] (agentpane--transcript-header summary))
-      (agentpane--attach-now))
+    (unless (agentpane--attached-p)
+      (user-error "The create answered, but the session did not attach"))
     (let ((model (agentpane--read-model backend))
           (taken nil)
           (effort nil))

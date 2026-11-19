@@ -185,7 +185,6 @@ describe("requests", () => {
 	it("forwards each verb to its route and answers null where the route has no body", async () => {
 		const model = { id: "m", label: "M", efforts: [{ id: "low", description: "Fast" }], defaultEffort: "low" };
 		const { io, calls } = start({
-			[`POST ${ROUTES.sessions}`]: () => json({ ref: pi }),
 			[`GET ${ROUTES.models}?backend=pi`]: () => json({ models: [model] }),
 			[`POST ${ROUTES.prompt(pi)}`]: noContent,
 			[`POST ${ROUTES.abort(pi)}`]: () => json({ queued: ["first steer", "second steer"] }),
@@ -198,7 +197,6 @@ describe("requests", () => {
 			[`DELETE ${ROUTES.error(pi)}`]: noContent,
 		});
 		const requests = [
-			["sessions/create", { cwd: "/work", backend: "pi" }, pi],
 			["models/list", { backend: "pi" }, [model]],
 			["sessions/prompt", { session: pi, text: "hello", priorErrorId: "e4" }, null],
 			// The prompts the stop took out of Pi's queue come back to the caller (OW-wisifo).
@@ -268,6 +266,33 @@ describe("requests", () => {
 				data: { status: 409, error: "turn_active", detail: "a turn is already running" },
 			},
 		});
+	});
+
+	/**
+	 * A create starts the session and attaches it (D30): its snapshot, carrying
+	 * the token, binds the new buffer as an attach's does (D25), and the reply
+	 * goes after it. The token goes nowhere but back.
+	 */
+	it("answers a create after the snapshot that attaches the session, carrying its token (D30)", async () => {
+		const created = summary(pi, "h9");
+		const { io, source, calls } = start({ [`POST ${ROUTES.sessions}`]: () => json({ session: created }, 201) });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/create", params: { cwd: "/work", backend: "pi", token: 7 } });
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.out).toEqual([]);
+		source.emit({ type: "snapshot", session: pi, handle: "h9", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		await io.until(2);
+
+		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { session: pi, handle: "h9", token: 7 } });
+		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 4, result: created });
+		expect(calls.find((call) => call.url === ROUTES.sessions)?.body).toEqual({ cwd: "/work", backend: "pi" });
+	});
+
+	it("binds nothing for a refused create (D30)", async () => {
+		const { io } = start({ [`POST ${ROUTES.sessions}`]: () => json({ error: "internal_error", detail: "sbox: no git root" }, 500) });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/create", params: { cwd: "/work", backend: "pi", token: 7 } });
+		await io.until(1);
+		expect(io.notifications()).toEqual([]);
+		expect(io.response(4)!["error"]).toMatchObject({ code: 500, data: { error: "internal_error", detail: "sbox: no git root" } });
 	});
 
 	/**

@@ -616,7 +616,21 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			// A preview is a stored session, never live, so nothing in it is running.
 			return projectTranscript(previewMessages(preview.turns), false, render);
 		},
-		"sessions/create": (params) => api.createSession(params),
+		// An attach of the new session for whoever sent `token`, as well as the
+		// operation (D30), bound as `sessions/attach` binds its own.
+		"sessions/create": async ({ token, ...body }) => {
+			const attach: Attaching = { token, seen: new Set(), done: false };
+			attaching.add(attach);
+			try {
+				await openStream();
+				if (attach.done) throw new Error("the create was given up before it was sent");
+				const summary = await api.createSession(body);
+				await bind(attach, summary.handle);
+				return summary;
+			} finally {
+				attaching.delete(attach);
+			}
+		},
 		"models/list": ({ backend }) => api.listModels(backend),
 		"sessions/attach": async ({ session, token }) => {
 			const attach: Attaching = { token, seen: new Set(), done: false };

@@ -58,12 +58,13 @@ describe("agentpane API", () => {
 		expect(fetch).toHaveBeenCalledWith(ROUTES.sessions, { method: "GET" });
 	});
 
-	it("creates a session with a JSON body and unwraps its ref", async () => {
-		const fetch = fetchRecorder(response({ ref }, 201));
+	it("creates a session with a JSON body and unwraps its live summary (D30)", async () => {
+		const session = { ...summary, status: "attached" as const, handle: "h1" };
+		const fetch = fetchRecorder(response({ session }, 201));
 		const api = createAgentpaneApi({ fetch });
 		const body = { cwd: "/work", backend: "pi" as const };
 
-		expect(await api.createSession(body)).toEqual(ref);
+		expect(await api.createSession(body)).toEqual(session);
 		expect(fetch).toHaveBeenCalledWith(ROUTES.sessions, {
 			method: "POST",
 			headers: { "content-type": "application/json" },

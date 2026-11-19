@@ -265,14 +265,11 @@ def main() -> int:
         )
         if create_status != 201:
             raise RuntimeError(f"create failed: HTTP {create_status} {created}")
-        virtual_ref = created["ref"]
-        if not virtual_ref["id"].startswith("virtual:"):
-            raise RuntimeError(f"a new Pi session should be virtual until prompted: {virtual_ref}")
-
-        attach_status, attached = http.json("GET", ref_path(virtual_ref))
-        if attach_status != 200:
-            raise RuntimeError(f"attach failed: HTTP {attach_status} {attached}")
-        attached_ref = attached["session"]["ref"]
+        # The create starts the session and answers as an attach does (D30),
+        # with the ref it has once started: a `virtual:` one where Pi named no
+        # path at start, else Pi's own.
+        attached = created
+        attached_ref = virtual_ref = attached["session"]["ref"]
 
         tree, workers = process_evidence(server.pid)
         launched_workers.update(row["pid"] for row in workers)
@@ -292,8 +289,8 @@ def main() -> int:
         evidence["checks"]["startup"] = {
             "timestamp": now(),
             "result": "pass",
-            "http": [create_status, attach_status],
-            "still_virtual_after_attach": attached_ref["id"].startswith("virtual:"),
+            "http": [create_status],
+            "still_virtual_after_create": attached_ref["id"].startswith("virtual:"),
             "process_chain": chain,
             "process_tree": tree,
             "pi_worker_pids": sorted(launched_workers),
@@ -301,14 +298,14 @@ def main() -> int:
 
         # -- 2. streaming transcript, prompted through the created id ------
         #
-        # Every reading from here on is keyed by the handle the attach reply
+        # Every reading from here on is keyed by the handle the create's reply
         # carried, which a rename never changes (D24); since OW-mofuho retired
         # the `renamed` event (2026-09-25), a snapshot under that handle
         # carrying the new ref is all a rename is on the wire. So the probe
         # never waits for one: a move is something it records in section 3.
         handle = attached["session"].get("handle")
         if not isinstance(handle, str) or not handle:
-            raise RuntimeError(f"attach answered no handle: {attached['session']}")
+            raise RuntimeError(f"the create answered no handle: {attached['session']}")
 
         first_start = len(stream.snapshot())
         prompt_status, prompt_body = http.json(
@@ -351,13 +348,15 @@ def main() -> int:
         # the prompt. Observed instead on pi 0.84.1: Pi has named the session
         # file by the time `start()`'s `get_state` probe answers, so the rename
         # lands during *attach* (on 0.87.1 the file itself is not written until
-        # the first turn's reply ends). Both orderings are legitimate -- the
-        # adapter's contract is that `ref` is unstable at two points, not that
-        # it changes at exactly one -- so this reads, once the first turn is
-        # over, every ref the handle carried and which of the two moved it.
+        # the first turn's reply ends), which since D30 is inside the create, so
+        # the create answers the moved ref and only a rename on the first prompt
+        # is seen by the client. Both orderings are legitimate -- the adapter's
+        # contract is that `ref` is unstable at two points, not that it changes
+        # at exactly one -- so this reads, once the first turn is over, every
+        # ref the handle carried and which of the two moved it.
         refs = refs_under(stream.snapshot(), handle)
         if not refs:
-            raise RuntimeError(f"no event arrived under the attach reply's handle {handle}")
+            raise RuntimeError(f"no event arrived under the create reply's handle {handle}")
         real_ref = refs[-1]
         if real_ref.get("backend") != "pi":
             raise RuntimeError(f"the handle's events carried no Pi ref: {refs}")
@@ -375,7 +374,7 @@ def main() -> int:
             "result": "pass",
             "handle": handle,
             "refs": refs,
-            "renamed_during": "attach" if not attached_ref["id"].startswith("virtual:") else "first prompt",
+            "renamed_during": "create" if not attached_ref["id"].startswith("virtual:") else "first prompt",
             "adopted_id_is_jsonl_path": True,
             "prompt_via_created_id_http_status": prompt_status,
             "superseded_id_still_resolves": alias_status == 200,

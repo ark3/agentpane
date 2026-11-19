@@ -371,12 +371,14 @@ def run_agentpane(args: argparse.Namespace, pi: str, home: Path, workspace: Path
             return None
 
         def attach(ref: dict[str, str]) -> dict[str, Any]:
-            status, body = http.json("GET", ref_path(ref))
+            return attached(*http.json("GET", ref_path(ref)))
+
+        def attached(status: int, body: Any) -> dict[str, Any]:
             track()
             session = (body or {}).get("session") or {}
             return {"status": status, "ref": session.get("ref"), "handle": session.get("handle"),
                     "isStreaming": session.get("isStreaming"), "onDisk": session.get("onDisk"),
-                    **({} if status == 200 else {"body": body})}
+                    **({} if status in (200, 201) else {"body": body})}
 
         def idle(handle: str, start: int, timeout: float = 120) -> None:
             def seen(events: list[tuple[str, dict[str, Any]]]) -> Any:
@@ -395,7 +397,8 @@ def run_agentpane(args: argparse.Namespace, pi: str, home: Path, workspace: Path
         status, created = http.json("POST", "/api/sessions", {"cwd": str(workspace), "backend": "pi", "model": args.model})
         if status != 201:
             raise RuntimeError(f"create failed: HTTP {status} {created}")
-        first = attach(created["ref"])
+        # The create starts the session and answers as an attach does (D30).
+        first = attached(status, created)
         ref, handle = first["ref"], first["handle"]
         out["attach"] = {**first, "file_exists": Path(ref["id"]).exists()}
         out["model_on_wire"] = next((e.get("model") for _, e in reversed(stream.snapshot())

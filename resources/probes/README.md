@@ -51,11 +51,7 @@ Verified with: `codex-cli` 0.147.0; the steer phase with `codex-cli` 0.154.0 on 
 
 ## `agentpane_codex_smoke.py`
 
-Proves the assembled application path with a real Codex process: build and
-serve the production client, create/attach through REST, observe incremental
-SSE transcript updates and idle completion, reconnect and verify a repaint
-without another native worker, abort a long turn, then shut the server down and
-verify the run-scoped worker exited.
+Proves the assembled application path with a real Codex process: build and serve the production client, create through REST, which attaches (D30), observe incremental SSE transcript updates and idle completion, reconnect and verify a repaint without another native worker, abort a long turn, then shut the server down and verify the run-scoped worker exited.
 
 ```bash
 python3 agentpane_codex_smoke.py \
@@ -75,6 +71,7 @@ The abort phase waits for the long turn to hold 20000 characters of its own text
 Verified with the change: `codex-cli` 0.157.1 on the home server, 2026-09-30; see `docs/MANUAL_TESTING.md`, "The smoke probes abort the long turn's own text, twenty thousand characters in (OW-sofige)".
 
 Verified with: `codex-cli` 0.157.1 on the home server, 2026-09-30, with the explicit `--model`; see `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
+Verified after the create began to start the session (ark3/agentpane#48): `codex-cli` 0.170.0 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
 
 ## `agentpane_pi_smoke.py`
 
@@ -99,12 +96,13 @@ It passes `--model` explicitly, through the create-session route's `model` field
 Its abort phase is the Codex harness's: it waits for 20000 characters of the long turn's own text and reports the length off that turn's messages alone (OW-sofige).
 Verified with the change: `pi` 0.87.1 on the home server, 2026-09-30, both bare and with `--tool-check`; see the same OW-sofige section.
 
-It keys every wait by the handle the attach reply carried and reads the rename after the first turn, recording in `checks.rename` every ref the handle carried and whether the move came at attach or on the first prompt (OW-niwusi).
+It keys every wait by the handle the create's reply carried and reads the rename after the first turn, recording in `checks.rename` every ref the handle carried and whether the move came at the start, inside the create since D30, or on the first prompt (OW-niwusi).
 Verified with: `pi` 0.87.1 on the home server, 2026-09-30, both bare and with `--tool-check`, with the explicit `--model`, after the move to the handle; see `docs/MANUAL_TESTING.md`, "The live Pi probes follow a session by its handle (OW-niwusi)".
 The runs before that move are "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
 Its first runs on that machine were on `pi` 0.85.1, 2026-09-13; see "The Pi smoke probe runs on the home server, end to end through the built server" (OW-moradi) for what that evidence said and the three defects it exposed (OW-guvojo, OW-hahohi, OW-lapuye).
 Verified in a session whose own sandbox mounts `~/.pi/agent` read-only, the case `PI_CODING_AGENT_DIR` exists for: `pi` 1.2.0 on the home server, 2026-10-14, with `--tool-check` and the explicit `--model`, in a session launched by `card run`, the first run that records its launch; the OW-niwusi runs had `~/.pi/agent/sessions` read-only too.
 See `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes in a `card run` session whose `~/.pi/agent` is read-only (OW-fitopi)".
+Verified after the create began to start the session (ark3/agentpane#48): `pi` 1.5.2 on the home server, 2026-11-19, with and without `--tool-check`; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
 
 ## `agentpane_pi_steer_probe.py`
 
@@ -145,6 +143,7 @@ Verified with: `pi` 0.85.1 on the home server, 2026-09-14, six runs.
 What it showed is `docs/MANUAL_TESTING.md`, "A prompt posted mid-turn is steered into Pi's running turn (OW-yuyofu)".
 It could not pass again after OW-mofuho retired the `renamed` event it waited for (2026-09-25), until OW-niwusi keyed its waits by the handle the attach reply carried; verified again with `pi` 0.87.1 on the home server, 2026-09-30, one run, in "The live Pi probes follow a session by its handle (OW-niwusi)".
 `--turn tool` verified with `pi` 0.87.1 on the home server, 2026-09-30, four runs, with the text turn re-run once beside them, in "Pi's steer waits for the whole tool batch (OW-nufitu)".
+Verified after the create began to start the session (ark3/agentpane#48): `pi` 1.5.2 on the home server, 2026-11-19, one run; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
 
 ## `agentpane_pi_prompt_window_probe.py`
 
@@ -166,6 +165,7 @@ It records rather than asserts: the output is the evidence, and it exits non-zer
 Costs tokens: about ten one-word model calls for part `rpc` and six for part `agentpane`, the latter one per extension command plus three.
 
 Verified with: `pi` 1.2.0 on the home server, 2026-10-14, five runs, in `docs/MANUAL_TESTING.md`, "A second Pi prompt sent before the first's `agent_start` is refused, and an extension command's is answered with nothing (OW-kokotu)".
+Run after the create began to start the session (ark3/agentpane#48), `--part agentpane` only: `pi` 1.5.2 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
 
 ## `agentpane_pi_fork_first_turn_probe.py`
 
@@ -187,10 +187,11 @@ It records rather than asserts, and exits non-zero only when a part could not ru
 Costs tokens: two long turns cut a few hundred characters in, and three one-word turns.
 
 Verified with: `pi` 1.2.0 on the home server, 2026-10-14, two runs, in `docs/MANUAL_TESTING.md`, "A Pi session's file appears at its first user message, and a fork at that message has none when `fork` returns (OW-tigaye)".
+Run after the create began to start the session (ark3/agentpane#48), `--part agentpane` only: `pi` 1.5.2 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
 
 ## `loopback_token_repro_probe.py`
 
-Proves: **a separate process holding no token can create a Pi session in a directory nobody gave it, and attach to it, which spawns the agent there**.
+Proves: **a separate process holding no token can create a Pi session in a directory nobody gave it, which since D30 spawns the agent there, and attach to it**.
 It sends neither `Authorization` nor `Origin` nor `Sec-Fetch-Site`, as any local non-browser process can; its `Http` client is built with `send_token=False`, so it never picks up the token the other probes send.
 Its passing condition is refusal: it passes (exit 0) only when both the create and the attach are answered 401 or 403, fails (exit 1) when either is answered 2xx, and is inconclusive (exit 2) on anything else; exit 3 means it could not close what it attached or clean up.
 
@@ -203,9 +204,10 @@ python3 loopback_token_repro_probe.py --base-url http://127.0.0.1:PORT  # target
 By default it builds and starts the production server, as `agentpane_pi_smoke.py` does, with Pi on a throwaway `PI_CODING_AGENT_DIR`; with `--base-url` it starts nothing.
 The session's `cwd` is a fresh `/var/tmp` directory holding only `.sandbox-workspace`, so `sbox` accepts it and a server outside the probe's sandbox sees it too.
 The create carries the pinned `--model`; nothing is prompted, so no model is charged.
-An attached session is closed through the ref the attach answered, and in its own-server mode the probe also records the Pi pids the attach spawned and that none outlived the close.
+A session the create or the attach started is closed through the ref the attach answered, else the create, and in its own-server mode the probe also records the Pi pids running then and that none outlived the close.
 
 Verified with: `pi` 1.5.2 on the home server, 2026-11-13, against the server at `ada7204d`, where it reproduced the exposure; the run is recorded in the message of the commit that added this probe.
+Run after the create began to start the session (ark3/agentpane#48), against its own server: `pi` 1.5.2 on the home server, 2026-11-19, where both requests were refused 401; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
 
 ## `sbox_token_mask_probe.py`
 

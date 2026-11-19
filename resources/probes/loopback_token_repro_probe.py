@@ -4,8 +4,9 @@
 What it proves: any process that can reach agentpane's loopback port gets the
 whole API. Acting as a non-browser client -- no `Authorization`, no `Origin`,
 no `Sec-Fetch-Site` -- it creates a Pi session (`POST /api/sessions`) whose
-`cwd` is a fresh directory it was never given by anyone, then attaches to it
-(`GET` of the session route), which spawns the agent there. A sandboxed agent
+`cwd` is a fresh directory it was never given by anyone, which since D30
+spawns the agent there, then attaches to it (`GET` of the session route),
+the route that spawns a stored one. A sandboxed agent
 shares the host's loopback (`sbox` keeps the network), so it can do the same.
 
 Its passing condition is refusal: it **passes** (exit 0) only when the server
@@ -30,9 +31,9 @@ Two modes:
 The workspace is a fresh directory under `/var/tmp` holding an empty
 `.sandbox-workspace`, because `sbox` refuses as a workspace a directory with
 neither a marker file nor a git root, and an attach whose agent exits at once
-would be inconclusive. If an attach succeeds the probe closes that session
-(`DELETE` on the ref the attach answered, which may differ from the one in the
-URL) so no agent is left running.
+would be inconclusive. If the create or the attach succeeds the probe closes
+that session (`DELETE` on the ref the attach answered, else the create, which
+may differ from the one the server minted) so no agent is left running.
 
 The create carries the pinned `model`, as `agentpane_pi_smoke.py` sends, but
 the probe never prompts, so no model is charged.
@@ -208,20 +209,23 @@ def main() -> int:
         evidence["requests"].append(create)
         create_status = create["status"]
 
-        created_ref = create["body"].get("ref") if isinstance(create["body"], dict) else None
+        created = create["body"].get("session", {}) if isinstance(create["body"], dict) else {}
+        created_ref = created.get("ref") if isinstance(created, dict) else None
         target_ref = created_ref if isinstance(created_ref, dict) else PLACEHOLDER_REF
         attach = call(http, "GET", ref_path(target_ref))
         evidence["requests"].append(attach)
         attach_status = attach["status"]
 
-        if 200 <= attach_status < 300:
-            # The attach's own ref, not the URL's: attaching is where a session
-            # first adopts its backend's id, and `summary.ref` is authoritative.
+        if 200 <= attach_status < 300 or 200 <= create_status < 300:
+            # The attach's own ref, else the create's: a session first adopts
+            # its backend's id at its start, and `summary.ref` is authoritative.
             session = attach["body"].get("session", {}) if isinstance(attach["body"], dict) else {}
+            if not 200 <= attach_status < 300:
+                session = created
             attached_ref = session.get("ref")
             if not isinstance(attached_ref, dict):
                 close_ok = False
-                evidence["close_error"] = "the attach answered no session.ref, so the session was not closed"
+                evidence["close_error"] = "neither the attach nor the create answered a session.ref, so the session was not closed"
             else:
                 close_ok = False
                 # Only a server this run started is a tree it may inspect, so

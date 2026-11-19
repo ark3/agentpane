@@ -7670,37 +7670,92 @@ that same handle, raises nothing when a turn from elsewhere ends unseen
       (funcall status nil)
       (should-not (agentpane-test--turn-done-p)))))
 
-;;;; A new session whose attach fails, against a stub jsonrpc
+;;;; A new session whose create does not attach, against a stub jsonrpc
 
-(ert-deftest agentpane-test-new-session-shown-when-its-attach-fails ()
-  "A new session whose attach signals, or is quit, is left in the selected
-window, where a send attaches it again, rather than in a buffer never shown."
-  (let ((ref '(:backend "codex" :id "virtual-1"))
-        (buffers (buffer-list)))
-    (dolist (failure '((error "attach failed") (quit)))
-      (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
-                ((symbol-function 'jsonrpc-request)
-                 (lambda (_connection method &rest _)
-                   (pcase method
-                     ('sessions/create ref)
-                     ('sessions/attach (signal (car failure) (cdr failure)))))))
-        (unwind-protect
-            (save-window-excursion
-              ;; `should-error' catches only `error' and its children.
-              (should (eq (condition-case err (progn (agentpane-new-session "codex") nil)
-                            ((error quit) (car err)))
-                          (car failure)))
-              (should (agentpane--buffer-for ref))
-              (should (eq (window-buffer (selected-window)) (agentpane--buffer-for ref))))
-          (dolist (buffer (buffer-list))
-            (unless (memq buffer buffers) (kill-buffer buffer))))))))
+(defmacro agentpane-test--with-create-stub (create &rest body)
+  "Run BODY with `sessions/create' answered by CREATE, a function of the
+request's params, against a stub connection, then kill every buffer BODY
+made and forget every create it left waiting."
+  (declare (indent 1))
+  `(let ((agentpane--connection 'connection)
+         (agentpane--creates-sent nil)
+         (buffers (buffer-list)))
+     (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
+               ((symbol-function 'jsonrpc-running-p) (lambda (_) t))
+               ((symbol-function 'jsonrpc-async-request) #'ignore)
+               ((symbol-function 'jsonrpc-request)
+                (lambda (_connection method params &rest _)
+                  (pcase method
+                    ('sessions/create (funcall ,create params))))))
+       (unwind-protect
+           (save-window-excursion ,@body)
+         (dolist (buffer (buffer-list))
+           (unless (memq buffer buffers) (kill-buffer buffer)))))))
+
+(ert-deftest agentpane-test-new-session-refused-makes-no-buffer ()
+  "A create the server refused leaves no session behind, so it makes no
+buffer, and the error reaches the caller (D30)."
+  (let ((ref '(:backend "codex" :id "virtual:1")))
+    (agentpane-test--with-create-stub
+        (lambda (_) (signal 'jsonrpc-error '("sbox: no git root")))
+      (should-error (agentpane-new-session "codex") :type 'jsonrpc-error)
+      (should-not (agentpane--buffer-for ref)))))
+
+(ert-deftest agentpane-test-new-session-quit-makes-the-buffer-at-its-snapshot ()
+  "A create quit before its snapshot came leaves its token waiting: the
+snapshot carrying it, arriving later, makes the session's buffer, attached
+and not shown, and the echo area names it (ark3/agentpane#48)."
+  (let ((ref '(:backend "codex" :id "virtual:1"))
+        (token nil))
+    (agentpane-test--with-create-stub
+        (lambda (params)
+          (setq token (plist-get params :token))
+          (signal 'quit nil))
+      (let ((shown (window-buffer (selected-window)))
+            (messages nil))
+        (should (eq (condition-case err (progn (agentpane-new-session "codex") nil)
+                      (quit (car err)))
+                    'quit))
+        (should-not (agentpane--buffer-for ref))
+        (cl-letf (((symbol-function 'message)
+                   (lambda (format &rest args) (push (apply #'format-message format args) messages))))
+          (agentpane-test--attach-snapshot ref :token token))
+        (let ((buffer (agentpane--buffer-for ref)))
+          (should buffer)
+          (with-current-buffer buffer
+            (should (agentpane--attached-p))
+            (should (eql agentpane--attach-sent token)))
+          (should (eq (window-buffer (selected-window)) shown))
+          (should (string-match-p (regexp-quote (buffer-name buffer)) (car messages))))
+        (should-not agentpane--creates-sent)))))
+
+(ert-deftest agentpane-test-new-session-with-no-snapshot-shows-it-and-signals ()
+  "A create answered with no snapshot having attached a buffer -- which the
+helper sends only once it expects none -- shows the session's buffer, not
+attached, holding the create's token so its detach releases it, and
+signals, reading no model."
+  (let ((ref '(:backend "codex" :id "virtual:1"))
+        (token nil))
+    (agentpane-test--with-create-stub
+        (lambda (params)
+          (setq token (plist-get params :token))
+          (list :ref ref :cwd default-directory :handle "h1"))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest _) (error "Read a model"))))
+        (should-error (agentpane-new-session "codex") :type 'user-error))
+      (let ((buffer (agentpane--buffer-for ref)))
+        (should (eq (window-buffer (selected-window)) buffer))
+        (with-current-buffer buffer
+          (should-not (agentpane--attached-p))
+          (should (eql agentpane--attach-sent token))))
+      (should-not agentpane--creates-sent))))
 
 ;;;; A new session's model and effort, against a stub jsonrpc
 
 (defun agentpane-test--new-session (choices &optional current held)
   "Run `agentpane-new-session' on Codex against a stub jsonrpc whose
 `models/list' answers `agentpane-test--models' and whose prompts answer
-CHOICES in turn, the attach's snapshot naming CURRENT as the model when
+CHOICES in turn, the create's snapshot naming CURRENT as the model when
 it is non-nil.  Return the requests sent, in order, each as its method or, for
 `sessions/setModel' and `sessions/setEffort', as the method and the value
 set, then the collections offered.
@@ -7730,14 +7785,13 @@ its answer waits until `agentpane-new-session' has returned, and the symbol
                    (unless held
                      (funcall answer)))))
               ((symbol-function 'jsonrpc-request)
-               (lambda (_connection method &rest _)
+               (lambda (_connection method params &rest _)
                  (push method sent)
                  (pcase method
-                   ('sessions/create ref)
-                   ('sessions/attach
-                    (apply #'agentpane-test--attach-snapshot ref
+                   ('sessions/create
+                    (apply #'agentpane-test--attach-snapshot ref :token (plist-get params :token)
                            (and current (list :isStreaming :json-false :model current)))
-                    (list :ref ref))
+                    (list :ref ref :handle "h1"))
                    ('models/list agentpane-test--models))))
               ;; The mode line's own listing, which these tests do not measure.
               ((symbol-function 'jsonrpc-async-request) #'ignore)
@@ -7761,7 +7815,7 @@ its answer waits until `agentpane-new-session' has returned, and the symbol
 answered, so the server checks it against the model just chosen, not the
 one the session had (OW-zayefe)."
   (should (equal (agentpane-test--new-session '("gpt-5.6-sol" "medium") "gpt-5.6-luna" t)
-                 '((sessions/create sessions/attach models/list
+                 '((sessions/create models/list
                     (sessions/setModel "gpt-5.6-sol") models/list
                     answered (sessions/setEffort "medium"))
                    (("gpt-5.6-luna" "gpt-5.6-sol" "plain") ("medium"))))))
@@ -7770,7 +7824,7 @@ one the session had (OW-zayefe)."
   "`agentpane-new-session' reads an effort after the model, offering the
 efforts of the model just chosen, and sets it after the model."
   (should (equal (agentpane-test--new-session '("gpt-5.6-sol" "medium") "gpt-5.6-luna")
-                 '((sessions/create sessions/attach models/list
+                 '((sessions/create models/list
                     (sessions/setModel "gpt-5.6-sol") models/list
                     (sessions/setEffort "medium"))
                    (("gpt-5.6-luna" "gpt-5.6-sol" "plain") ("medium"))))))
@@ -7779,7 +7833,7 @@ efforts of the model just chosen, and sets it after the model."
   "`agentpane-new-session' prompts for no effort when the model chosen
 offers none."
   (should (equal (agentpane-test--new-session '("plain" "low"))
-                 '((sessions/create sessions/attach models/list
+                 '((sessions/create models/list
                     (sessions/setModel "plain") models/list)
                    (("gpt-5.6-luna" "gpt-5.6-sol" "plain"))))))
 
@@ -7787,11 +7841,11 @@ offers none."
   "With an empty model choice, `agentpane-new-session' offers the efforts of
 the model the session already has, and none when that is not known."
   (should (equal (agentpane-test--new-session '("" "high") "gpt-5.6-luna")
-                 '((sessions/create sessions/attach models/list models/list
+                 '((sessions/create models/list models/list
                     (sessions/setEffort "high"))
                    (("gpt-5.6-luna" "gpt-5.6-sol" "plain") ("low" "high")))))
   (should (equal (agentpane-test--new-session '("" "high"))
-                 '((sessions/create sessions/attach models/list)
+                 '((sessions/create models/list)
                    (("gpt-5.6-luna" "gpt-5.6-sol" "plain"))))))
 
 ;;;; A send that signals, against a stub jsonrpc

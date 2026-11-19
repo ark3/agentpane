@@ -5100,6 +5100,33 @@ From the `clear_queue` until two seconds after the `abort`'s answer Pi wrote thr
 A `fork` at the first user message then answered `success: true`, `cancelled: false`, and the `get_state` after it named a `sessionFile` other than the one before the stop.
 A first run of the same script, before its check allowed the `queue_update`, read the same lines and reported `fail` on that check alone.
 
+## A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)
+
+Run on the home server on 2026-11-19, on `pi 1.5.2`, `codex-cli 0.170.0` and `claude 2.1.328`, each on its pinned model (`openrouter/deepseek/deepseek-v4.1-flash:high`, `gpt-5.6-luna`, `haiku`), named to the create route, and `bun 1.4.0`, against this checkout once `POST /api/sessions` and `sessions/create` started the session (D30).
+Each probe below was run from `resources/probes/` and exited 0; `loopback_token_repro_probe.py` built the client, and the rest ran with `--skip-build`.
+The two smoke probes and the steer, prompt-window and fork-first-turn probes gave each run a throwaway state directory (`make_state_home`); `fork_attach_probe.py` and the two runs by hand below used each backend's own, which was writable in this session.
+
+The first three runs, `loopback_token_repro_probe.py`, `agentpane_pi_smoke.py --tool-check` and `agentpane_codex_smoke.py`, served a build of the change whose failure path still kept the created container behind a flag; it differed from what landed only when a start fails, which none of them reaches.
+`agentpane_pi_smoke.py` without `--tool-check` was run again on what landed.
+
+**Each backend's create answered 201 with an attached session, and nothing followed it.**
+`agentpane_pi_smoke.py` passed every check in both runs, `startup.http` reading `[201]` with no attach sent: Pi had named its JSONL path by the time the create answered (`still_virtual_after_create: false`, `renamed_during: "create"`), so the client never saw the `virtual:` id, and a prompt through the ref the create answered got 202.
+`agentpane_codex_smoke.py` passed every check, its create answering a Codex thread id.
+`fork_attach_probe.py` passed on all three backends, each create answering 201 with a handle, then two turns, a fork of the last turn and of the fork, and a second fork of the parent.
+`agentpane_pi_steer_probe.py` passed with `steered_into_running_turn`.
+`agentpane_pi_prompt_window_probe.py --part agentpane` and `agentpane_pi_fork_first_turn_probe.py --part agentpane`, which record rather than assert, ran to the end; the fork-first-turn probe recorded its create as its first attach, at 201, with no file on disk yet.
+`loopback_token_repro_probe.py` read 401 for both the create and the attach and passed.
+
+**`agentpane-new-session` created a Pi session through the real helper in one request.**
+A batch Emacs 31.1 loaded `agentpane.el`, started `bun run src/emacs/main.ts` against a server on port 4791, and ran `agentpane-new-session "pi"` with `completing-read` answering the empty string.
+The new buffer was attached under the create's handle, holding the create's `token` as its attach, and `agentpane--creates-sent` was empty after.
+The model read offered 407 models from `models/list`, which the server answers for Pi only from a live adapter, and the effort read offered the session's own model's four levels.
+The server's listing then held the one session, `attached`, `onDisk: false`; nothing was prompted.
+
+**A start that failed answered 500 and left no row.**
+`POST /api/sessions` for Pi with `cwd` a fresh `/var/tmp` directory holding no `sbox` marker and no git root answered 500 `internal_error`, whose detail carried Pi's exit and `sbox`'s `Could not detect workspace`.
+The listing after it held no session in that directory, none with a `virtual:` id, and no session with a handle.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
