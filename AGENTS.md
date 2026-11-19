@@ -106,6 +106,7 @@ One that lands it in neither carries the capability onto both wires -- the HTTP 
 Outstanding work is tracked in GitHub issues on `ark3/agentpane`.
 Issues say what is to be done; they are not the record of what was decided, which lives in the repo's documents -- decisions in `docs/decisions/`, live-run evidence in `docs/MANUAL_TESTING.md`.
 `card` is one way to work an issue as a plan, when that suits it; it carries its own instructions.
+The commit that meets an issue's "Done when" carries `Closes #N.` in its body, so GitHub closes the issue once the commit reaches `main` there; a bare `ark3/agentpane#N` mention closes nothing.
 `OW-` ids name legacy cards, retired on 2026-11-13; `docs/work/README.md` says how to read them.
 
 ## Worktrees
