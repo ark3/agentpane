@@ -28,14 +28,14 @@ captures its run-scoped PIDs automatically, and cleans up temporary state:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-python3 resources/probes/agentpane_codex_smoke.py \
+bun resources/probes/agentpane_codex_smoke.ts \
   --workspace /home/asa0717/src/agentpane
 ```
 
 It copies credential files by name without printing their contents and leaves
 the real `~/.codex` untouched. Do not enable shell tracing while running it.
-Run `python3 resources/probes/agentpane_codex_smoke.py --help` for checkout,
-workspace, port, credential-source, and build options.
+Its docblock's `Usage:` line names the checkout, workspace, port, model,
+credential-source, and build options.
 
 The equivalent manual setup is below for interactive inspection:
 
@@ -5207,6 +5207,13 @@ On `claude 2.1.328` with `haiku`, in a fresh `git init`ed `/var/tmp` directory, 
 The create was answered 1.6 s after it was sent, its `sessions-changed` and its empty snapshot ahead of the reply.
 Each prompt's own user upsert and `isStreaming: true` status came before its reply, `disposition: "started"`, as D31 point 3 says; the assistant upserts and the idle status followed it.
 Snapshots per prompt, send to turn end: `[0,0]`, as in the OW-yirosu run after its change.
+
+**`agentpane_codex_smoke.ts` passed every check.**
+On `codex-cli 0.170.0` with `--model gpt-5.6-luna`, read back as `gpt-5.6-luna` off a `status` event, in a throwaway `CODEX_HOME` holding copies of `auth.json` and `config.toml`; 88 s.
+Every command and wait was keyed by the create's handle, where the Python one keyed them by a ref.
+The first turn's text grew across nine upserts, and a second socket, opened once it was idle, repainted it from its opening snapshot, two messages and 971 characters of answer, with the same Codex worker before and after.
+The long turn, sent on that second socket, streamed 72 s and was aborted at 20002 assistant characters (`abort_wait: "filled"`); it went idle 54 ms after the abort's request, `queued: []`, and still held 20002 1.5 s later.
+The server exited 0 at SIGTERM, leaving no worker, and the state directory and the server's log were removed.
 
 ## HANDOFF findings 1–49
 
