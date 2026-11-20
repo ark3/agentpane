@@ -6829,9 +6829,12 @@ helper started, where the first helper started writes LAST-WORDS, as
 unless `prompted' is nil, and then exits, or waits to be killed when
 `linger' is non-nil, each as BODY has set it when the helper starts;
 every later helper is mute.  Nothing is said in the echo area.
+The attaches BODY sends carry the tokens 1, 2, 3 and so on, so
+LAST-WORDS can tag the snapshot that answers one, as the helper does.
 Whichever helper is current when BODY ends is killed."
   (declare (indent 1))
   `(let ((agentpane--connection nil)
+         (agentpane--attach-tokens 0)
          (ref '(:backend "codex" :id "t1"))
          (prompted t)
          (linger nil)
@@ -6931,7 +6934,7 @@ jsonrpc.el 1.0.29).  The use in the gap must be refused, and the buffer
 end let go of, attached to nothing (OW-bukupu)."
   (agentpane-test--outliving
       (list (list :jsonrpc "2.0" :method "session/snapshot"
-                  :params (list :session ref :handle "h1" :isStreaming :false
+                  :params (list :session ref :handle "h1" :token 1 :isStreaming :false
                                 :nodes (vector)))
             (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))
     (setq linger before-sentinel)
@@ -7114,7 +7117,7 @@ is raised once the teardown has run."
                    (funcall submit))))
         (agentpane-test--outliving
             (list (list :jsonrpc "2.0" :method "session/snapshot"
-                        :params (list :session ref :handle "h1"
+                        :params (list :session ref :handle "h1" :token 1
                                       :isStreaming (if streaming t :false)
                                       :nodes (vector)))
                   (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))
@@ -7193,14 +7196,15 @@ and going out through a replacement for a buffer holding no handle
 
 (defun agentpane-test--snapshot-then-death (reply)
   "Attach a buffer through a helper that writes the attach's snapshot,
-under the handle \"h1\" and streaming, then the attach reply when REPLY,
+tagged with its token, under the handle \"h1\" and streaming, then the
+attach reply when REPLY,
 and exits while Emacs is busy, and let Emacs handle what it left.  The
 buffer must end let go of, holding no handle and idle (OW-bukupu)."
   (agentpane-test--watching
     (agentpane-test--outliving
         (append
          (list (list :jsonrpc "2.0" :method "session/snapshot"
-                     :params (list :session ref :handle "h1" :isStreaming t :model "luna"
+                     :params (list :session ref :handle "h1" :token 1 :isStreaming t :model "luna"
                                    :nodes (vector))))
          (and reply
               (list (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))))
@@ -7216,8 +7220,9 @@ buffer must end let go of, holding no handle and idle (OW-bukupu)."
 (ert-deftest agentpane-test-snapshot-before-a-death-is-let-go ()
   "A buffer the dying helper gave a handle, by the snapshot of an attach
 it answered or never answered, is let go of by that helper's teardown as
-one attached through it is: a snapshot can reach a buffer before its
-attach's reply (D2), and a helper can exit before it replies (OW-bukupu)."
+one attached through it is: the helper writes an attach's tagged
+snapshot ahead of its reply (D31 point 3), and can be killed between
+the two (OW-bukupu)."
   (agentpane-test--snapshot-then-death t)
   (agentpane-test--snapshot-then-death nil))
 
@@ -7470,6 +7475,7 @@ answering that request.  Each buffer must end not attached, holding no
 handle and free to send again, and no prompt may go out, through
 that helper or any started after it (OW-kifuhi)."
   (let* ((agentpane--connection nil)
+         (agentpane--attach-tokens 0)
          (refs (seq-take '((:backend "codex" :id "t1") (:backend "codex" :id "t2")) count))
          (handles (seq-map-indexed (lambda (_ index) (format "h%d" (1+ index))) refs))
          (started 0)
@@ -7483,11 +7489,11 @@ that helper or any started after it (OW-kifuhi)."
                        (agentpane-test--mute-helper)
                      (agentpane-test--writes-then-dies
                       (append
-                       (seq-mapn (lambda (ref handle)
+                       (seq-mapn (lambda (ref handle token)
                                    (list :jsonrpc "2.0" :method "session/snapshot"
-                                         :params (list :session ref :handle handle
+                                         :params (list :session ref :handle handle :token token
                                                        :isStreaming :false :nodes (vector))))
-                                 refs handles)
+                                 refs handles '(1 2))
                        (seq-map-indexed (lambda (ref index)
                                           (list :jsonrpc "2.0" :id (1+ index)
                                                 :result (list :ref ref :handle (nth index handles))))
@@ -7549,7 +7555,7 @@ reply is handed on (OW-tifiva), as in wire order
 \(`agentpane-test-attach-reply-after-its-detached-attaches-nothing')."
   (agentpane-test--outliving
       (list (list :jsonrpc "2.0" :method "session/snapshot"
-                  :params (list :session ref :handle "h1" :isStreaming :false
+                  :params (list :session ref :handle "h1" :token 1 :isStreaming :false
                                 :nodes (vector)))
             (list :jsonrpc "2.0" :method "session/detached"
                   :params (list :session ref :handle "h1" :cause "gapped"))
