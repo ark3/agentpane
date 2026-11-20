@@ -1430,54 +1430,41 @@ describe("client controller", () => {
 		expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
 	});
 
-	// Both orderings: the server writes the `ended` and the
-	// `sessions-changed` before it answers the close, the order the socket
-	// delivers them in (D31 point 3), and the other is the one the event stream
-	// allowed, still covered: the view goes on the `ended` alone (D26), and
-	// until it goes the pane reads live and nothing fetches its preview, so
-	// whichever wins the race the view has to be gone and the preview on screen.
-	for (const endedFirst of [true, false]) {
-		const when = endedFirst ? "before" : "after";
-		it(`detaches the selected session onto its read-only preview, with its ended landing ${when} the close answers`, async () => {
-			const api = new FakeApi();
-			const controller = createController(api);
-			await controller.start();
-			api.open();
-			await controller.select(ref);
-			api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
-			const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
-			api.listSessions.mockResolvedValue([detachedSummary]);
-			const turns: SessionPreviewTurn[] = [{ role: "user", content: "done" }];
-			api.preview.mockResolvedValue({ ref, turns });
-			const closing = deferred<void>();
-			api.close.mockReturnValueOnce(closing.promise);
-			const ended = async () => {
-				api.emit({ type: "ended", session: ref, handle: h(ref) });
-				api.emit({ type: "sessions-changed" });
-				await settle();
-			};
+	// The server writes the `ended` and the `sessions-changed` before it
+	// answers the close (D31 point 3), and the view goes on the `ended` (D26),
+	// so by the time the close answers the pane reads the preview.
+	it("detaches the selected session onto its read-only preview, its ended landing before the close answers", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
+		api.listSessions.mockResolvedValue([detachedSummary]);
+		const turns: SessionPreviewTurn[] = [{ role: "user", content: "done" }];
+		api.preview.mockResolvedValue({ ref, turns });
+		const closing = deferred<void>();
+		api.close.mockReturnValueOnce(closing.promise);
 
-			const detaching = controller.detach();
-			await settle();
-			expect(api.close).toHaveBeenCalledWith(ref);
-			if (endedFirst) await ended();
-			closing.resolve();
-			await detaching;
-			await settle();
-			if (!endedFirst) {
-				expect(paneMode(controller.getView())).toBe("live");
-				await ended();
-			}
+		const detaching = controller.detach();
+		await settle();
+		expect(api.close).toHaveBeenCalledWith(ref);
+		api.emit({ type: "ended", session: ref, handle: h(ref) });
+		api.emit({ type: "sessions-changed" });
+		await settle();
+		closing.resolve();
+		await detaching;
+		await settle();
 
-			const detachedView = controller.getView();
-			expect(detachedView.state.sessions[h(ref)]).toBeUndefined();
-			expect(detachedView.state.selected).toEqual(ref);
-			expect(paneMode(detachedView)).toBe("preview");
-			expect(detachedView.preview).toEqual({ ref, turns });
-			expect(detachedView.state.summaries).toEqual([detachedSummary]);
-			controller.dispose();
-		});
-	}
+		const detachedView = controller.getView();
+		expect(detachedView.state.sessions[h(ref)]).toBeUndefined();
+		expect(detachedView.state.selected).toEqual(ref);
+		expect(paneMode(detachedView)).toBe("preview");
+		expect(detachedView.preview).toEqual({ ref, turns });
+		expect(detachedView.state.summaries).toEqual([detachedSummary]);
+		controller.dispose();
+	});
 
 	// The sidebar's attached stripe reads `summary.status`, and only a listing
 	// moves that -- so a detach whose `sessions-changed` broadcast never arrives,
@@ -1877,13 +1864,16 @@ describe("client controller", () => {
 		api.preview.mockClear();
 		api.preview.mockRejectedValue(gone());
 		api.listSessions.mockClear();
+		const closing = deferred<void>();
+		api.close.mockReturnValueOnce(closing.promise);
 
-		await controller.detach();
+		const detaching = controller.detach();
 		await settle();
-		// The close answered first here; the `ended` the server wrote before it
-		// lands after, an order the event stream allowed and the socket does not
-		// (D31 point 3), and the pane it leaves reads the preview.
+		// The `ended` the server writes before it answers the close (D31 point 3).
 		api.emit({ type: "ended", session: createdRef, handle: h(createdRef) });
+		await settle();
+		closing.resolve();
+		await detaching;
 		await settle();
 
 		const detachedView = controller.getView();
