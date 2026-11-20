@@ -13,7 +13,7 @@
  *
  * Everything with behaviour lives in `helper.ts` behind injectable streams
  * and is tested there in node; this file only decides what they are wired
- * to. The api client hands `openSocket` the socket's route, so the base URL
+ * to. The api client hands `openSocket` the socket's path, so the base URL
  * is prefixed here, its scheme moved to `ws:`; and the token is read from
  * its file for the `hello` (`token.ts`). Loading the markdown renderer takes
  * about a second, so it happens before the first frame is read rather than

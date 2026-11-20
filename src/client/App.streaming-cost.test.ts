@@ -1,5 +1,5 @@
 /**
- * What one SSE event costs the renderer, counted rather than timed (OW-detepa).
+ * What one event costs the renderer, counted rather than timed (OW-detepa).
  *
  * The reported symptom was that streaming went sluggish, worst when the session
  * doing the streaming was not the one on screen. The cause was `view` being a
@@ -81,7 +81,7 @@ class PublishingController implements AgentpaneController {
 		for (const listener of this.listeners) listener(this.current);
 	}
 
-	/** One SSE event, through the real reducer and out through the real publish. */
+	/** One event, through the real reducer and out through the real publish. */
 	deliver(event: ServerEvent): void {
 		flushSync(() => this.publish({ state: reduceServerEvent(this.current.state, event).state }));
 	}

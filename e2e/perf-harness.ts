@@ -1,5 +1,5 @@
 /**
- * Streaming-cost harness: how much work one SSE event actually causes.
+ * Streaming-cost harness: how much work one event actually causes.
  *
  * The real `App.svelte` and the real `controller.ts` in a real browser, driven
  * by a synthetic backend -- the same construction as `harness.ts`, and for the

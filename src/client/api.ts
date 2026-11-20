@@ -144,7 +144,7 @@ export interface AgentpaneApi {
 	 * Resolves with the body, which a fake may leave out for a prompt that
 	 * started a turn, as the HTTP route once answered one; the body says a
 	 * backend handled the prompt without starting a turn for it, though an
-	 * extension's own work may still arrive on the stream (`PromptDisposition`,
+	 * extension's own work may still arrive as events (`PromptDisposition`,
 	 * OW-dulipe). One that named no handle names the session it attached
 	 * (`PromptRequest.handle`, D30); a refusal after that attach rejects with
 	 * an `ApiClientError` whose `attached` names it.

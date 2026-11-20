@@ -344,9 +344,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * fork moving the process onto a conversation of its own, and nothing
 	 * comes under it again. The attachment under it goes and Emacs is told:
 	 * a buffer left counting itself attached would send a prompt naming the
-	 * ended handle, which the prompt route refuses (D25, D30). The buffer lets
+	 * ended handle, which the server refuses (D25, D30). The buffer lets
 	 * go of the handle, and its own next attach, by the ref it holds, finds
-	 * the session wherever it is now, the route answering the current handle
+	 * the session wherever it is now, the server answering the current handle
 	 * and ref (`agentpane--notified-buffer` in emacs/agentpane.el).
 	 * Re-attaching here instead would respawn the session the other client
 	 * closed. An attach still out whose reply names the handle finds no view

@@ -103,7 +103,7 @@ export interface ControllerView {
 	previewFailure: { ref: SessionRef; message: string } | null;
 	/**
 	 * Transcript indices the *selected* session can be forked at, as of the last
-	 * `GET fork-points` (OW-roveze), or null while nobody has been told yet.
+	 * `sessions/forkPoints` (OW-roveze), or null while nobody has been told yet.
 	 * Whether a user message is offered an Edit control at all reads this.
 	 *
 	 * On the view rather than on each `SessionView` because only the selected
@@ -236,7 +236,7 @@ export interface AgentpaneController {
 	 * otherwise, the way `forkAndSubmit` below does, because there are four
 	 * ways for it not to -- nothing selected, a selection this tab holds no
 	 * live view of (OW-forinu), an empty draft or a prompt already in flight,
-	 * and a rejected POST -- and the caller arms per-tab state on a submit that
+	 * and a refused request -- and the caller arms per-tab state on a submit that
 	 * only the answer here can tell it to take back down (OW-mifuki).
 	 *
 	 * A landed prompt can still have started no turn: `"handled"` is one a Pi
@@ -373,8 +373,8 @@ export const RECONNECT_MS = 5_000;
 const PREVIEW_READ_TIMEOUT_MS = 10_000;
 
 /**
- * Whether a preview read failed because its session is nowhere: the route's
- * code `gone`, for a ref nobody holds and no file backs (D26 point 5).
+ * Whether a preview read failed because its session is nowhere: the refusal
+ * `gone`, for a ref nobody holds and no file backs (D26 point 5).
  * Nothing else is, `not_found` included.
  */
 function isGone(error: unknown): boolean {
@@ -1020,7 +1020,7 @@ export function createController(
 	}
 
 	/**
-	 * Detach, in this tab alone, a session whose SSE sequence gapped
+	 * Detach, in this tab alone, a session whose event sequence gapped
 	 * (`acceptsSequence` in `session-state.ts`), which means this client dropped
 	 * an event (D25 point 5). The view goes, and with it everything this tab held
 	 * under the handle; the server still holds the session for every other
@@ -1352,12 +1352,12 @@ export function createController(
 			// the controller does not lean on that: a session with no view here is
 			// one the server may no longer hold, and a prompt naming no handle
 			// would start it. One whose handle has ended, a close crossing it, is
-			// refused 409 `not_attached` (D25).
+			// refused `not_attached` (D25).
 			if (paneMode(view) !== "live") return null;
 			const handle = handleOf(view.state, selected);
 			if (handle === undefined) return null;
 			// One prompt at a time (OW-nasofa): a second Ctrl-Enter, or Enter then a
-			// click on Send, while the POST is in flight would issue a second
+			// click on Send, while the prompt is out would issue a second
 			// identical prompt -- the server admits it and what the backend does
 			// with it is nobody's intent. Read off `sending` rather than `busy`,
 			// which names an abort or an attach made meanwhile (OW-kelede). Nor while

@@ -40,7 +40,7 @@ export interface ClientState {
 	 * stored session being previewed has no handle (D24). A live view is found
 	 * from it through `handleOf`. It follows the ref: an event under a handle
 	 * that names a new `session` moves this where it named the view's old ref,
-	 * since `detach()`, the preview route and every row comparison read refs.
+	 * since `detach()`, `sessions/preview` and every row comparison read refs.
 	 */
 	selected: SessionRef | null;
 	/**

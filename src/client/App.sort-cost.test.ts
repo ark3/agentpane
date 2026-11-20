@@ -1,5 +1,5 @@
 /**
- * What the session list costs per SSE event, counted rather than timed
+ * What the session list costs per event, counted rather than timed
  * (OW-jineli).
  *
  * The sidebar sort used to read `view.state.summaries` straight out of a
@@ -87,7 +87,7 @@ class PublishingController implements AgentpaneController {
 		for (const listener of this.listeners) listener(this.current);
 	}
 
-	/** One SSE event, through the real reducer and out through the real publish. */
+	/** One event, through the real reducer and out through the real publish. */
 	deliver(event: ServerEvent): void {
 		flushSync(() => this.publish({ state: reduceServerEvent(this.current.state, event).state }));
 	}

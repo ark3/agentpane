@@ -129,7 +129,8 @@ describe("the turn-done watch", () => {
 	});
 
 	it("keeps waiting while the client has no view of the session yet", () => {
-		// The submit's POST can resolve before the first SSE event arrives (D2).
+		// The submit's reply can arrive before the turn's first event, which
+		// follows the prompt's admission (D31 point 3).
 		let watch = watchSubmit(emptyTurnWatch(), "pi:a");
 		watch = watchSessions(watch, new Map(), UNFOCUSED);
 		expect(watch.waiting.get("pi:a")).toBe(false);

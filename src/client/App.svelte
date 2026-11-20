@@ -34,7 +34,7 @@
 	/**
 	 * `$state.raw`, and that is load-bearing rather than a micro-optimisation
 	 * (OW-detepa). A deep `$state` proxies the whole view, and `publish()`
-	 * swaps a fresh `ControllerView` per SSE event, so every settled markdown
+	 * swaps a fresh `ControllerView` per event, so every settled markdown
 	 * block in the selected transcript re-parsed on every event -- including
 	 * events for sessions that are not on screen, at ~92ms each on a 180-message
 	 * transcript. Raw keeps object identity for the parts that did not change,
@@ -345,7 +345,7 @@
 	 *
 	 * The rest is kept because `close()` kills mid-turn, and on Claude Code a
 	 * kill mid-turn loses the whole reply (OW-japuzo). `view.sending` is in it
-	 * for the same reason: the turn a prompt POST starts is not streaming yet,
+	 * for the same reason: the turn a prompt starts is not streaming yet,
 	 * so `isStreaming` alone would leave that window open. `compaction` is the
 	 * same loss by another name -- a kill lands on the subprocess running it --
 	 * and the Compact item three lines below already refuses on that field, so
@@ -366,7 +366,7 @@
 	/**
 	 * Whether the Tools menu may offer Rename (OW-bumonu). Detach's predicate,
 	 * with `virtual` out rather than in: a rename is written through to the
-	 * backend (D13, "Names are not marks"), and the name route refuses any
+	 * backend (D13, "Names are not marks"), and `sessions/setName` refuses any
 	 * session with no adapter, which is all a `virtual` status reports
 	 * (`SessionManager.#liveOverlay`). Not mid-turn, as Detach is not, though
 	 * as of `claude 2.1.287` and `codex-cli 0.160.0` both answered a rename
@@ -1239,8 +1239,8 @@
 	/**
 	 * Rename the selected session (OW-bumonu). The browser's own prompt is a
 	 * first cut, chosen because its Cancel is the way out D14 asks for at no
-	 * cost. Cancel and a name blank once trimmed both send nothing; the route
-	 * would refuse the blank one (400) anyway.
+	 * cost. Cancel and a name blank once trimmed both send nothing; the server
+	 * would refuse the blank one anyway.
 	 */
 	function renameSession(): void {
 		const name = window.prompt("Rename session", selectedSummary?.name ?? "");
@@ -1436,7 +1436,7 @@
 		// reply, which a refused press never reaches, so there it has nothing to
 		// disarm (OW-vitefo). Both paths, and off the controller's own `sending`
 		// flag rather than `busy` -- which an abort or an attach clears while the
-		// POST it described is still outstanding (OW-kelede). The controller
+		// request it described is still out (OW-kelede). The controller
 		// refuses while the external editor has the draft too, and this returns
 		// before arming anything, as for a send (OW-momejo).
 		if (view.sending || view.editingExternally) return;

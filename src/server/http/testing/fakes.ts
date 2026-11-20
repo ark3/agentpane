@@ -187,7 +187,7 @@ export class FakeAdapter implements BackendAdapter {
 	readonly prompts: { text: string; images?: ImageInput[] }[] = [];
 	readonly forks: string[] = [];
 	aborts = 0;
-	/** What the next `abort` hands back, as Pi's cleared queue (OW-wisifo); set it to drive the route. */
+	/** What the next `abort` hands back, as Pi's cleared queue (OW-wisifo); set it to drive the command. */
 	queued: string[] = [];
 	compactions = 0;
 	model?: string;
@@ -456,7 +456,7 @@ export class FakeAdapterFactory implements AdapterFactory {
 
 /** Stands in for the on-disk walk (D9) without touching a filesystem. */
 export class FakeSessionIndex implements SessionIndex {
-	/** Records every ref the preview route asked for, so a test can prove it was used. */
+	/** Records every ref `sessions/preview` asked for, so a test can prove it was used. */
 	readonly previewed: SessionRef[] = [];
 
 	constructor(

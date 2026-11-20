@@ -257,7 +257,7 @@
  *   to choose; `defaultEffort` (string or `null`) is what the backend runs it
  *   at when none is chosen.
  * - `sessions/attach` -- `{ session, token }` -> the `SessionSummary` the
- *   attach route answers, carrying the session's `handle`. `token`
+ *   server's `sessions/attach` answers, carrying the session's `handle`. `token`
  *   (integer, always) names this attach: agentpane-mode mints it, no two
  *   attaches it sends carry the same one, and the helper sends it nowhere
  *   but back, on the snapshot that answers this attach, and holds it to
@@ -285,7 +285,7 @@
  *   or `{ session, token, text, images?, priorErrorId? }` ->
  *   `null` for a prompt that started a turn or joined one, or
  *   `{ disposition: "handled" }` for one the backend consumed without
- *   starting a turn for it: the prompt route's own `PromptResponse`
+ *   starting a turn for it: the server's own `PromptResponse`
  *   (OW-dulipe). An extension that handled it may still start work of its
  *   own, whose notifications arrive as usual (`docs/rpc-commands.md` "prompt"
  *   in `pi 1.2.0`, read at the installed package, not measured); after
@@ -318,8 +318,8 @@
  * on the new session (D31 point 9). `session` goes nowhere.
  *
  * - `sessions/abort` -- `{ session, handle }` -> `null` for a stop that took nothing
- *   out of the backend's queue, or `{ queued }` for one that did: the abort
- *   route's own `AbortResponse`, the text of each prompt steered into the turn
+ *   out of the backend's queue, or `{ queued }` for one that did: the
+ *   server's own `AbortResponse`, the text of each prompt steered into the turn
  *   and not yet delivered, which only Pi holds, for the buffer that stopped
  *   it to take back (D16, OW-wisifo). No notification carries them.
  * - `sessions/compact` -- `{ session, handle }` -> `null`.

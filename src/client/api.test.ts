@@ -53,7 +53,7 @@ function reply(socket: FakeSocket, result: unknown): void {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("agentpane API over the socket", () => {
-	it("opens the socket at its route and sends the token as the first frame", () => {
+	it("opens the socket at its path and sends the token as the first frame", () => {
 		const { socket } = setup({ token: () => "secret" });
 		expect(socket.path).toBe(SOCKET_PATH);
 		expect(socket.sent).toEqual([]);

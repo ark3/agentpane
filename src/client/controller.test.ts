@@ -81,7 +81,7 @@ function snapshotOf(session: SessionRef, handle = h(session)): ServerEvent {
 	return { type: "snapshot", session, handle, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] };
 }
 
-/** What the preview route answers for a ref nobody holds and no file backs (D26 point 5). */
+/** What `sessions/preview` refuses with for a ref nobody holds and no file backs (D26 point 5). */
 function gone(): ApiClientError {
 	return new ApiClientError("gone", "no such session");
 }
@@ -805,7 +805,7 @@ describe("client controller", () => {
 	 * started no turn, and only the answer here can tell it which one this was
 	 * (OW-yobayi). The draft clears either way: the backend took the prompt.
 	 */
-	it("resolves a landed prompt's disposition, handled for the 200 body and started for none (OW-yobayi)", async () => {
+	it("resolves a landed prompt's disposition, handled for a reply saying so and started for none (OW-yobayi)", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
@@ -1220,9 +1220,9 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// The attach reply and its snapshot are unordered (D2), so the gap's preview
-	// can resolve between them, when the selection names the session and no
-	// view is back yet. It lands then, and the snapshot outranks it (`paneMode`).
+	// The gap's preview can resolve while the attach made meanwhile is out,
+	// when the selection names the session and no view is back yet. It lands
+	// then, and the snapshot outranks it (`paneMode`).
 	it("goes live over the gap's preview once the attach of the same session made while it was out brings its snapshot (OW-lunihe, OW-forinu)", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
@@ -1430,9 +1430,10 @@ describe("client controller", () => {
 		expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
 	});
 
-	// Both orderings, because the server writes the `ended` and the
-	// `sessions-changed` before it answers the close, but the stream and the
-	// reply are unordered (D2): the view goes on the `ended` alone (D26), and
+	// Both orderings: the server writes the `ended` and the
+	// `sessions-changed` before it answers the close, the order the socket
+	// delivers them in (D31 point 3), and the other is the one the event stream
+	// allowed, still covered: the view goes on the `ended` alone (D26), and
 	// until it goes the pane reads live and nothing fetches its preview, so
 	// whichever wins the race the view has to be gone and the preview on screen.
 	for (const endedFirst of [true, false]) {
@@ -1480,14 +1481,14 @@ describe("client controller", () => {
 
 	// The sidebar's attached stripe reads `summary.status`, and only a listing
 	// moves that -- so a detach whose `sessions-changed` broadcast never arrives,
-	// the SSE connection being down, left the row lit as attached until the user
+	// the socket being down, left the row lit as attached until the user
 	// pressed Refresh: the exact untruthful indicator Detach exists to clear
 	// (OW-lejahi). The detach itself no longer asks for that listing; the
-	// reconnect does (D21), so the stripe clears when the stream comes back and
+	// reconnect does (D21), so the stripe clears when the socket comes back and
 	// no broadcast is needed anywhere in this test. The row is lit by a Refresh
 	// taken after the drop, because the drop itself reads every row detached
 	// (D25) and an attach reply lights nothing (OW-wazija): only a listing lit
-	// while the stream is still down is one only the reconnect can put out.
+	// while the socket is still down is one only the reconnect can put out.
 	it("clears a detached row's stripe at the reconnect when no broadcast followed the detach", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
@@ -1880,7 +1881,8 @@ describe("client controller", () => {
 		await controller.detach();
 		await settle();
 		// The close answered first here; the `ended` the server wrote before it
-		// lands after (D2), and the pane it leaves reads the preview.
+		// lands after, an order the event stream allowed and the socket does not
+		// (D31 point 3), and the pane it leaves reads the preview.
 		api.emit({ type: "ended", session: createdRef, handle: h(createdRef) });
 		await settle();
 
@@ -1933,7 +1935,7 @@ describe("client controller", () => {
 
 	// A streaming view dropped reads as a turn ending, but nothing is left to
 	// cut: the handle is gone, and the attach reply's summary still carrying it
-	// would send a fork-points read that can only answer 409 (D26).
+	// would send a fork-points read that can only be refused `not_attached` (D26).
 	it("asks for no fork points when the selected session's handle ends mid-turn (OW-sodohi)", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
@@ -2130,7 +2132,7 @@ describe("client controller", () => {
 		const submitted = controller.submit();
 
 		// The server admits the prompt and clears the error, then the new turn
-		// fails at once with the same text, all before the reply (D2).
+		// fails at once with the same text, all before the reply.
 		api.emit({ type: "error-cleared", session: ref, handle: h(ref), seq: 3 });
 		api.emit({ type: "error", session: ref, handle: h(ref), seq: 4, message: "The turn ended in an error.", errorId: "e2" });
 		prompt.resolve();
@@ -2139,7 +2141,7 @@ describe("client controller", () => {
 		expect(controller.getView().state.sessions[h(ref)]?.error).toBe("The turn ended in an error.");
 	});
 
-	it("does not clear a fresh same-turn error that races in via SSE before the prompt POST resolves (D2)", async () => {
+	it("does not clear a fresh same-turn error that arrives before the prompt's reply (D31 point 3)", async () => {
 		const api = new FakeApi();
 		const prompt = deferred<void>();
 		api.prompt.mockReturnValue(prompt.promise);
@@ -2151,7 +2153,7 @@ describe("client controller", () => {
 		controller.setDraft("try again");
 		const submitted = controller.submit();
 
-		// A genuine error for *this* turn arrives before the POST's own response does.
+		// A genuine error for *this* turn arrives before the prompt's own reply does.
 		api.emit({ type: "error", session: ref, handle: h(ref), seq: 2, message: "This turn just failed.", errorId: "e1" });
 		prompt.resolve();
 		await submitted;
@@ -2159,7 +2161,7 @@ describe("client controller", () => {
 		expect(controller.getView().state.sessions[h(ref)]?.error).toBe("This turn just failed.");
 	});
 
-	it("does not clear a model failure that lands before the prompt POST resolves", async () => {
+	it("does not clear a model failure that lands before the prompt's reply", async () => {
 		const api = new FakeApi();
 		const setting = deferred<void>();
 		const prompt = deferred<void>();
@@ -2832,7 +2834,7 @@ describe("client controller", () => {
 	/**
 	 * `busy` is one global slot, so it never was a sound in-flight signal
 	 * (OW-kelede): prompt a session, watch the turn start streaming ahead of the
-	 * POST's own response (D2), press Stop, and `abort`'s `finally` publishes
+	 * prompt's own reply (D31 point 3), press Stop, and `abort`'s `finally` publishes
 	 * `"idle"` over the `"submitting"` of a prompt that is still outstanding.
 	 * The guards read the flag the two send paths own instead.
 	 */
@@ -2860,7 +2862,7 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	it("closes SSE and ignores later events after disposal", async () => {
+	it("closes the socket and ignores later events after disposal", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
@@ -3226,7 +3228,7 @@ describe("client controller", () => {
 			});
 		}
 
-		// The attach's snapshot beats its reply (D2), a gap then drops the view it
+		// The attach's snapshot beats its reply (D31 point 3), a gap then drops the view it
 		// made, and only then does the reply select the session.
 		it("lands an attach whose snapshot's view a gap dropped before the reply on the detached-loading pane (OW-tefigi)", async () => {
 			const api = new FakeApi();

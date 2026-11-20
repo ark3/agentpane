@@ -861,7 +861,7 @@ describe("App", () => {
 				sessions: { [sessionKey(piSession)]: { ...live, isStreaming: true } },
 			}),
 		});
-		// A prompt POST in flight: the turn it starts is not streaming yet, so
+		// A prompt out: the turn it starts is not streaming yet, so
 		// nothing on the session says so and only `sending` does.
 		refusedWhen({
 			sending: true,
@@ -942,7 +942,7 @@ describe("App", () => {
 		expect(offeredWhen({ state: selectedWith({}) })).toBe(true);
 		expect(offeredWhen({ state: selectedWith({}, { messages: [{ role: "user", content: "Hi", timestamp: 1 }] }) })).toBe(true);
 		// A rename is written through to the backend, so a session with no
-		// process refuses it (D13), the route with a 409 -- virtual included.
+		// process refuses it (D13), and so does the server -- virtual included.
 		expect(offeredWhen({ state: selectedWith({ status: "detached" }) })).toBe(false);
 		expect(offeredWhen({ state: selectedWith({ status: "virtual" }) })).toBe(false);
 		// Mid-turn, read as Detach reads it: the live entry, a prompt in flight,
@@ -1986,8 +1986,8 @@ describe("App", () => {
 
 	/**
 	 * Follow and the badge are armed before the request goes out, because the
-	 * echoed message can land ahead of the POST's own response (D2). A prompt
-	 * that then fails leaves both armed for a turn that was never sent, and the
+	 * echoed message can land ahead of the prompt's own reply (D31 point 3). A
+	 * prompt that then fails leaves both armed for a turn that was never sent, and the
 	 * next stream on that session -- another tab's prompt, or a turn that was
 	 * already running -- would collect them (OW-mifuki).
 	 */
@@ -2321,7 +2321,7 @@ describe("App", () => {
 	 * The release that answer makes when its own pending follow engaged first
 	 * puts back the follow that stood when it armed. Here that is the running
 	 * turn's: a user message from elsewhere -- another tab's steer, or an
-	 * extension's prompt delivered as one -- lands while the `/mcp` POST is
+	 * extension's prompt delivered as one -- lands while the `/mcp` prompt is
 	 * out, and the `/mcp` submit's follow engages on it, moving the anchor off
 	 * the turn's own message. Released to nothing, the pane would stop chasing
 	 * a turn that is still streaming (OW-zikiga).
@@ -2554,7 +2554,7 @@ describe("App", () => {
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 		expect(controller.submitted).toBe(1);
 
-		// The submitted message lands (simulating the resulting SSE upsert). Its
+		// The submitted message lands (simulating the resulting upsert). Its
 		// position within the scrollable content is fixed at 400px from the top
 		// and never moves as later content grows below it -- exactly what a real
 		// message that finished rendering and isn't itself changing would do.
@@ -2651,7 +2651,7 @@ describe("App", () => {
 
 		// Submitting arms follow for whatever message this submission produces
 		// -- it does not exist in the transcript yet, matching the real
-		// submit-then-SSE-upsert ordering (D2).
+		// submit-then-upsert ordering.
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 		const sessions = {
 			"pi:pi-1": { ...initial["pi:pi-1"], messages: [old, submittedMessage], isStreaming: true },
@@ -4379,8 +4379,8 @@ describe("App", () => {
 	 * A Pi session streaming its reply to "first draft", with "half-written note"
 	 * in the composer, driven through the real controller and the real abort
 	 * answer (OW-fahoti). The first stop answers with `queued` once `answer` is
-	 * called -- with no body at all when `queued` is empty, as the route's 204
-	 * does -- and any later stop finds the queue already empty. Every prompt,
+	 * called -- with no body at all when `queued` is empty, as the HTTP route's
+	 * 204 once did -- and any later stop finds the queue already empty. Every prompt,
 	 * a fork's included, is held until `land` is called or `refuse` fails it,
 	 * so a test can answer while a fork or a send is still out; a fork's
 	 * refusal names the fork, which the server attached before it prompted

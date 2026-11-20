@@ -773,7 +773,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 
 		await sessions.close(forked);
 
-		// DELETE then attach is reachable straight off the HTTP API. A recipe that
+		// A close then an attach is reachable straight off the socket. A recipe that
 		// survived the close would spawn a sandboxed agent for a session the
 		// caller has already thrown away.
 		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
@@ -1136,8 +1136,9 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	});
 
 	it("puts no fork's container into the table for a session closed while its fork was in flight", async () => {
-		// DELETE and POST .../fork are plain concurrent handlers under
-		// `Bun.serve` (app.ts); nothing serializes them. `close()` empties the
+		// `sessions/close` and `sessions/fork` each run as their frame arrives
+		// (socket.ts), and a close does not queue behind a fork
+		// (`SessionManager.#serially`); nothing serializes them. `close()` empties the
 		// table before its first await, and the adapter announces its move long
 		// afterwards -- here, once Pi's parked fork round trip resumes. Were the
 		// container still subscribed, that would put a fork's container into
@@ -1174,7 +1175,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	});
 
 	it("puts no fork's container into the table for a session disposed while its fork was in flight", async () => {
-		// Same window as the test above, with shutdown in place of DELETE.
+		// Same window as the test above, with shutdown in place of the close.
 		// `disposeAll()` clears the table before its first await, and the parked
 		// `fork` announces its move afterwards -- so were each ManagedSession not
 		// unsubscribed in that same run, it would re-insert the disposed
@@ -1977,7 +1978,7 @@ describe("lifecycle", () => {
 	it("says a close ended the handle, and that the list changed, before the adapter's disposal settles (D26, OW-sodohi)", async () => {
 		// Up to the kill's grace passes between the forget and the disposal
 		// settling, and a client that heard nothing meanwhile held a view whose
-		// Send met 409.
+		// Send was refused `not_attached`.
 		await sessions.attach(REF);
 		const handle = sessions.summaryOf(REF)?.handle;
 		const adapter = pi.created[0];
@@ -2018,7 +2019,7 @@ describe("lifecycle", () => {
 	});
 
 	it("keeps a closing adapter's replacement waiting through a second close of the same session", async () => {
-		// Two clients can each send the DELETE. The second finds nothing in the
+		// Two clients can each send the close. The second finds nothing in the
 		// table and has nothing to let go of, and must leave the first's
 		// disposal holding the attach back.
 		await sessions.attach(REF);

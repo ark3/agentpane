@@ -24,7 +24,7 @@
  *
  * A ref no file backs -- a Pi path that does not resolve inside the store,
  * or no filename match -- answers null rather than throwing, and never an
- * empty preview, which is a file with no turns: the preview route reads the
+ * empty preview, which is a file with no turns: `sessions/preview` reads the
  * null, for a ref the manager does not hold, as the session gone (D26
  * point 5).
  *

@@ -206,7 +206,7 @@ test("reading view keeps a streaming turn's original follow anchor locked", asyn
 		.poll(async () => (await page.evaluate((index) => window.harness.metrics(index), anchorIndex)).anchorOffset)
 		.toBeCloseTo(0, 0);
 	// Pause the synthetic stream between chunks so only the toggle can restore
-	// the anchor in the assertions below. Otherwise a later SSE upsert can run
+	// the anchor in the assertions below. Otherwise a later upsert can run
 	// the ordinary follow reconciliation and make the toggle path pass without
 	// doing anything of its own.
 	await page.evaluate(() => window.harness.pace(160, 1_000));

@@ -1564,14 +1564,14 @@ export class SessionManager {
 			this.broadcaster.forget(session.handle);
 			// Said here, where the handle is let go of, and not after the disposal
 			// below, which can run to the kill's grace: until then another client
-			// held a live-looking view whose Send met 409 (D26). A close that found
+			// held a live-looking view whose Send was refused `not_attached` (D26). A close that found
 			// no container sends neither, having no handle for a client to hold.
 			this.broadcaster.ended(session);
 			this.broadcaster.sessionsChanged();
 		}
 		// Swallowed deliberately. By this point the session is out of the table
 		// and unsubscribed, so it *is* closed as far as the caller is concerned;
-		// failing the DELETE would tell the browser to retry a close that has
+		// refusing the close would tell the client to retry a close that has
 		// already happened. What a throw here can still mean is a subprocess that
 		// outlived its kill -- DESIGN's third open question, which needs a live
 		// spawn to settle and has no honest answer from in here. A parked

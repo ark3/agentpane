@@ -2,7 +2,7 @@
  * The turn-done favicon badge, end to end in a real browser (OW-diyuwu).
  *
  * What is here and not in jsdom: that a real submit through the real
- * controller, followed by the real SSE event ordering of a turn, reaches a
+ * controller, followed by the real event ordering of a turn, reaches a
  * real `<link rel="icon">` -- one this page did not declare, so the module
  * had to create it -- and that the badged file the swap points at is actually
  * served and actually decodes. A favicon that fails to parse renders as

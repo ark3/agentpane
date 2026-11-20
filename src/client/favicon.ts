@@ -52,7 +52,7 @@ export function watchSubmit(watch: TurnWatch, key: string, streaming = false): T
 
 /**
  * The submit `watchSubmit` armed never reached the backend -- it was refused
- * before it was issued, or its POST failed (OW-mifuki). Stop waiting: the next
+ * before it was issued, or its request failed (OW-mifuki). Stop waiting: the next
  * stream on that session, from another tab or a turn that was already running,
  * is not one this tab asked for and must not badge.
  *

@@ -28,7 +28,8 @@
 ;; a prefix argument lifts the filter, and `w' in the picker chooses another
 ;; workspace the listing carries, or every session.  The notification flows from the picker's first listing on,
 ;; whether or not any buffer has attached a session: the helper opens its
-;; event stream from `sessions/list' (src/emacs/helper.ts).  A row's dot
+;; socket at the first request it reads, the picker's `sessions/list'
+;; (src/emacs/helper.ts).  A row's dot
 ;; says its session is streaming; a red one, that a turn ended while no
 ;; window showed its transcript, until one does.  In a transcript buffer
 ;; `n' and `p' step between nodes, `TAB' toggles the fold at point, `g'
@@ -64,7 +65,7 @@
 ;; node, a node update redraws the node with its index or appends it, and
 ;; the mode line shows streaming, compaction, the model and its effort,
 ;; the model's default one when the session reports none.  When the
-;; helper's event stream drops, the helper exits, and every buffer it served
+;; helper's socket closes, the helper exits, and every buffer it served
 ;; is left detached (D25).  A prompt is
 ;; typed in the region below the last node, or in the composer
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
@@ -420,7 +421,7 @@ Run from its sentinel, behind what the helper wrote last; see
 helper starts before it has (`agentpane--connection'), so every buffer
 attached through a helper is attached through the one being torn down,
 and CONNECTION is still `agentpane--connection' here.
-The helper exits when its event stream drops or its first open fails, so
+The helper exits when its socket closes or its first open fails, so
 this is also how a server that went away reaches the buffers (D25).
 
 It then answers, as the helper's death, oldest first, every request
@@ -479,8 +480,8 @@ Its stdin is closed first, since that is what the helper exits on
 \(`runHelper' in src/emacs/helper.ts); `jsonrpc-shutdown' does not close
 it, and after 0.3s without an exit it warns and kills the process.  Once
 the helper is reading its input, it exited within 0.1s of the close, even
-with its event stream open or an HTTP request of its own unanswered, which
-it aborts (Emacs 31.1, bun 1.4.0, measured 2026-09-22;
+with its event stream, as it then had, open or an HTTP request of its own
+unanswered, which it aborts (Emacs 31.1, bun 1.4.0, measured 2026-09-22;
 docs/MANUAL_TESTING.md, OW-bonode and OW-kofuda).
 The teardown, which the sentinel defers behind what the helper wrote last
 \(`agentpane--helper-exited'), ran within `jsonrpc-shutdown''s wait too,
@@ -521,20 +522,20 @@ exited (D25); see `agentpane--let-go'.")
 (defconst agentpane--spawn-timeout 60
   "Seconds to wait for a request that may spawn the session's backend:
 `sessions/attach', and since D30 `sessions/create',
-`sessions/forkAndPrompt' and a `sessions/prompt' naming no handle; every
-other route acts on a session already attached, or refuses
-\(src/server/http/app.ts).  A `sessions/prompt' naming its handle,
+`sessions/forkAndPrompt' and a `sessions/prompt' naming a ref; every
+other command acts on a session already attached, or is refused
+\(src/server/http/socket.ts).  A `sessions/prompt' naming its handle,
 `sessions/forkPoints' and `sessions/fork' still take this too, from when
-their routes attached first; each now waits only on a backend already
+their HTTP routes attached first; each now waits only on a backend already
 running, and whether they want jsonrpc.el's default instead, as
 `sessions/setModel' takes, has not been weighed.
 Past this the reply is discarded even if it comes, so a spawn that ran long
 but succeeded reads as a failure and leaves the buffer unattached though
 its session is live.  jsonrpc.el's default is 10s, and the one attach
 measured took 1.138s, a re-attach on `pi 0.85.1' on 2026-09-16, driven at
-the HTTP route (docs/MANUAL_TESTING.md, OW-jamoyi); no cold spawn has been
-timed.  60s is what `agentpane-new-session''s synchronous create, which
-attaches too, allows, where waiting blocks Emacs; here it blocks
+the HTTP route of the time (docs/MANUAL_TESTING.md, OW-jamoyi); no cold
+spawn has been timed.  60s is what `agentpane-new-session''s synchronous
+create, which attaches too, allows, where waiting blocks Emacs; here it blocks
 nothing, and a hung helper costs only a minute before a refused second
 send is accepted again.")
 
@@ -1211,11 +1212,10 @@ clears it; a prompt's answer does not, since the server's
 `(:error MESSAGE)' node; see `agentpane--hold-error'.
 A snapshot sets it even from a stale error: a snapshot the server
 broadcast before it cleared the error, at `submit' or `clearError' in
-session-manager.ts, may be handled after the prompt's answer, since the
-event stream and the reply are unordered (D2), or after
-`agentpane-dismiss-error', which clears it before the server has heard.
+session-manager.ts, may be handled after `agentpane-dismiss-error',
+which clears it before the server has heard.
 The server announces every clear with a `session/errorCleared'
-\(OW-jopifu), and the event stream is one ordered stream, so that clear
+\(OW-jopifu), and the socket is one ordered stream, so that clear
 always follows the stale snapshot and the line the stale one draws is
 transient; the buffer keeps no send-time state to second-guess a snapshot
 \(OW-sedosu).")
@@ -3304,7 +3304,7 @@ A prompt the server refuses, the helper
 answering with an error whose `data' carries the server's code, even one
 it wrote as it died, takes back its claim on the watch, which goes when
 no other prompt claims it, as the browser's `watchAbandon' does for a
-refused POST: refused, the prompt started nothing, and the next turn on
+refused prompt: refused, the prompt started nothing, and the next turn on
 the session is not one it asked for.  So does one that never went out,
 sending it having exited non-locally, or its helper having exited before
 the teardown (`agentpane--request').  The claim is taken back even when a
@@ -3324,8 +3324,8 @@ streaming then ends as an aborted one does (`agentpane--helper-gone').
 Abandoned at the death, as it was until OW-mopuyi, that turn raised
 nothing (OW-zedawo).
 One whose reply outlasts `agentpane--spawn-timeout' keeps its claim: the
-reply is discarded, not refused, and the prompt route answers only once
-the backend has admitted the turn (src/server/http/app.ts), so a reply
+reply is discarded, not refused, and the server answers a prompt only once
+the backend has admitted the turn (src/server/http/socket.ts), so a reply
 that long in coming most likely means a backend slow to admit it, behind
 a Pi compaction, say (`SessionManager.#serially'), and a prompt admitted
 once it could.
@@ -3990,8 +3990,8 @@ A buffer not attached, only previewed, is attached and forks nothing: once
 the attach answers, the echo area says the transcript now shows the live
 session and to press `f' again at the message to fork.  Its indices are the
 stored projection's, and the fork points are the live adapter's, which
-alone answers the route, and the two can name different messages: a Pi
-preview drops the `custom_message' entries and roles such as
+alone answers `sessions/forkPoints', and the two can name different
+messages: a Pi preview drops the `custom_message' entries and roles such as
 `bashExecution' that `get_messages' keeps (read from `pi 0.87.1''s
 source), and nothing makes the Claude Code store and live projections
 agree (OW-gekiki).  So trusting the index could fork at another message.

@@ -29,7 +29,7 @@
 		editingIndex?: number | null;
 		/**
 		 * The `messages` indices an edit may start at (OW-roveze): the ones the
-		 * backend answered `GET fork-points` with. A user message outside it gets
+		 * backend answered `sessions/forkPoints` with. A user message outside it gets
 		 * no control, because forking at it is not something any backend offers
 		 * -- a Codex turn steered mid-flight holds a second user message the
 		 * backend cannot cut before. Omitted, every user message is offered one;

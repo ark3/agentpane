@@ -227,7 +227,7 @@ const api: AgentpaneApi = {
 		};
 	},
 	async prompt(_ref, body) {
-		// The route acknowledges (202) and the turn streams afterwards.
+		// The reply admits the prompt and the turn streams afterwards.
 		turnSettled = runTurn(body.text);
 	},
 	async editDraft(body) {
@@ -235,8 +235,8 @@ const api: AgentpaneApi = {
 	},
 	async abort() {},
 	async compact() {
-		// The lifecycle arrives over SSE, as the real one does (OW-natiha): the
-		// route acknowledges and the backend's "running" status follows. No
+		// The lifecycle arrives as events, as the real one does (OW-natiha): the
+		// reply admits it and the backend's "running" status follows. No
 		// terminal event -- what the specs ask of a compaction is the persistent
 		// acknowledgment in the action row, not its ending.
 		queueMicrotask(() => {

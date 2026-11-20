@@ -14,7 +14,7 @@
  * second marker; only 39 of those 45 carry one, and all six without it were
  * written by 0.154.0, which emits it for 5 of its 11 subagent rollouts.
  * The parent's transcript links to the child by id, and that link resolves
- * through `getSession` and the preview route, which locate by filename and so
+ * through `getSession` and `sessions/preview`, which locate by filename and so
  * would keep reaching a child even if the listing ever hid one.
  *
  * Preview: see SYNTHETIC_USER_PREFIXES below -- this is the one place this
