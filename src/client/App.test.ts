@@ -6,6 +6,7 @@ import {
 	sessionKey,
 	type AbortResponse,
 	type BackendId,
+	type ForkPoint,
 	type LiveSessionSummary,
 	type ModelInfo,
 	type PromptDisposition,
@@ -15,26 +16,48 @@ import {
 	type SessionSummary,
 } from "$shared/protocol.ts";
 import App from "./App.svelte";
-import { ApiClientError, type AgentpaneApi, type EventHandlers } from "./api.ts";
+import { ApiClientError } from "./api.ts";
 import { createController, type AgentpaneController, type ControllerView } from "./controller.ts";
 import { previewMessages } from "./preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "./session-state.ts";
 import { assistant, systemLeading, toolRead, toolResult, user } from "./render/samples.ts";
 import { openToolCards } from "./render/tools/test-support.ts";
+import { socketServer, type Script, type SocketServer } from "./test-support.ts";
 
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
 const codexSession: SessionRef = { backend: "codex", id: "codex-1" };
-/** For a test that never sends an edit: a fake asked to fork fails it. */
-const forkAndPromptUnused = async (): Promise<never> => {
-	throw new Error("this test sends no edit");
-};
 /** What the server's fork-points answer says of a fork stopping a running turn, as of ark3/agentpane#47: Pi alone. */
 const serverForkStopsTurn = (ref: SessionRef): boolean => ref.backend === "pi";
 
-/** The ref the controller holds under `handle`, which is how a server's fork-points answer knows the session it names. */
-function refUnder(controller: AgentpaneController, handle: string): SessionRef {
-	const { state } = controller.getView();
-	return state.sessions[handle]?.ref ?? state.summaries.find((summary) => summary.handle === handle)!.ref;
+/**
+ * The scripted server the tests that drive the real controller run the real
+ * api over (D31), with `script` over its defaults: its listing holds
+ * `listed`, and its fork points are `points`, beside `serverForkStopsTurn`
+ * for the session of `refs` it holds under the handle asked.
+ */
+function appServer(
+	{ listed, refs = listed.map((item) => item.ref), points = [] }: { listed: SessionSummary[]; refs?: SessionRef[]; points?: ForkPoint[] },
+	script: Script = {},
+): SocketServer {
+	return socketServer({
+		"sessions/list": () => ({ sessions: listed }),
+		"sessions/forkPoints": ({ handle }, server) => ({
+			points,
+			forkStopsTurn: refs.some((ref) => server.handleAt(ref) === handle && serverForkStopsTurn(ref)),
+		}),
+		...script,
+	});
+}
+
+/** The point an Edit of a session's first message forks at. */
+const firstPoint: ForkPoint[] = [{ id: "turn-1", text: "first draft", index: 0 }];
+
+/** An attach that leaves the session under `handle`, writing `snapshot` of it before it replies (D31 point 3). */
+function attachesUnder(handle: string, snapshot: (ref: SessionRef, handle: string) => ServerEvent): NonNullable<Script["sessions/attach"]> {
+	return ({ ref }, server) => {
+		server.emit(snapshot(ref, handle));
+		return { session: { ...summary(ref), handle } };
+	};
 }
 
 function summary(
@@ -226,7 +249,7 @@ class FakeController implements AgentpaneController {
 
 	/** What a landed submit answers; `"handled"` stands for a prompt a Pi extension consumed (OW-yobayi). */
 	submitDisposition: PromptDisposition = "started";
-	/** Held until it settles, so the session's events can land ahead of the submit's answer (D2, OW-zikiga). */
+	/** Held until it settles, so the session's events can land ahead of the submit's answer, as the server writes them (D31 point 3, OW-zikiga). */
 	submitGate: Promise<void> | null = null;
 
 	async submit() {
@@ -505,45 +528,18 @@ describe("App", () => {
 	 * empty one (OW-widozi).
 	 */
 	it("offers and sends a model and effort for a Pi session holding only its system message (OW-widozi)", async () => {
-		let emit: (event: ServerEvent) => void = () => {};
-		const modelSets: string[] = [];
-		const effortSets: string[] = [];
 		const models: ModelInfo[] = [
 			{ id: "opaque/current", label: "Current Model", efforts: [{ id: "low", description: "" }, { id: "high", description: "" }], defaultEffort: "low" },
 			{ id: "opaque/next", label: "Next Model", efforts: [], defaultEffort: null },
 		];
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(piSession, null)],
-			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
-			attach: async () => ({ ...summary(piSession, null), handle: "h-1" }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => models,
-			setModel: async (_ref, model) => {
-				modelSets.push(model);
-			},
-			setEffort: async (_ref, effort) => {
-				effortSets.push(effort);
-			},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
-			forkAndPrompt: forkAndPromptUnused,
-			fork: async () => piSession,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
-		render(App, { props: { controller } });
-		emit({
-			type: "snapshot", session: piSession, handle: "h-1", seq: 1, messages: [systemLeading()], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		const server = appServer({ listed: [summary(piSession, null)] }, {
+			"sessions/attach": attachesUnder("h-1", (session, handle) => ({
+				type: "snapshot", session, handle, seq: 1, messages: [systemLeading()], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+			})),
+			"models/list": () => ({ models }),
 		});
+		const controller = createController(server.api());
+		render(App, { props: { controller } });
 		await controller.select(piSession);
 		await tick();
 
@@ -552,8 +548,8 @@ describe("App", () => {
 		await fireEvent.change(picker, { target: { value: "opaque/next" } });
 		await fireEvent.change(screen.getByLabelText("Conversation effort"), { target: { value: "high" } });
 
-		expect(modelSets).toEqual(["opaque/next"]);
-		expect(effortSets).toEqual(["high"]);
+		expect(server.on["sessions/setModel"].mock.calls.map(([params]) => params.model)).toEqual(["opaque/next"]);
+		expect(server.on["sessions/setEffort"].mock.calls.map(([params]) => params.effort)).toEqual(["high"]);
 	});
 
 	it("shows the reported model when an older messaged snapshot attaches", () => {
@@ -975,38 +971,13 @@ describe("App", () => {
 
 	/** Driven by the real controller, so what is under test reaches the API's `setName`. */
 	it("renames the selection through the API with the name typed, and sends nothing on Cancel or a blank name (OW-bumonu)", async () => {
-		let emit: (event: ServerEvent) => void = () => {};
-		const named: Array<{ handle: string; name: string }> = [];
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(piSession, "P")],
-			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
-			attach: async () => ({ ...summary(piSession, "P"), handle: "h-1" }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async (handle, name) => {
-				named.push({ handle, name });
-			},
-			forkPoints: async (handle) => ({ points: [], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
-			forkAndPrompt: forkAndPromptUnused,
-			fork: async () => piSession,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
-		render(App, { props: { controller } });
-		emit({
-			type: "snapshot", session: piSession, handle: "h-1", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		const server = appServer({ listed: [summary(piSession, "P")] }, {
+			"sessions/attach": attachesUnder("h-1", (session, handle) => ({
+				type: "snapshot", session, handle, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+			})),
 		});
+		const controller = createController(server.api());
+		render(App, { props: { controller } });
 		await controller.select(piSession);
 		await tick();
 
@@ -1023,7 +994,7 @@ describe("App", () => {
 			window.prompt = prompt;
 		}
 
-		expect(named).toEqual([{ handle: "h-1", name: "Release notes" }]);
+		expect(server.on["sessions/setName"].mock.calls.map(([params]) => params)).toEqual([{ handle: "h-1", name: "Release notes" }]);
 	});
 
 	it("previews a stored session on row selection instead of attaching, labelling it by backend and id", async () => {
@@ -1881,7 +1852,7 @@ describe("App", () => {
 		expect(el.scrollTop).toBe(50);
 	});
 
-	it("keeps following through a submit whose echoed message and assistant placeholder both arrive before their status:true (D2: cross-event ordering is not guaranteed)", async () => {
+	it("keeps following through a submit whose echoed message and assistant placeholder both arrive before their status:true, an order the server may write them in", async () => {
 		const old = user("old message");
 		const sessions = {
 			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null },
@@ -2404,43 +2375,20 @@ describe("App", () => {
 	 * one this tab stopped hearing (D25 point 5, OW-jadoda).
 	 */
 	it("ends the badge's watch at a seq gap, so a turn under the same handle after a re-attach raises nothing (OW-jadoda)", async () => {
-		let emit: (event: ServerEvent) => void = () => {};
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(piSession)],
-			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
-			attach: async () => ({ ...summary(piSession), handle: "h-1" }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async () => ({ points: [], forkStopsTurn: serverForkStopsTurn(piSession) }),
-			forkAndPrompt: forkAndPromptUnused,
-			fork: async () => piSession,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
 		const snapshot = (isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session: piSession, handle: "h-1", seq: 1, messages: [], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
 		const status = (seq: number, isStreaming: boolean): ServerEvent => ({
 			type: "status", session: piSession, handle: "h-1", seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
 		});
+		const server = appServer({ listed: [summary(piSession)] }, { "sessions/attach": attachesUnder("h-1", () => snapshot(false)) });
+		const emit = (event: ServerEvent) => server.emit(event);
 		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
 		const hasFocus = document.hasFocus;
 		document.hasFocus = () => false;
 		try {
-			const controller = createController(api);
+			const controller = createController(server.api());
 			render(App, { props: { controller } });
-			emit(snapshot(false));
 			await controller.select(piSession);
 			await tick();
 			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "Summarize the diff" } });
@@ -2474,66 +2422,44 @@ describe("App", () => {
 	 */
 	for (const streamed of [true, false]) {
 		it(`at a close of the socket, ${streamed ? "raises the badge for a turn seen streaming" : "raises nothing for a turn not yet seen streaming"}, and drops the watch (D31 point 6)`, async () => {
-			let handlers: EventHandlers | undefined;
-			const api: AgentpaneApi = {
-				listSessions: async () => [summary(piSession)],
-				createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
-				attach: async () => ({ ...summary(piSession), handle: "h-1" }),
-				preview: async (ref) => ({ ref, turns: [] }),
-				prompt: async () => {},
-				editDraft: async (body) => ({ text: body.text }),
-				abort: async () => {},
-				compact: async () => {},
-				close: async () => {},
-				listModels: async () => [],
-				setModel: async () => {},
-				setEffort: async () => {},
-				setName: async () => {},
-				forkPoints: async () => ({ points: [], forkStopsTurn: serverForkStopsTurn(piSession) }),
-				forkAndPrompt: forkAndPromptUnused,
-				fork: async () => piSession,
-				dismissError: async () => {},
-				connect: (next: EventHandlers) => {
-					handlers = next;
-					return { close: () => {} };
-				},
-			};
 			const snapshot = (isStreaming: boolean): ServerEvent => ({
 				type: "snapshot", session: piSession, handle: "h-1", seq: 1, messages: [], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 			});
 			const status = (seq: number, isStreaming: boolean): ServerEvent => ({
 				type: "status", session: piSession, handle: "h-1", seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
 			});
+			const server = appServer({ listed: [summary(piSession)] }, { "sessions/attach": attachesUnder("h-1", () => snapshot(false)) });
 			const icon = () => document.querySelector('link[rel="icon"]')!.getAttribute("href");
 			document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
 			const hasFocus = document.hasFocus;
 			document.hasFocus = () => false;
 			try {
-				const controller = createController(api);
+				const controller = createController(server.api());
 				render(App, { props: { controller } });
-				handlers!.onOpen();
-				handlers!.onEvent(snapshot(false));
 				await controller.select(piSession);
 				await tick();
 				await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "Summarize the diff" } });
 				await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 				await tick();
-				if (streamed) handlers!.onEvent(status(2, true));
+				if (streamed) server.emit(status(2, true));
 				await tick();
 				expect(icon()).toBe("/favicon.svg");
 
-				handlers!.onDisconnect();
+				server.drop();
 				await tick();
 				expect(icon()).toBe(streamed ? "/favicon-badged.svg" : "/favicon.svg");
 
-				// The server survived after all: the reconnect's opening snapshot
-				// re-forms the view under the same handle, and its turn ends.
+				// The server survived after all: the reconnect's opening snapshot,
+				// before its `hello`'s reply, re-forms the view under the same
+				// handle, and its turn ends.
 				window.dispatchEvent(new Event("focus"));
 				await tick();
-				handlers!.onOpen();
-				handlers!.onEvent(snapshot(true));
+				server.opening = [snapshot(true)];
+				controller.reconnect();
+				await new Promise((resolve) => setTimeout(resolve, 0));
 				await tick();
-				handlers!.onEvent(status(2, false));
+				expect(controller.getView().state.sessions["h-1"]?.isStreaming).toBe(true);
+				server.emit(status(2, false));
 				await tick();
 				expect(icon()).toBe("/favicon.svg");
 				controller.dispose();
@@ -2916,40 +2842,22 @@ describe("App", () => {
 		// nothing in the composer stops a second Ctrl-Enter (OW-nasofa).
 		let resolvePrompt = () => {};
 		const prompts: string[] = [];
-		let emit: (event: ServerEvent) => void = () => {};
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(piSession)],
-			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
-			attach: async () => ({ ...summary(piSession), handle: "h-parent" }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async (_ref, body) => {
-				prompts.push(body.text);
+		const server = appServer({ listed: [summary(piSession)] }, {
+			// The composer only replaces the Attach button once the session is
+			// live, which is a snapshot's job, not the attach response's.
+			"sessions/attach": attachesUnder("h-parent", (session, handle) => ({
+				type: "snapshot", session, handle, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+			})),
+			"sessions/prompt": async ({ text }) => {
+				prompts.push(text);
 				await new Promise<void>((resolve) => {
 					resolvePrompt = resolve;
 				});
+				return { disposition: "started" };
 			},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
-			forkAndPrompt: forkAndPromptUnused,
-			fork: async () => piSession,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+		});
+		const controller = createController(server.api());
 		render(App, { props: { controller } });
-		// The composer only replaces the Attach button once the session is live,
-		// which is a snapshot's job, not the attach response's.
-		emit({ type: "snapshot", session: piSession, handle: "h-parent", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 		await controller.select(piSession);
 		await tick();
 		const textarea = screen.getByLabelText("Prompt");
@@ -3551,23 +3459,11 @@ describe("App", () => {
 		const forkRef: SessionRef = { backend: "codex", id: "thread-fork" };
 		let resolveFork = () => {};
 		let forks = 0;
-		let emit: (event: ServerEvent) => void = () => {};
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(piSession)],
-			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
-			attach: async (ref) => ({ ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
-			forkAndPrompt: async () => {
+		const server = appServer({ listed: [summary(piSession)], refs: [piSession, forkRef], points: firstPoint }, {
+			"sessions/attach": attachesUnder("h-parent", (session, handle) => ({
+				type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+			})),
+			"sessions/forkAndPrompt": async () => {
 				forks += 1;
 				if (forks > 1) throw new Error("fork refused");
 				await new Promise<void>((resolve) => {
@@ -3576,20 +3472,14 @@ describe("App", () => {
 				emit({ type: "snapshot", session: forkRef, handle: "h-fork", seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
 			},
-			fork: async () => forkRef,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+		});
+		const emit = (event: ServerEvent) => server.emit(event);
+		const controller = createController(server.api());
 		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
 		const hasFocus = document.hasFocus;
 		document.hasFocus = () => false;
 		try {
 			render(App, { props: { controller } });
-			emit({ type: "snapshot", session: piSession, handle: "h-parent", seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 			await controller.select(piSession);
 			await tick();
 
@@ -3629,35 +3519,22 @@ describe("App", () => {
 		const parentRef: SessionRef = { backend, id: "parent" };
 		const forkRef: SessionRef = { backend, id: "fork" };
 		let answer = () => {};
-		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string, isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
 		const status = (session: SessionRef, handle: string, seq: number, isStreaming: boolean): ServerEvent => ({
 			type: "status", session, handle, seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
 		});
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(parentRef)],
-			createSession: async () => ({ ...summary(parentRef), handle: "h-created" }),
-			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
+		const server = appServer({ listed: [summary(parentRef)], refs: [parentRef, forkRef], points: firstPoint }, {
+			"sessions/attach": attachesUnder("h-parent", (session, handle) => snapshot(session, handle, true)),
 			// The fork's own answer never comes, so no publish of it refreshes the
 			// watch: what the reply arms from is all that badges.
-			forkPoints: (handle) => refUnder(controller, handle).id === forkRef.id
+			"sessions/forkPoints": ({ handle }) => handle === "h-fork"
 				? new Promise<never>(() => {})
-				: Promise.resolve({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
+				: { points: firstPoint, forkStopsTurn: serverForkStopsTurn(parentRef) },
 			// The server's order: the fork attached, its turn started under its own
 			// handle, and only then the reply.
-			forkAndPrompt: async () => {
+			"sessions/forkAndPrompt": async () => {
 				await new Promise<void>((resolve) => {
 					answer = resolve;
 				});
@@ -3665,20 +3542,14 @@ describe("App", () => {
 				emit(status(forkRef, "h-fork", 2, true));
 				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
 			},
-			fork: async () => forkRef,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+		});
+		const emit = (event: ServerEvent) => server.emit(event);
+		const controller = createController(server.api());
 		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
 		const hasFocus = document.hasFocus;
 		document.hasFocus = () => false;
 		try {
 			render(App, { props: { controller } });
-			emit(snapshot(parentRef, "h-parent", true));
 			await controller.select(parentRef);
 			await tick();
 
@@ -3715,33 +3586,15 @@ describe("App", () => {
 	it("keeps the parent's own watch on the parent through a fork taken mid-turn (OW-koledi)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "fork" };
 		let answer = () => {};
-		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
 		const status = (session: SessionRef, handle: string, seq: number, isStreaming: boolean): ServerEvent => ({
 			type: "status", session, handle, seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
 		});
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(codexSession)],
-			createSession: async () => ({ ...summary(codexSession), handle: "h-created" }),
-			attach: async (ref) => {
-				const handle = ref.id === forkRef.id ? "h-fork" : "h-parent";
-				emit(snapshot(ref, handle));
-				return { ...summary(ref), handle };
-			},
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
-			forkAndPrompt: async () => {
+		const server = appServer({ listed: [summary(codexSession)], refs: [codexSession, forkRef], points: firstPoint }, {
+			"sessions/attach": attachesUnder("h-parent", snapshot),
+			"sessions/forkAndPrompt": async () => {
 				await new Promise<void>((resolve) => {
 					answer = resolve;
 				});
@@ -3749,14 +3602,9 @@ describe("App", () => {
 				emit(status(forkRef, "h-fork", 2, true));
 				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
 			},
-			fork: async () => forkRef,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+		});
+		const emit = (event: ServerEvent) => server.emit(event);
+		const controller = createController(server.api());
 		const icon = () => document.querySelector('link[rel="icon"]')!.getAttribute("href");
 		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
 		const hasFocus = document.hasFocus;
@@ -3809,37 +3657,16 @@ describe("App", () => {
 	it.each(["pi", "codex"] as const)("badges the %s parent turn this tab sent, forked mid-turn, only where the fork leaves it running (OW-rihanu)", async (backend) => {
 		const parentRef: SessionRef = { backend, id: "parent" };
 		const forkRef: SessionRef = { backend, id: "fork" };
-		let aborts = 0;
 		let answer = () => {};
-		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
 		const status = (session: SessionRef, handle: string, seq: number, isStreaming: boolean): ServerEvent => ({
 			type: "status", session, handle, seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
 		});
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(parentRef)],
-			createSession: async () => ({ ...summary(parentRef), handle: "h-created" }),
-			attach: async (ref) => {
-				const handle = ref.id === forkRef.id ? "h-fork" : "h-parent";
-				emit(snapshot(ref, handle));
-				return { ...summary(ref), handle };
-			},
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {
-				aborts += 1;
-			},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
-			forkAndPrompt: async () => {
+		const server = appServer({ listed: [summary(parentRef)], refs: [parentRef, forkRef], points: firstPoint }, {
+			"sessions/attach": attachesUnder("h-parent", snapshot),
+			"sessions/forkAndPrompt": async () => {
 				await new Promise<void>((resolve) => {
 					answer = resolve;
 				});
@@ -3847,14 +3674,9 @@ describe("App", () => {
 				emit(status(forkRef, "h-fork", 2, true));
 				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
 			},
-			fork: async () => forkRef,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+		});
+		const emit = (event: ServerEvent) => server.emit(event);
+		const controller = createController(server.api());
 		const icon = () => document.querySelector('link[rel="icon"]')!.getAttribute("href");
 		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
 		const hasFocus = document.hasFocus;
@@ -3875,7 +3697,7 @@ describe("App", () => {
 			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
 			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 			await tick();
-			expect(aborts).toBe(0);
+			expect(server.on["sessions/abort"]).not.toHaveBeenCalled();
 			// On Pi this is the server's stop; Codex's turn simply finishes.
 			emit(status(parentRef, "h-parent", 3, false));
 			await tick();
@@ -3900,44 +3722,22 @@ describe("App", () => {
 
 	it("arms no watch on a fork whose prompt was refused, so a turn there from elsewhere raises nothing (OW-koledi, D30)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "fork" };
-		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
 		const status = (seq: number, isStreaming: boolean): ServerEvent => ({
 			type: "status", session: forkRef, handle: "h-fork", seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
 		});
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(codexSession)],
-			createSession: async () => ({ ...summary(codexSession), handle: "h-created" }),
-			attach: async (ref) => {
-				emit(snapshot(ref, "h-parent"));
-				return { ...summary(ref), handle: "h-parent" };
-			},
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
+		const server = appServer({ listed: [summary(codexSession)], refs: [codexSession, forkRef], points: firstPoint }, {
+			"sessions/attach": attachesUnder("h-parent", snapshot),
 			// The fork is created and attached, and its prompt refused (D30).
-			forkAndPrompt: async () => {
+			"sessions/forkAndPrompt": () => {
 				emit(snapshot(forkRef, "h-fork"));
 				throw new ApiClientError("backend_refused", "prompt refused", { ref: forkRef, handle: "h-fork" });
 			},
-			fork: async () => forkRef,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+		});
+		const emit = (event: ServerEvent) => server.emit(event);
+		const controller = createController(server.api());
 		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
 		const hasFocus = document.hasFocus;
 		document.hasFocus = () => false;
@@ -3976,45 +3776,26 @@ describe("App", () => {
 	it("arms no follow or watch on a fork whose prompt the backend handled, and says it started no turn (OW-yobayi)", async () => {
 		const parentRef: SessionRef = { backend: "pi", id: "parent" };
 		const forkRef: SessionRef = { backend: "pi", id: "fork" };
-		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string, seq: number, messages: AgentMessage[], isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session, handle, seq, messages, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(parentRef)],
-			createSession: async () => ({ ...summary(parentRef), handle: "h-created" }),
-			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
-			forkAndPrompt: async () => {
+		const server = appServer({ listed: [summary(parentRef)], refs: [parentRef, forkRef], points: firstPoint }, {
+			"sessions/attach": attachesUnder("h-parent", (session, handle) =>
+				snapshot(session, handle, 1, [user("first draft"), assistant([{ type: "text", text: "an answer" }])], false)),
+			"sessions/forkAndPrompt": () => {
 				// A Pi fork at a user message keeps nothing from that message on.
 				emit(snapshot(forkRef, "h-fork", 1, [], false));
 				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "handled" };
 			},
-			fork: async () => forkRef,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+		});
+		const emit = (event: ServerEvent) => server.emit(event);
+		const controller = createController(server.api());
 		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
 		const hasFocus = document.hasFocus;
 		document.hasFocus = () => false;
 		try {
 			const { container } = render(App, { props: { controller } });
 			const el = container.querySelector(".conversation") as HTMLElement;
-			emit(snapshot(parentRef, "h-parent", 1, [user("first draft"), assistant([{ type: "text", text: "an answer" }])], false));
 			await controller.select(parentRef);
 			await tick();
 
@@ -4192,29 +3973,16 @@ describe("App", () => {
 		const forkRef: SessionRef = { backend, id: "fork" };
 		const reworded = user("reworded");
 		let answer = () => {};
-		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string, seq: number, messages: AgentMessage[], isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session, handle, seq, messages, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
 		const status = (session: SessionRef, handle: string, seq: number, isStreaming: boolean): ServerEvent => ({
 			type: "status", session, handle, seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
 		});
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(parentRef)],
-			createSession: async () => ({ ...summary(parentRef), handle: "h-created" }),
-			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
-			forkAndPrompt: async () => {
+		const server = appServer({ listed: [summary(parentRef)], refs: [parentRef, forkRef], points: firstPoint }, {
+			"sessions/attach": attachesUnder("h-parent", (session, handle) =>
+				snapshot(session, handle, 1, [user("first draft"), assistant([{ type: "text", text: "an ans" }])], true)),
+			"sessions/forkAndPrompt": async () => {
 				await new Promise<void>((resolve) => {
 					answer = resolve;
 				});
@@ -4222,17 +3990,11 @@ describe("App", () => {
 				emit(status(forkRef, "h-fork", 2, true));
 				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
 			},
-			fork: async () => forkRef,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+		});
+		const emit = (event: ServerEvent) => server.emit(event);
+		const controller = createController(server.api());
 		const { container } = render(App, { props: { controller } });
 		const el = container.querySelector(".conversation") as HTMLElement;
-		emit(snapshot(parentRef, "h-parent", 1, [user("first draft"), assistant([{ type: "text", text: "an ans" }])], true));
 		await controller.select(parentRef);
 		await tick();
 		// The reader has scrolled the parent, so it has a remembered position of
@@ -4277,46 +4039,26 @@ describe("App", () => {
 		const parentRef: SessionRef = { backend: "codex", id: "parent" };
 		const forkRef: SessionRef = { backend: "codex", id: "fork" };
 		let answer = () => {};
-		let emit: (event: ServerEvent) => void = () => {};
 		const snapshot = (session: SessionRef, handle: string, messages: AgentMessage[], isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
 		const status = (session: SessionRef, handle: string, seq: number, isStreaming: boolean): ServerEvent => ({
 			type: "status", session, handle, seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
 		});
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(parentRef)],
-			createSession: async () => ({ ...summary(parentRef), handle: "h-created" }),
-			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
+		const server = appServer({ listed: [summary(parentRef)], refs: [parentRef, forkRef], points: firstPoint }, {
+			"sessions/attach": attachesUnder("h-parent", (session, handle) => snapshot(session, handle, [user("first draft")], true)),
 			// The request stays out until the test lets it go.
-			forkAndPrompt: async () => {
+			"sessions/forkAndPrompt": async () => {
 				await new Promise<void>((resolve) => {
 					answer = resolve;
 				});
 				emit(snapshot(forkRef, "h-fork", [user("reworded")], false));
 				return { session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" };
 			},
-			fork: async () => forkRef,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+		});
+		const emit = (event: ServerEvent) => server.emit(event);
+		const controller = createController(server.api());
 		render(App, { props: { controller } });
-		emit(snapshot(parentRef, "h-parent", [user("first draft")], true));
 		await controller.select(parentRef);
 		await tick();
 		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
@@ -4390,8 +4132,7 @@ describe("App", () => {
 	 * A Pi session streaming its reply to "first draft", with "half-written note"
 	 * in the composer, driven through the real controller and the real abort
 	 * answer (OW-fahoti). The first stop answers with `queued` once `answer` is
-	 * called -- with no body at all when `queued` is empty, as the HTTP route's
-	 * 204 once did -- and any later stop finds the queue already empty. Every prompt,
+	 * called, and any later stop finds the queue already empty. Every prompt,
 	 * a fork's included, is held until `land` is called or `refuse` fails it,
 	 * so a test can answer while a fork or a send is still out; a fork's
 	 * refusal names the fork, which the server attached before it prompted
@@ -4401,7 +4142,6 @@ describe("App", () => {
 	 */
 	async function streamingPi(queued: string[], streaming = true) {
 		const forkRef: SessionRef = { backend: "pi", id: "pi-fork" };
-		let emit: (event: ServerEvent) => void = () => {};
 		let answer = () => {};
 		let land = () => {};
 		let refuse = () => {};
@@ -4412,56 +4152,39 @@ describe("App", () => {
 		const snapshot = (session: SessionRef, handle: string, isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages: [user("first draft"), assistant([{ type: "text", text: "an answer" }])], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(piSession)],
-			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
-			attach: async (ref) => ({ ...summary(ref), handle: "h-parent" }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: (_ref, body) => {
-				prompts.push(body.text);
-				return new Promise<void>((resolve, reject) => {
-					land = resolve;
+		const server = appServer({ listed: [summary(piSession)], refs: [piSession, forkRef], points: firstPoint }, {
+			"sessions/attach": attachesUnder("h-parent", (session, handle) => snapshot(session, handle, streaming)),
+			"sessions/prompt": ({ text }) => {
+				prompts.push(text);
+				return new Promise((resolve, reject) => {
+					land = () => resolve({ disposition: "started" });
 					refuse = () => reject(new Error("prompt refused"));
 				});
 			},
-			editDraft: (body) => {
-				edits.push(body.text);
+			"draft/edit": ({ text }) => {
+				edits.push(text);
 				return new Promise<{ text: string }>((resolve) => {
-					answerEdit = (text) => resolve({ text });
+					answerEdit = (edited) => resolve({ text: edited });
 				});
 			},
-			abort: () => {
+			"sessions/abort": () => {
 				aborts += 1;
-				if (aborts > 1) return Promise.resolve();
-				return new Promise<AbortResponse | void>((resolve) => {
-					answer = () => resolve(queued.length > 0 ? { queued } : undefined);
+				if (aborts > 1) return { queued: [] };
+				return new Promise<AbortResponse>((resolve) => {
+					answer = () => resolve({ queued });
 				});
 			},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [{ id: "turn-1", text: "first draft", index: 0 }], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
-			forkAndPrompt: (_ref, body) => {
-				prompts.push(body.text);
-				emit(snapshot(forkRef, "h-fork", false));
+			"sessions/forkAndPrompt": ({ text }, server) => {
+				prompts.push(text);
+				server.emit(snapshot(forkRef, "h-fork", false));
 				return new Promise((resolve, reject) => {
 					land = () => resolve({ session: { ...summary(forkRef), handle: "h-fork" }, disposition: "started" });
 					refuse = () => reject(new ApiClientError("backend_refused", "prompt refused", { ref: forkRef, handle: "h-fork" }));
 				});
 			},
-			fork: async () => forkRef,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+		});
+		const controller = createController(server.api());
 		render(App, { props: { controller } });
-		emit(snapshot(piSession, "h-parent", streaming));
 		await controller.select(piSession);
 		controller.setDraft("half-written note");
 		await tick();
@@ -4947,34 +4670,13 @@ describe("App", () => {
  * ever reached it, so the snapshot is the only thing that can.
  */
 describe("a client that connects after the fact (OW-bipume)", () => {
-	function connectLate(): { controller: AgentpaneController; emit: (event: ServerEvent) => void } {
-		let emit: (event: ServerEvent) => void = () => {};
-		const api: AgentpaneApi = {
-			listSessions: async () => [summary(piSession)],
-			createSession: async () => ({ ...summary(piSession), handle: "h-created" }),
-			attach: async (ref) => ({ ...summary(ref), handle: sessionKey(ref) }),
-			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: async () => {},
-			editDraft: async (body) => ({ text: body.text }),
-			abort: async () => {},
-			compact: async () => {},
-			close: async () => {},
-			listModels: async () => [],
-			setModel: async () => {},
-			setEffort: async () => {},
-			setName: async () => {},
-			forkPoints: async (handle) => ({ points: [], forkStopsTurn: serverForkStopsTurn(refUnder(controller, handle)) }),
-			forkAndPrompt: forkAndPromptUnused,
-			fork: async () => piSession,
-			dismissError: async () => {},
-			connect: (handlers: EventHandlers) => {
-				emit = handlers.onEvent;
-				return { close: () => {} };
-			},
-		};
-		const controller = createController(api);
+	/** Open on `snapshot`, the opening snapshot the `hello`'s reply follows (D31). */
+	function connectLate(snapshot: ServerEvent): AgentpaneController {
+		const server = appServer({ listed: [summary(piSession)] });
+		server.opening = [snapshot];
+		const controller = createController(server.api());
 		render(App, { props: { controller } });
-		return { controller, emit: (event) => emit(event) };
+		return controller;
 	}
 
 	function opening(held: Pick<Extract<ServerEvent, { type: "snapshot" }>, "error" | "errorId" | "notices">): ServerEvent {
@@ -4982,9 +4684,8 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 	}
 
 	it("shows a notice raised before it connected", async () => {
-		const { controller, emit } = connectLate();
 		const notice = { kind: "configWarning", message: "Unknown key", details: null, path: "/c.toml:3:5" };
-		emit(opening({ error: null, errorId: null, notices: [notice] }));
+		const controller = connectLate(opening({ error: null, errorId: null, notices: [notice] }));
 		await controller.select(piSession);
 		await tick();
 
@@ -4994,8 +4695,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 	});
 
 	it("shows a turn error recorded before it connected", async () => {
-		const { controller, emit } = connectLate();
-		emit(opening({ error: "turn failed upstream", errorId: "e1", notices: [] }));
+		const controller = connectLate(opening({ error: "turn failed upstream", errorId: "e1", notices: [] }));
 		await controller.select(piSession);
 		await tick();
 
