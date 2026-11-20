@@ -49,13 +49,12 @@ Extend the wait or the prompt if a faster model finishes before the steer lands.
 
 Verified with: `codex-cli` 0.147.0; the steer phase with `codex-cli` 0.154.0 on 2026-09-12.
 
-## `agentpane_codex_smoke.py`
+## `agentpane_codex_smoke.ts`
 
-Proves the assembled application path with a real Codex process: build and serve the production client, create through REST, which attaches (D30), observe incremental SSE transcript updates and idle completion, reconnect and verify a repaint without another native worker, abort a long turn, then shut the server down and verify the run-scoped worker exited.
+Proves the assembled application path with a real Codex process: build and serve the production client, create over the socket, which attaches (D30), observe incremental transcript updates and idle completion, reconnect on a second socket and verify a repaint without another native worker, abort a long turn, then shut the server down and verify the run-scoped worker exited.
 
 ```bash
-python3 agentpane_codex_smoke.py \
-  --workspace /home/asa0717/src/agentpane
+bun agentpane_codex_smoke.ts --workspace /home/asa0717/src/agentpane
 ```
 
 This makes live model calls. It derives the application checkout from its own
@@ -67,11 +66,14 @@ of the server it starts. It never invokes Pi. Exit 0 plus the emitted JSON
 It creates the session with an explicit `model`, `--model`, defaulting to the `gpt-5.6-luna` that `AGENTS.md` pins: agentpane spawns a bare `codex app-server` and sends no model on `thread/start` unless the session was created with one, so without it Codex answers on whatever the copied `config.toml` names.
 `checks.model` records the flag beside the model the thread reported (OW-yehisa).
 
-The abort phase waits for the long turn to hold 20000 characters of its own text before aborting it, and reports `assistant_length_at_abort` off that turn's messages alone (OW-sofige), so a run spends that much output and up to 150 s more than it did; the prompt and the wait are shared with the Pi harness in `agentpane_live_support.py`.
+The abort phase waits for the long turn to hold 20000 characters of its own text before aborting it, and reports `assistant_length_at_abort` off that turn's messages alone (OW-sofige), so a run spends that much output and up to 150 s more than it did; the prompt and the wait are shared with the Pi harness in `agentpane_live_support.ts`.
 Verified with the change: `codex-cli` 0.157.1 on the home server, 2026-09-30; see `docs/MANUAL_TESTING.md`, "The smoke probes abort the long turn's own text, twenty thousand characters in (OW-sofige)".
 
 Verified with: `codex-cli` 0.157.1 on the home server, 2026-09-30, with the explicit `--model`; see `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
 Verified after the create began to start the session (ark3/agentpane#48): `codex-cli` 0.170.0 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
+It was `agentpane_codex_smoke.py`, over HTTP and the event stream, until ark3/agentpane#54 ported it to Bun and the socket (D31), every run above being of the Python one.
+Since the port it prompts and aborts by the handle the create answered and keys every wait by that handle, where it keyed them by the ref; the reconnect closes its socket and opens another, whose opening snapshots must repaint the finished turn; and replies are recorded by their result or refusal code where HTTP statuses were, a prompt's 202 now read as `disposition: "started"`.
+Verified with the port: `codex-cli` 0.170.0 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
 ## `agentpane_pi_smoke.ts`
 
