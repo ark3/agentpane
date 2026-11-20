@@ -1557,6 +1557,32 @@ describe("App", () => {
 		expect(nav.queryByLabelText("Turn finished")).not.toBeInTheDocument();
 	});
 
+	// A drop takes every view and leaves each row its handle (`onDisconnect`),
+	// so a mark filed under a view's handle outlives the view; selecting the
+	// row is what clears it, as it does for a live one (owner, 2026-11-20).
+	it("keeps a finished-turn marker through a socket drop until its row is selected", async () => {
+		const summaries = [summary(piSession, "Selected turn", { handle: "h-pi" }), summary(codexSession, "Other turn", { handle: "h-codex" })];
+		const live = (codexStreaming: boolean) => ({
+			"h-pi": { ref: piSession, messages: [], isStreaming: false, seq: 1, error: null, errorId: null },
+			"h-codex": { ref: codexSession, messages: [], isStreaming: codexStreaming, seq: 1, error: null, errorId: null },
+		});
+		const controller = new FakeController(view({ state: state({ selected: piSession, summaries, sessions: live(true) }) }));
+		render(App, { props: { controller } });
+		controller.publish(view({ state: state({ selected: piSession, summaries, sessions: live(false) }) }));
+		await tick();
+		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
+		expect(nav.getByLabelText("Turn finished").closest("button")).toHaveTextContent("Other turn");
+
+		const dropped = summaries.map((row) => ({ ...row, status: "detached" as const, isStreaming: false }));
+		controller.publish(view({ connection: "reconnecting", state: state({ selected: piSession, summaries: dropped, sessions: {} }) }));
+		await tick();
+		expect(nav.getByLabelText("Turn finished").closest("button")).toHaveTextContent("Other turn");
+
+		controller.publish(view({ connection: "reconnecting", state: state({ selected: codexSession, summaries: dropped, sessions: {} }) }));
+		await tick();
+		expect(nav.queryByLabelText("Turn finished")).not.toBeInTheDocument();
+	});
+
 	it("does not mistake an unselected idle level for a finished turn", async () => {
 		const summaries = [summary(piSession, "Selected turn"), summary(codexSession, "Other turn")];
 		const live = {

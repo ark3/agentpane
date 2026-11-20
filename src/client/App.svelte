@@ -556,9 +556,25 @@
 		return handleOf(view.state, ref) ?? sessionKey(ref);
 	}
 
-	/** `keyOf` for a session row, through `viewHandles` rather than a scan per row. */
+	/**
+	 * The key a session row's marks are filed under: its view's handle, as
+	 * `keyOf`, through `viewHandles` rather than a scan per row; else the handle
+	 * the listing gave the row, which a drop leaves on it (`onDisconnect`), so a
+	 * finished mark filed under the gone view's handle stays until the row is
+	 * selected (`selectionKey`); else its ref.
+	 */
 	function rowKey(summary: SessionSummary): string {
 		return viewHandles.get(sessionKey(summary.ref)) ?? summary.handle ?? sessionKey(summary.ref);
+	}
+
+	/**
+	 * The selection's key for its row's marks: its row's `rowKey`, so that
+	 * selecting a row clears the mark the row shows, a drop's kept handle
+	 * included; `keyOf` for a selection no row lists.
+	 */
+	function selectionKey(): string | null {
+		if (view.state.selected === null) return null;
+		return selectedSummary ? rowKey(selectedSummary) : keyOf(view.state.selected);
 	}
 
 	/**
@@ -1101,8 +1117,7 @@
 		for (const [key, session] of Object.entries(view.state.sessions)) {
 			streaming.set(key, session.isStreaming);
 		}
-		const selectedKey = view.state.selected === null ? null : keyOf(view.state.selected);
-		sessionTurnMarks = foldSessionTurns(sessionTurnMarks, streaming, selectedKey);
+		sessionTurnMarks = foldSessionTurns(sessionTurnMarks, streaming, selectionKey());
 		turnWatch = watchSessions(turnWatch, streaming, document.hasFocus());
 		setFaviconBadge(turnWatch.badged);
 	});
