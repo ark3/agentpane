@@ -6029,7 +6029,7 @@ then ends unseen raises nothing (OW-lohavi)."
   (agentpane-test--submitting
     (setq hold '(sessions/prompt))
     (funcall submit)
-    (funcall (cdr (pop held)) '(:error "turn_active"))
+    (funcall (cdr (pop held)) '(:error "backend_refused"))
     (funcall status t)
     (funcall status nil)
     (should-not (agentpane-test--turn-done-p))))
@@ -6042,7 +6042,7 @@ prompt armed, so the turn's end still raises the indicator (OW-lohavi)."
     (funcall status t)
     (setq hold '(sessions/prompt))
     (funcall submit)
-    (funcall (cdr (pop held)) '(:error "turn_active"))
+    (funcall (cdr (pop held)) '(:error "backend_refused"))
     (funcall status nil)
     (should (agentpane-test--turn-done-p))))
 
@@ -6400,7 +6400,7 @@ so a turn from elsewhere that then ends unseen raises nothing.  Through
                 (should-not (buffer-live-p holder))
                 (funcall (plist-get prompt :error-fn)
                          '(:code -32000 :message "Refused"
-                           :data (:error "turn_active" :detail "Refused"))))
+                           :data (:error "backend_refused" :detail "Refused"))))
               (funcall status t)
               (funcall status nil)
               (should-not (agentpane-test--turn-done-p)))))))))
@@ -6498,7 +6498,7 @@ does."
                     ('handled (funcall (plist-get held :success-fn) '(:disposition "handled")))
                     ('refused (funcall (plist-get held :error-fn)
                                        '(:code -32000 :message "Refused"
-                                         :data (:error "turn_active"
+                                         :data (:error "backend_refused"
                                                 :detail "Refused")))))
                   (funcall (plist-get joined :success-fn) nil)))
               (funcall status t)
@@ -7252,9 +7252,9 @@ there, raising the indicator."
         (list (list :jsonrpc "2.0" :method "session/status"
                     :params (list :session ref :handle "h1" :isStreaming t))
               (list :jsonrpc "2.0" :id 1
-                    :error (list :code -32000 :message "a turn is already running"
-                                 :data (list :error "turn_active"
-                                             :detail "a turn is already running"))))
+                    :error (list :code -32000 :message "the backend refused the prompt"
+                                 :data (list :error "backend_refused"
+                                             :detail "the backend refused the prompt"))))
       (let ((dead (agentpane--connection)))
         (setq agentpane--attached dead
               agentpane--handle "h1")
@@ -7616,7 +7616,7 @@ ends unseen, and return whether the indicator is raised."
                 ('timeout (funcall (plist-get prompt :timeout-fn)))
                 ('error (funcall (plist-get prompt :error-fn)
                                  '(:code -32000 :message "Refused"
-                                   :data (:error "turn_active" :detail "Refused"))))
+                                   :data (:error "backend_refused" :detail "Refused"))))
                 ('transport (funcall (plist-get prompt :error-fn)
                                      '(:code -32603 :message "fetch failed")))
                 ('reply-exit (should-error (funcall (plist-get prompt :success-fn) nil))))))

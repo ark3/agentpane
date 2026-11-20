@@ -357,7 +357,7 @@ describe("requests", () => {
 	it("carries a server refusal through as a JSON-RPC error with the server's code and text", async () => {
 		const { io } = start({
 			"sessions/prompt": () => {
-				throw new ApiClientError("turn_active", "a turn is already running");
+				throw new ApiClientError("backend_refused", "the backend refused the prompt");
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "again" } });
@@ -365,7 +365,7 @@ describe("requests", () => {
 		expect(io.response(3)).toEqual({
 			jsonrpc: "2.0",
 			id: 3,
-			error: { code: -32000, message: "a turn is already running", data: { error: "turn_active", detail: "a turn is already running" } },
+			error: { code: -32000, message: "the backend refused the prompt", data: { error: "backend_refused", detail: "the backend refused the prompt" } },
 		});
 	});
 
