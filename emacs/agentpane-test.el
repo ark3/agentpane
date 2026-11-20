@@ -24,6 +24,42 @@
 (require 'ert)
 (require 'agentpane)
 
+;;;; The server's refusal, shared by every stub that answers a request
+
+(defconst agentpane-test--live-methods
+  '(sessions/abort sessions/compact sessions/dismissError sessions/setModel
+    sessions/setEffort sessions/setName sessions/forkPoints sessions/fork
+    sessions/forkAndPrompt)
+  "The helper's methods on a live session, each of which the server runs
+only under the handle it names (`LiveParams' in src/emacs/protocol.ts).")
+
+(defun agentpane-test--refusal (method params)
+  "The `data' of the error the helper answers METHOD with PARAMS with where
+the server refuses it before running it, or nil where it would run it: a
+command on a live session naming no handle is refused `bad_request', as
+`live' in src/server/http/socket.ts refuses it, and the helper hands the
+refusal on (`toRpcError' in src/emacs/helper.ts).  Every stub that answers
+a request asks this first, so a test that sends what the server would
+refuse cannot pass on an answer the server would not give."
+  (and (memq method agentpane-test--live-methods)
+       (not (stringp (plist-get params :handle)))
+       (list :error "bad_request" :detail "handle is required and must be a string")))
+
+(defun agentpane-test--refusing (request)
+  "REQUEST, a function in place of `agentpane--request', made to answer
+first what the server refuses (`agentpane-test--refusal') as
+`agentpane--request' answers a refusal: saying so, then running UNSENT,
+and FAILED and ERRED with the refusal in the buffer that sent it."
+  (lambda (method params callback &optional always failed timeout unsent erred replied)
+    (let ((refusal (agentpane-test--refusal method params)))
+      (if (not refusal)
+          (funcall request method params callback always failed timeout unsent erred replied)
+        (message "agentpane: %s failed: %s" method (plist-get refusal :detail))
+        (when unsent (funcall unsent))
+        (when failed (funcall failed))
+        (when erred (funcall erred refusal))
+        nil))))
+
 (defconst agentpane-test--nodes
   [(:index 0 :role "user"
     :parts [(:type "text" :text "Fix the bug" :html "<p>Fix the bug</p>\n")])
@@ -1655,7 +1691,7 @@ runs no CALLBACK in a killed buffer but passes a following one's on."
         (calls nil))
     (agentpane-test--with-helper
       (agentpane-test--merging
-        (cl-letf (((symbol-function 'agentpane--request) request)
+        (cl-letf (((symbol-function 'agentpane--request) (agentpane-test--refusing request))
                   ((symbol-function 'jsonrpc-async-request)
                    (lambda (_conn method _params &rest args)
                      (push (cons method args) calls)
@@ -1722,7 +1758,7 @@ the error's `data', in the buffer that absorbed it (OW-larele).  Through
         (ran nil))
     (agentpane-test--with-helper
       (agentpane-test--merging
-        (cl-letf (((symbol-function 'agentpane--request) request)
+        (cl-letf (((symbol-function 'agentpane--request) (agentpane-test--refusing request))
                   ((symbol-function 'jsonrpc-async-request)
                    (lambda (_conn method _params &rest args)
                      (push (cons method args) calls)
@@ -2062,10 +2098,11 @@ sends nothing; on a buffer with none it attaches and sends `sessions/setModel'."
         (sent nil))
     (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t))
               ((symbol-function 'agentpane--request)
+               (agentpane-test--refusing
                (lambda (method _params callback &rest _)
                  (push method sent)
                  (when (eq method 'sessions/attach) (agentpane-test--attach-snapshot ref))
-                 (funcall callback (list :ref ref))))
+                 (funcall callback (list :ref ref)))))
               ((symbol-function 'jsonrpc-async-request)
                (lambda (&rest _) (push 'jsonrpc-async-request sent)))
               ((symbol-function 'jsonrpc-request)
@@ -2088,9 +2125,10 @@ whose model prompt answers CHOICE, and return the methods sent, in order."
     (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
               ((symbol-function 'jsonrpc-running-p) (lambda (_) t))
               ((symbol-function 'agentpane--request)
+               (agentpane-test--refusing
                (lambda (method _params callback &rest _)
                  (push method sent)
-                 (funcall callback (list :ref ref))))
+                 (funcall callback (list :ref ref)))))
               ((symbol-function 'jsonrpc-request)
                (lambda (_connection method &rest _)
                  (push method sent)
@@ -2134,10 +2172,11 @@ with none it attaches and sends `sessions/setEffort'."
         (sent nil))
     (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t))
               ((symbol-function 'agentpane--request)
+               (agentpane-test--refusing
                (lambda (method _params callback &rest _)
                  (push method sent)
                  (when (eq method 'sessions/attach) (agentpane-test--attach-snapshot ref))
-                 (funcall callback (list :ref ref))))
+                 (funcall callback (list :ref ref)))))
               ((symbol-function 'jsonrpc-async-request)
                (lambda (&rest _) (push 'jsonrpc-async-request sent)))
               ((symbol-function 'jsonrpc-request)
@@ -2182,9 +2221,10 @@ collections offered, then the user error signalled, if any."
     (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
               ((symbol-function 'jsonrpc-running-p) (lambda (_) t))
               ((symbol-function 'agentpane--request)
+               (agentpane-test--refusing
                (lambda (method _params callback &rest _)
                  (push method sent)
-                 (funcall callback (list :ref ref))))
+                 (funcall callback (list :ref ref)))))
               ((symbol-function 'jsonrpc-request)
                (lambda (_connection method &rest _)
                  (push method sent)
@@ -2748,8 +2788,10 @@ failure by nil.  A reply runs the request's REPLIED with it before its
 CALLBACK (OW-kejire).  Either way the answer runs in the buffer that sent the
 request, or, for a request sent with ALWAYS `follow', the buffer that has
 absorbed it since (`agentpane--absorber'), and to a buffer since killed it
-runs only UNSENT and REPLIED, as `agentpane--request' does.  Every buffer
-BODY made is killed afterwards."
+runs only UNSENT and REPLIED, as `agentpane--request' does.  A request
+the server refuses before running it, one on a live session naming no
+handle, is refused so at once and recorded nowhere
+\(`agentpane-test--refusing').  Every buffer BODY made is killed afterwards."
   (declare (indent 2))
   `(let ((sent nil)
          (said nil)
@@ -2771,6 +2813,7 @@ BODY made is killed afterwards."
                   (cl-pushnew (current-buffer) snapshotted)
                   (apply attach-by args)))
                ((symbol-function 'agentpane--request)
+                (agentpane-test--refusing
                 (lambda (method params callback &optional always failed _timeout unsent erred replied)
                   (push (cons method params) sent)
                   (when (or (eq method 'sessions/attach)
@@ -2835,7 +2878,7 @@ BODY made is killed afterwards."
                                            (when erred (funcall erred ok)))))))))
                     (if (memq method hold)
                         (setq held (append held (list (cons method answer))))
-                      (funcall answer t)))))
+                      (funcall answer t))))))
                ((symbol-function 'message)
                 (lambda (format-string &rest args)
                   (push (apply #'format format-string args) said))))
@@ -2897,7 +2940,8 @@ and says the message is not forkable."
           [(:id "turn-0" :text "Fix the bug" :index 0)]
           '(:backend "codex" :id "t2")
         (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection)
+          (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1")
           (agentpane-test--goto-index 1)
           (agentpane-fork)
           (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
@@ -2917,13 +2961,15 @@ since `sessions/compact' answers only for an attached session."
           forked
         (agentpane-test--with-session ref
           (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1"
                 agentpane--attach-sent 7)
           (agentpane-test--goto-index 0)
           (agentpane-fork)
           (should (equal (mapcar #'car (reverse sent))
                          '(sessions/forkPoints sessions/fork sessions/detach
                            sessions/attach)))
-          (should (equal (assq 'sessions/detach sent) `(sessions/detach :session ,ref :tokens [7])))
+          (should (equal (assq 'sessions/detach sent)
+                         `(sessions/detach :session ,ref :handle "h1" :tokens [7])))
           (setq sent nil)
           (with-current-buffer buffer (agentpane-compact))
           (should (equal (reverse sent)
@@ -2941,7 +2987,8 @@ transcript under the fork's ref, never the parent's (OW-zovaye)."
           [(:id "entry-0" :text "Fix the bug" :index 0)]
           forked
         (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection)
+          (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1")
           (agentpane-test--goto-index 0)
           (agentpane-fork)
           (should (agentpane--buffer-for forked))
@@ -3016,7 +3063,8 @@ nothing; a fork that failed, or finished, frees the buffer for another."
           [(:id "turn-0" :text "Fix the bug" :index 0)]
           '(:backend "codex" :id "t2")
         (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection)
+          (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1")
           (setq hold '(sessions/forkPoints))
           (agentpane-test--goto-index 0)
           (agentpane-fork)
@@ -3043,7 +3091,8 @@ began, not in whichever window is selected when its reply lands."
           [(:id "turn-0" :text "Fix the bug" :index 0)]
           forked
         (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection)
+          (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1")
           (delete-other-windows)
           (switch-to-buffer buffer)
           (let ((parent-window (selected-window))
@@ -3068,6 +3117,7 @@ reply is released, and those sent after, in order."
           (list :backend backend :id "fork")
         (agentpane-test--with-session ref
           (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1"
                 agentpane--attach-sent 7)
           (setq hold '(sessions/abort))
           (agentpane--on-notification
@@ -3209,6 +3259,7 @@ running with nothing listening; see `agentpane-fork'."
           forked
         (agentpane-test--with-session ref
           (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1"
                 agentpane--attach-sent 7)
           (setq hold '(sessions/fork sessions/attach))
           (agentpane-test--goto-index 0)
@@ -3333,7 +3384,8 @@ displaced and forks nothing: the next send prompts the session itself."
           '(:backend "codex" :id "t2")
         (agentpane-test--with-session ref
           (agentpane--draw agentpane-test--image-nodes)
-          (setq agentpane--attached 'connection)
+          (setq agentpane--attached 'connection
+                agentpane--handle "h1")
           (goto-char (point-max))
           (insert "a draft")
           (agentpane-test--goto-index 0)
@@ -3766,6 +3818,7 @@ ark3/agentpane#17).  Whatever the backend: the answer decides."
           (agentpane-test--with-session ref
             (agentpane--draw (seq-take agentpane-test--two-asks 2))
             (setq agentpane--attached agentpane--connection
+                  agentpane--handle "h1"
                   fork-stops stops)
             (agentpane-test--goto-index 0)
             (agentpane-edit)
@@ -3807,7 +3860,8 @@ drawn (`agentpane--record', OW-roveze)."
           '(:backend "codex" :id "fork")
         (agentpane-test--with-session ref
           (agentpane--draw agentpane-test--two-asks)
-          (setq agentpane--attached 'connection)
+          (setq agentpane--attached 'connection
+                agentpane--handle "h1")
           (agentpane--on-notification
            nil 'session/node
            (list :session ref :handle "h1"
@@ -3833,7 +3887,8 @@ in the transcript's prompt region, and the transcript is shown."
             '(:backend "codex" :id "fork")
           (agentpane-test--with-session '(:backend "codex" :id "parent")
             (agentpane--draw agentpane-test--two-asks)
-            (setq agentpane--attached 'connection)
+            (setq agentpane--attached 'connection
+                  agentpane--handle "h1")
             (goto-char (point-max))
             (insert "a draft")
             (pcase how
@@ -3877,6 +3932,7 @@ holding no user message it refuses and sends nothing."
         (agentpane-test--with-session ref
           (agentpane--draw agentpane-test--two-asks)
           (setq agentpane--attached 'connection
+                agentpane--handle "h1"
                 agentpane--attach-sent 7)
           (agentpane--on-notification
            nil 'session/status (list :session ref :handle "h1" :isStreaming t :compaction nil :model nil))
@@ -4325,6 +4381,7 @@ shows it, and so does this buffer (OW-lohubo)."
       (agentpane-test--forking nil nil
         (agentpane-test--with-session ref
           (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1"
                 agentpane--attach-sent 7)
           (agentpane--on-notification
            agentpane--connection 'session/snapshot
@@ -4352,6 +4409,7 @@ and here it is not (OW-sedosu)."
       (agentpane-test--forking nil nil
         (agentpane-test--with-session ref
           (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1"
                 agentpane--attach-sent 7)
           (agentpane--on-notification
            nil 'session/error (list :session ref :handle "h1" :message "Turn failed upstream"))
@@ -4382,6 +4440,7 @@ second-guess a snapshot (OW-sedosu, OW-jopifu)."
       (agentpane-test--forking nil nil
         (agentpane-test--with-session ref
           (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1"
                 agentpane--attach-sent 7)
           (funcall snapshot ref "Turn failed upstream")
           (setq hold '(sessions/prompt))
@@ -4578,7 +4637,8 @@ does not stop the transcript buffer from being killed."
                (lambda (&rest _) (error "Process agentpane helper not running")))
               ((symbol-function 'message) #'ignore))
       (agentpane-test--with-session '(:backend "codex" :id "t1")
-        (setq agentpane--attached agentpane--connection)
+        (setq agentpane--attached agentpane--connection
+              agentpane--handle "h1")
         (kill-buffer buffer)
         (should-not (buffer-live-p buffer))))))
 
@@ -6457,7 +6517,7 @@ so a turn from elsewhere that then ends unseen raises nothing.  Through
     (agentpane-test--watching
       (agentpane-test--with-helper
         (agentpane-test--merging
-          (cl-letf (((symbol-function 'agentpane--request) request)
+          (cl-letf (((symbol-function 'agentpane--request) (agentpane-test--refusing request))
                     ((symbol-function 'jsonrpc-async-request)
                      (lambda (_conn method _params &rest args)
                        (push (cons method args) calls)
@@ -6499,7 +6559,7 @@ runs no CALLBACK in a killed buffer (OW-kejire)."
     (agentpane-test--watching
       (agentpane-test--with-helper
         (agentpane-test--merging
-          (cl-letf (((symbol-function 'agentpane--request) request)
+          (cl-letf (((symbol-function 'agentpane--request) (agentpane-test--refusing request))
                     ((symbol-function 'jsonrpc-async-request)
                      (lambda (_conn method _params &rest args)
                        (push (cons method args) calls)
@@ -6547,7 +6607,7 @@ does."
     (agentpane-test--watching
       (agentpane-test--with-helper
         (agentpane-test--merging
-          (cl-letf (((symbol-function 'agentpane--request) request)
+          (cl-letf (((symbol-function 'agentpane--request) (agentpane-test--refusing request))
                     ((symbol-function 'jsonrpc-async-request)
                      (lambda (_conn method _params &rest args)
                        (push (cons method args) calls)
@@ -7655,7 +7715,7 @@ unseen, and return whether the indicator is raised."
         (calls nil))
     (agentpane-test--submitting
       (let ((global-mode-string global-mode-string))
-        (cl-letf (((symbol-function 'agentpane--request) request)
+        (cl-letf (((symbol-function 'agentpane--request) (agentpane-test--refusing request))
                   ((symbol-function 'jsonrpc-async-request)
                    (lambda (_conn method _params &rest args)
                      (when (eq how 'send-exit) (error "Helper failed to start"))
@@ -7946,6 +8006,7 @@ its answer waits until `agentpane-new-session' has returned, and the symbol
     (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
               ((symbol-function 'jsonrpc-running-p) (lambda (_) t))
               ((symbol-function 'agentpane--request)
+               (agentpane-test--refusing
                (lambda (method params callback &rest _)
                  (push (pcase method
                          ('sessions/setModel (list method (plist-get params :model)))
@@ -7958,7 +8019,7 @@ its answer waits until `agentpane-new-session' has returned, and the symbol
                                     (with-current-buffer buffer
                                       (funcall callback nil)))))
                    (unless held
-                     (funcall answer)))))
+                     (funcall answer))))))
               ((symbol-function 'jsonrpc-request)
                (lambda (_connection method params &rest _)
                  (push method sent)
