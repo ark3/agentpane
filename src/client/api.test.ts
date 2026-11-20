@@ -281,6 +281,68 @@ describe("agentpane API over the socket", () => {
 		await flush();
 	});
 
+	it("rejects a refusal that names the session its prompt attached (D30)", async () => {
+		const { api, socket } = setup();
+		socket.open();
+		const attached = { ref, handle: "h1" };
+		const refused = api.prompt(ref, { text: "x" });
+		socket.deliver({ type: "reply", id: socket.sent.at(-1)!["id"] as string, ok: false, code: "backend_refused", detail: "no", attached });
+		expect(await refused.catch((thrown: unknown) => thrown)).toMatchObject({ code: "backend_refused", attached, fork: undefined });
+	});
+
+	it("writes a frame between a third of the limit and the limit, which only encoding it can tell (D31 point 8)", async () => {
+		const { api, socket } = setup();
+		socket.open();
+		const text = "x".repeat(MAX_SOCKET_FRAME_BYTES / 2);
+		const prompt = api.prompt(ref, { text, handle: "h1" });
+		expect(socket.commands().map((frame) => frame["cmd"])).toEqual(["sessions/prompt"]);
+		reply(socket, null);
+		await prompt;
+	});
+
+	it("reports an event with no event, and a reply with no id or no ok, as malformed, settling nothing", async () => {
+		const { api, socket, events } = setup();
+		socket.open();
+		const listing = api.listSessions();
+		const id = socket.sent.at(-1)!["id"] as string;
+		socket.deliver(JSON.stringify({ type: "event" }));
+		socket.deliver(JSON.stringify({ type: "event", event: null }));
+		socket.deliver(JSON.stringify({ type: "reply", ok: true, result: { sessions: [summary] } }));
+		socket.deliver(JSON.stringify({ type: "reply", id }));
+		expect(events.onMalformed).toHaveBeenCalledTimes(4);
+		expect(events.onEvent).not.toHaveBeenCalled();
+		socket.deliver({ type: "reply", id, ok: true, result: { sessions: [] } });
+		expect(await listing).toEqual([]);
+	});
+
+	it("rejects a request whose signal had already aborted, and writes nothing", async () => {
+		const { api, socket } = setup();
+		socket.open();
+		const abort = new AbortController();
+		abort.abort(new Error("superseded"));
+		await expect(api.preview(ref, abort.signal)).rejects.toThrow("superseded");
+		expect(socket.commands()).toEqual([]);
+	});
+
+	it("refuses a request held unsent when the client closes as unreachable, since it was never written", async () => {
+		const { api, socket, connection } = setup();
+		const listing = api.listSessions();
+		connection.close();
+		await expect(listing).rejects.toMatchObject({ code: "unreachable" });
+		expect(socket.sent).toEqual([]);
+	});
+
+	it("hears nothing from a socket once it has closed, from either end", async () => {
+		for (const close of ["client", "server"] as const) {
+			const { socket, events, connection } = setup();
+			socket.open();
+			if (close === "client") connection.close();
+			else socket.drop(1006);
+			socket.emit({ type: "sessions-changed" });
+			expect(events.onEvent).not.toHaveBeenCalled();
+		}
+	});
+
 	it("closes from the client's end without reporting a disconnect, the requests out lost", async () => {
 		const { api, socket, events, connection } = setup();
 		socket.open();

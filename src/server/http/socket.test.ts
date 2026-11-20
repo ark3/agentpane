@@ -421,6 +421,12 @@ describe("queries", () => {
 		try {
 			const socket = await connected();
 			expect(await socket.ok("draft/edit", { text: "original" })).toEqual({ text: "edited by fixture" });
+			// The fixture exits 1 without its flag, and what it wrote is not read.
+			process.env.EDITOR = `sh ${new URL("./testing/editor-fixture.sh", import.meta.url).pathname}`;
+			expect(await socket.refused("draft/edit", { text: "original" })).toMatchObject({
+				code: "editor_failed",
+				detail: "external editor exited with status 1",
+			});
 			delete process.env.EDITOR;
 			expect((await socket.refused("draft/edit", { text: "original" })).code).toBe("editor_failed");
 		} finally {
@@ -498,6 +504,13 @@ describe("commands that name a ref", () => {
 			expect([cwd, (await socket.refused("sessions/create", { cwd, backend: "pi" })).code]).toEqual([cwd, "bad_request"]);
 		}
 		expect((await socket.refused("sessions/create", { cwd: WORKSPACE, backend: "gemini" })).code).toBe("bad_backend");
+		expect(pi.created).toHaveLength(0);
+	});
+
+	it("refuses a listing's cwd or a create's model that is not a string, starting nothing", async () => {
+		const socket = await connected();
+		expect((await socket.refused("sessions/list", { cwd: 1 })).code).toBe("bad_request");
+		expect((await socket.refused("sessions/create", { cwd: WORKSPACE, backend: "pi", model: 1 })).code).toBe("bad_request");
 		expect(pi.created).toHaveLength(0);
 	});
 

@@ -1566,6 +1566,43 @@ describe("client controller", () => {
 		}
 	});
 
+	// What a pasted token calls (`TokenPrompt.svelte`): the socket opens now, not
+	// at the delay's end, and the delay it replaced opens no second one.
+	it("reconnects at once when asked while a retry is pending, and that retry then opens nothing", async () => {
+		vi.useFakeTimers();
+		try {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await vi.advanceTimersByTimeAsync(0);
+
+			// Up, there is nothing to reconnect.
+			controller.reconnect();
+			expect(api.connects).toBe(1);
+
+			api.drop();
+			await vi.advanceTimersByTimeAsync(1_000);
+			controller.reconnect();
+			expect(api.connects).toBe(2);
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(api.connects).toBe(2);
+
+			// Asked twice, it opens one.
+			api.drop();
+			controller.reconnect();
+			controller.reconnect();
+			expect(api.connects).toBe(3);
+
+			api.drop();
+			controller.dispose();
+			controller.reconnect();
+			expect(api.connects).toBe(3);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	const virtualRef: SessionRef = { backend: "codex", id: "virtual:new" };
 	const storedRef: SessionRef = { backend: "pi", id: "/sessions/stored.jsonl" };
 
