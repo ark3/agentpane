@@ -8113,7 +8113,8 @@ request's listing is the one left drawn, not the reply that landed last."
   "The real helper the mode starts exits cleanly on `agentpane-shutdown' and
 is gone from the process table.  Needs `bun install' in the checkout, and
 no agentpane server: the request that shows the helper is reading its
-input is one it answers itself."
+input is one it answers itself, opening no socket, so no failed open
+ends the helper ahead of the shutdown (`respond' in src/emacs/helper.ts)."
   (let ((agentpane--connection nil)
         (agentpane-project-directory agentpane-test--root))
     (let* ((connection (agentpane--connection))

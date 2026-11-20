@@ -20,8 +20,8 @@
  * view goes, and Emacs is told `session/detached` under its handle where it
  * attached it, and nothing is attached on its behalf (`detachGapped` below).
  *
- * One socket, filtered. It opens as the first request is read, and stays
- * open until the helper exits; a request read before it has opened goes out
+ * One socket, filtered. It opens as the first request for a known method is
+ * read, and stays open until the helper exits; a request read before it has opened goes out
  * behind its `hello`. Not at the helper's start: with no server listening,
  * the failed open would end the helper before it read the request Emacs had
  * already written, which would then get no reply, where it is owed one
@@ -509,7 +509,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		}
 	};
 
-	// Opened by the first request, whose reply then follows the opening
+	// Opened by the first request for a known method, whose reply then follows the opening
 	// snapshots, and every event after them (D31 point 1).
 	let connection: ReturnType<typeof api.connect> | null = null;
 	const connect = (): void => {
@@ -623,12 +623,13 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const respond = async (request: JsonRpcRequest): Promise<void> => {
 		const { id, method } = request;
 		if (id === undefined || id === null) return; // A notification from Emacs: nothing to answer, and none is defined.
-		if (!stopped) connect();
 		const handler = (handlers as Record<string, (params: unknown) => Promise<unknown>>)[method ?? ""];
+		// Answered here, with nothing to ask the server, so it opens no socket.
 		if (!handler) {
 			write(encodeFrame({ jsonrpc: "2.0", id, error: { code: -32601, message: `unknown method ${JSON.stringify(method)}` } }));
 			return;
 		}
+		if (!stopped) connect();
 		try {
 			const result = await handler(request.params);
 			write(encodeFrame({ jsonrpc: "2.0", id, result }));

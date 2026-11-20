@@ -170,6 +170,20 @@ describe("the socket", () => {
 		expect(server.sockets).toHaveLength(1);
 	});
 
+	it("answers an unknown method without opening the socket, so with no server it goes on reading", async () => {
+		const io = stdio();
+		const server = socketServer();
+		server.failing = 1;
+		const done = runHelper({ input: io.input, write: io.write, openSocket: (path) => server.openSocket(path), token: () => ({ value: null, refusal: "" }), render });
+		io.send({ jsonrpc: "2.0", id: 1, method: "agentpane-test/unknown" });
+		await io.until(1);
+		expect(io.response(1)!["error"]).toMatchObject({ code: -32601 });
+		expect(server.sockets).toHaveLength(0);
+		expect(await settled(done)).toBe("pending");
+		io.end();
+		expect(await settled(done)).toBe("resolved");
+	});
+
 	it("exits when the socket fails to open, and opens it no more", async () => {
 		const io = stdio();
 		const server = socketServer();
