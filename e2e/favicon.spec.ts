@@ -19,10 +19,11 @@ test("the served page links a favicon that resolves and decodes", async ({ page 
 	expect(direct.status()).toBe(200);
 	expect(direct.headers()["content-type"]).toContain("image/svg+xml");
 
-	// `index.html` mounts the real app, whose first act is to call the backend.
-	// No backend is running here and the icon does not need one; blocking the
-	// calls keeps the proxy failures out of every run's log.
-	await page.route("**/api/**", (route) => route.abort());
+	// `index.html` mounts the real app, whose first act is to open its socket.
+	// No server is running here and the icon does not need one; answering the
+	// socket in the page, with nothing, keeps the proxy's failures out of every
+	// run's log.
+	await page.routeWebSocket("/api/socket", () => {});
 	await page.goto("/");
 	const link = page.locator('link[rel="icon"]');
 	expect(await link.count(), "index.html declares no favicon").toBe(1);

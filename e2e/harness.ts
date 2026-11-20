@@ -11,7 +11,9 @@
  * than mocking the socket. That layer is already covered by
  * `api.test.ts` and is not what any of these specs are about; what matters is
  * that the *controller* sees a real event sequence in real time,
- * which it does. The event ordering below (echoed user message, assistant
+ * which it does. Each command writes what it causes before it answers, as
+ * the server does (D31 point 3), and what a turn emits comes after its
+ * prompt's answer. The event ordering below (echoed user message, assistant
  * placeholder, only then `status:true`) is the ordering a live Pi turn was
  * observed to produce -- see OW-27's close note.
  *
@@ -90,6 +92,10 @@ const HARNESS_EFFORTS = [
 	{ id: "high", description: "High" },
 ];
 let handlers: EventHandlers | undefined;
+/** Whether the server holds the session live: an attach makes it so and a close ends it. */
+let live = true;
+/** The live session's turn error, which the banners put there and a dismissal clears. */
+let errorId: string | null = null;
 /** Resolves when the in-flight turn emits its `status:false`. */
 let turnSettled: Promise<void> = Promise.resolve();
 /** Streaming chunks per synthetic turn, and the delay between them. */
@@ -114,6 +120,7 @@ const BANNERS = {
 
 function snapshot(isStreaming: boolean, banners = false): void {
 	seq += 1;
+	errorId = banners ? BANNERS.errorId : null;
 	emit({ type: "snapshot", session: REF, handle: HANDLE, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null, error: null, errorId: null, notices: [], ...(banners ? BANNERS : {}) });
 }
 
@@ -136,7 +143,7 @@ function summary(): LiveSessionSummary {
 		preview: "harness session",
 		createdAt: "2026-08-14T00:00:00.000Z",
 		updatedAt: "2026-08-14T00:00:00.000Z",
-		status: "attached",
+		status: live ? "attached" : "detached",
 		isStreaming: false,
 		name: null,
 		onDisk: true,
@@ -147,10 +154,11 @@ function summary(): LiveSessionSummary {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * One synthetic turn, in the order a live turn was observed to arrive: the
- * echoed user message and the assistant's own placeholder both land while the
- * session still reads `isStreaming:false`, and only then does `status:true`
- * follow (D2 does not guarantee cross-event ordering).
+ * One synthetic turn, in the order a live Pi turn was observed to arrive:
+ * after the prompt's answer, the echoed user message and the assistant's own
+ * placeholder both land while the session still reads `isStreaming:false`,
+ * and only then does `status:true` follow. That is the backend's order, which
+ * the socket keeps (D31, "What it retires").
  */
 async function runTurn(text: string): Promise<void> {
 	upsert(messages.length, user(text));
@@ -211,6 +219,7 @@ const api: AgentpaneApi = {
 	async attach() {
 		// The snapshot an attach triggers arrives on the stream ahead of its
 		// reply, as the socket orders them (D31 point 3).
+		live = true;
 		snapshot(false);
 		return summary();
 	},
@@ -227,8 +236,11 @@ const api: AgentpaneApi = {
 		};
 	},
 	async prompt(_ref, body) {
-		// The reply admits the prompt and the turn streams afterwards.
-		turnSettled = runTurn(body.text);
+		// The reply admits the prompt and the turn streams afterwards, its
+		// echo of the user message included, as Pi's does (D31, "What it
+		// retires"): the next task runs after the controller has the reply.
+		turnSettled = sleep(0).then(() => runTurn(body.text));
+		return { disposition: "started" };
 	},
 	async editDraft(body) {
 		return body;
@@ -236,15 +248,23 @@ const api: AgentpaneApi = {
 	async abort() {},
 	async compact() {
 		// The lifecycle arrives as events, as the real one does (OW-natiha): the
-		// reply admits it and the backend's "running" status follows. No
-		// terminal event -- what the specs ask of a compaction is the persistent
-		// acknowledgment in the action row, not its ending.
-		queueMicrotask(() => {
+		// `"requesting"` the backend sets at the request comes before the reply,
+		// and its "running" status after. No terminal event -- what the specs
+		// ask of a compaction is the persistent acknowledgment in the action
+		// row, not its ending.
+		seq += 1;
+		emit({ type: "status", session: REF, handle: HANDLE, seq, isStreaming: false, compaction: "requesting", model, effort, unrestoredModel: null });
+		void sleep(0).then(() => {
 			seq += 1;
 			emit({ type: "status", session: REF, handle: HANDLE, seq, isStreaming: false, compaction: "running", model, effort, unrestoredModel: null });
 		});
 	},
-	async close() {},
+	async close() {
+		// The server lets go of the handle and says so before it answers (D26).
+		live = false;
+		emit({ type: "ended", session: REF, handle: HANDLE });
+		emit({ type: "sessions-changed" });
+	},
 	async listModels() {
 		return [
 			{ id: "harness/default", label: "Harness Default", efforts: HARNESS_EFFORTS, defaultEffort: "medium" },
@@ -253,11 +273,11 @@ const api: AgentpaneApi = {
 	},
 	async setModel(_ref, next) {
 		model = next;
-		queueMicrotask(() => status(false));
+		status(false);
 	},
 	async setEffort(_ref, next) {
 		effort = next;
-		queueMicrotask(() => status(false));
+		status(false);
 	},
 	async setName() {},
 	/**
@@ -289,7 +309,12 @@ const api: AgentpaneApi = {
 	async fork() {
 		return REF;
 	},
-	async dismissError() {},
+	async dismissError(_handle, dismissed) {
+		if (errorId !== dismissed) return;
+		errorId = null;
+		seq += 1;
+		emit({ type: "error-cleared", session: REF, handle: HANDLE, seq });
+	},
 	connect(next: EventHandlers): EventConnection {
 		handlers = next;
 		queueMicrotask(() => next.onOpen());
