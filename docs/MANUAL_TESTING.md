@@ -5222,6 +5222,14 @@ Pi's `queue_update` put the text in `steering`, `followUp` empty, 17 tap lines a
 The user message carrying the marker came after the essay's assistant `message_end` (13602 characters), a `turn_end` and a `turn_start`, with no `agent_end` and no `agent_settled` between, and its answer followed: `steered_into_running_turn`.
 Nothing was left running, and the state directory, the shim and its tap were removed.
 
+**`fork_attach_probe.ts` forked, attached and answered on every backend.**
+On `pi 1.5.2`, `codex-cli 0.170.0` and `claude 2.1.328`, each on its pinned model, against each backend's own state directory, which was writable in this session; 50 s for all three, and the run left four small sessions in each store.
+Every step was one `sessions/forkPoints` and one `sessions/forkAndPrompt` at the last point where the Python one sent a fork and then an attach, so each fork it made answered a turn of its own: the fork of the last turn THREE, the fork of the fork FOUR, the second fork of the parent at the same point FIVE, every reply read back off the wire.
+Each fork's transcript kept the first turn and replaced the forked turn's prompt with its own, and its re-attach answered `ok` under the same handle.
+The fork's store file was there when the fork-and-prompt replied on Pi and Codex, and 0.31 s after it on Claude Code, which the Python one did not measure.
+On Codex, closing either side of the fork pair and attaching it again while the other lived answered `ok` both times, under a new handle (OW-voyezi).
+The parent attached again under its own handle on Claude Code and Codex, and under a new one on Pi, whose fork had moved the live process onto the fork's file.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
