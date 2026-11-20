@@ -94,6 +94,8 @@ export class AgentpaneSocket {
 	closed: { code: number; reason: string } | undefined;
 	/** Settles with the close, whoever closed it. */
 	readonly closing: Promise<{ code: number; reason: string }>;
+	/** Called with each event as it is recorded, for a probe that logs them as they arrive. */
+	onEvent: ((event: WireEvent) => void) | undefined;
 
 	private readonly socket: WebSocket;
 	private readonly pending = new Map<string, (reply: Reply) => void>();
@@ -115,6 +117,7 @@ export class AgentpaneSocket {
 			const frame = JSON.parse(String(message.data));
 			if (frame.type === "event") {
 				this.events.push([now(), frame.event]);
+				this.onEvent?.(frame.event);
 			} else if (frame.type === "reply") {
 				const settleReply = this.pending.get(frame.id);
 				this.pending.delete(frame.id);

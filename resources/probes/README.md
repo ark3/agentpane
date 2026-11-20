@@ -520,9 +520,10 @@ What it showed is the same `docs/MANUAL_TESTING.md` section.
 
 ## `agentpane_prompt_events_live.ts`
 
-Proves: **what agentpane's event stream carries for a prompt to an attached Claude Code session**, event by event, and how many snapshots each prompt drew between its send and its turn's end (OW-yirosu).
-It starts the server of the checkout `--root` names on a free loopback port, so pointing it at a checkout before a change and after it shows both.
-Once that server is listening it reads the API token from `~/.ssh/agentpane-token`, through `apiTokenPath` in `src/server/api-token.ts`, and sends it on every `/api` request; a `--root` from before the token creates no file, and the probe then sends no header.
+Proves: **what agentpane's socket carries for a prompt to an attached Claude Code session**, event by event, and how many snapshots each prompt drew between its send and its turn's end (OW-yirosu).
+It starts the server of the checkout `--root` names on a free loopback port, so pointing it at a checkout before a change and after it shows both, as far back as ark3/agentpane#52, which added the socket.
+Once that server is listening it says `hello` through `agentpane_live_support.ts`, creates the session, which attaches it (D30), and prompts by the create's handle.
+It read the event stream as raw SSE and sent HTTP commands until ark3/agentpane#54 moved it to the socket.
 Without `--workspace` it makes a `git init`ed scratch directory, since the home server's `claude` wrapper refuses a directory with no workspace marker.
 
 ```bash
@@ -533,6 +534,7 @@ Costs tokens: two one-word Haiku turns.
 
 Verified with: `claude 2.1.280` on the home server, 2026-09-25.
 What it showed is in `docs/MANUAL_TESTING.md`, OW-yirosu.
+Verified with the socket: `claude 2.1.328` on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
 ## `hydrate_window_probe.py`
 

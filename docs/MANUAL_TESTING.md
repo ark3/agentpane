@@ -5202,6 +5202,12 @@ A socket whose first frame was a `sessions/create` was closed 4401, "the first f
 Asked with the token afterwards, the workspace held no session, and no Pi ran under the server.
 A throwaway copy that sent the server's real token in the second case exited 1: its `hello` and create were answered `ok`, the attach of a placeholder ref `not_found`, and the listing held the Pi session, `attached`, whose Pi the probe then closed.
 
+**`agentpane_prompt_events_live.ts --root <this checkout>` drew no snapshot for either prompt.**
+On `claude 2.1.328` with `haiku`, in a fresh `git init`ed `/var/tmp` directory, against Claude Code's own state directory, which was writable in this session; the run left one small session there.
+The create was answered 1.6 s after it was sent, its `sessions-changed` and its empty snapshot ahead of the reply.
+Each prompt's own user upsert and `isStreaming: true` status came before its reply, `disposition: "started"`, as D31 point 3 says; the assistant upserts and the idle status followed it.
+Snapshots per prompt, send to turn end: `[0,0]`, as in the OW-yirosu run after its change.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
