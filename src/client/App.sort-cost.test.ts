@@ -184,6 +184,7 @@ async function mounted(): Promise<PublishingController> {
 		models: [],
 		modelSetting: false,
 		effortSetting: false,
+		compacting: false,
 		preview: null,
 		previewFailure: null,
 		forkIndices: null,

@@ -2306,75 +2306,77 @@ describe("client controller", () => {
 	/**
 	 * OW-natiha. `api.compact()` resolving is *admission*, not completion: the
 	 * backend's work is still running, and only its status/snapshot events end
-	 * it. The controller marks the session "requesting" at the request itself --
-	 * the server's own "requesting" status races the POST response (D2), and the
-	 * click needs feedback either way -- and server events overwrite that mark.
+	 * it. The click writes no phase (D31 point 7): the request out holds
+	 * `compacting`, and the server's own status, written before its reply, is
+	 * what the session reads.
 	 */
-	it("keeps the session reading as compacting after the request resolves, until a terminal event (OW-natiha)", async () => {
+	it("reads the compaction phase from the server alone, and compacting while its request is out (OW-natiha, D31 point 7)", async () => {
 		const api = new FakeApi();
 		const compacting = deferred<void>();
 		api.compact.mockReturnValue(compacting.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		api.emit(snapshotOf(ref));
 
 		const compacted = controller.compact();
-		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBe("requesting");
+		expect(controller.getView()).toMatchObject({ busy: "compacting", compacting: true });
+		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBeNull();
 
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 2, isStreaming: false, compaction: "requesting", model: null, effort: null, unrestoredModel: null });
 		compacting.resolve();
 		await compacted;
 
-		// The request resolved with no backend lifecycle update yet: still compacting.
+		expect(controller.getView()).toMatchObject({ busy: "idle", compacting: false });
 		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBe("requesting");
 
-		api.emit({ type: "status", session: ref, handle: h(ref), seq: 2, isStreaming: false, compaction: "running", model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: false, compaction: "running", model: null, effort: null, unrestoredModel: null });
 		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBe("running");
 
-		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 4, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBeNull();
+		controller.dispose();
 	});
 
-	it("clears its own requesting mark when the compaction request fails (OW-natiha)", async () => {
+	it("reads compacting for the selected session alone (D31 point 7)", async () => {
 		const api = new FakeApi();
 		const compacting = deferred<void>();
 		api.compact.mockReturnValue(compacting.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		api.emit(snapshotOf(ref));
+		api.emit(snapshotOf(attachedRef));
 
 		const compacted = controller.compact();
+		await controller.preview(attachedRef);
+		expect(controller.getView().compacting).toBe(false);
+		await controller.preview(ref);
+		expect(controller.getView().compacting).toBe(true);
+
+		compacting.resolve();
+		await compacted;
+		controller.dispose();
+	});
+
+	/**
+	 * One of OW-husivu's two accepted races: a refused compaction cleared the
+	 * "requesting" it could not tell from another client's. The client writes
+	 * no compaction of its own (D31 point 7), so a refusal leaves the server's.
+	 */
+	it("leaves the server's requesting standing when its own compaction is refused (OW-husivu, D31 point 7)", async () => {
+		const api = new FakeApi();
+		api.compact.mockRejectedValue(new ApiClientError("backend_refused", "compaction refused"));
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ ...snapshotOf(ref), compaction: "requesting" } as ServerEvent);
+
+		await controller.compact();
+
+		expect(controller.getView().error).toBe("compaction refused");
 		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBe("requesting");
-
-		compacting.reject(new Error("compaction refused"));
-		await compacted;
-
-		expect(controller.getView().error).toBe("compaction refused");
-		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBeNull();
-	});
-
-	it("clears the requesting mark on failure through a mid-flight rename (OW-natiha)", async () => {
-		const api = new FakeApi();
-		const compacting = deferred<void>();
-		api.compact.mockReturnValue(compacting.promise);
-		const controller = createController(api);
-		await controller.start();
-		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
-
-		const compacted = controller.compact();
-		expect(viewAt(controller, ref)?.compaction).toBe("requesting");
-
-		// The server renames the session while the POST is in flight (D9); the
-		// status that carries the new ref carries the mark too.
-		api.emit({ type: "status", session: attachedRef, handle: h(ref), seq: 2, isStreaming: false, compaction: "requesting", model: null, effort: null, unrestoredModel: null });
-
-		compacting.reject(new Error("compaction refused"));
-		await compacted;
-
-		expect(controller.getView().error).toBe("compaction refused");
-		expect(viewAt(controller, attachedRef)?.compaction).toBeNull();
+		controller.dispose();
 	});
 
 	/**

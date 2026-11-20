@@ -20,7 +20,6 @@ import {
 	initialClientState,
 	reduceServerEvent,
 	replaceSessionSummaries,
-	setSessionCompaction,
 	viewOf,
 	type ClientState,
 	type Recovery,
@@ -69,6 +68,13 @@ export interface ControllerView {
 	modelSetting: boolean;
 	/** The effort select's own flag, as `modelSetting` is the model picker's. */
 	effortSetting: boolean;
+	/**
+	 * A compaction of the selected session is out. Compact and Send read it
+	 * beside the server's `compaction`, which is the only phase drawn
+	 * (D31 point 7): a click writes none, where its `"requesting"` raced the
+	 * server's and a refusal cleared another client's (OW-natiha, OW-husivu).
+	 */
+	compacting: boolean;
 	/**
 	 * Read-only transcript of the selected session (OW-39), as last read from
 	 * its store. Whether the pane shows it is `paneMode`'s to say, not this
@@ -135,7 +141,7 @@ export interface ControllerView {
 export type PaneMode = "live" | "preview" | "loading";
 
 /** The view's fields read from the requests still out, which `publish` takes from nobody. */
-type Flag = "busy" | "sending" | "editingExternally" | "modelSetting" | "effortSetting";
+type Flag = "busy" | "sending" | "editingExternally" | "modelSetting" | "effortSetting" | "compacting";
 
 /**
  * One of this controller's requests still out, as far as the view reads it
@@ -144,8 +150,9 @@ type Flag = "busy" | "sending" | "editingExternally" | "modelSetting" | "effortS
  * it raises; an attach's intent, which selection it was made under.
  */
 type Outstanding =
-	| { kind: "listing" | "submitting" | "aborting" | "compacting" | "editing-externally" }
+	| { kind: "listing" | "submitting" | "aborting" | "editing-externally" }
 	| { kind: "attaching"; intent: number }
+	| { kind: "compacting"; handle: string }
 	| { kind: "setting-model" | "setting-effort"; handle: string };
 
 /**
@@ -411,6 +418,7 @@ export function createController(
 		models: [],
 		modelSetting: false,
 		effortSetting: false,
+		compacting: false,
 		preview: null,
 		previewFailure: null,
 		forkIndices: null,
@@ -645,7 +653,14 @@ export function createController(
 	/** The view's flags, as the requests still out say them -- see `ControllerView.busy`. */
 	function flags(): Pick<ControllerView, Flag> {
 		const selected = handleOf(view.state, view.state.selected);
-		const read: Pick<ControllerView, Flag> = { busy: "idle", sending: false, editingExternally: false, modelSetting: false, effortSetting: false };
+		const read: Pick<ControllerView, Flag> = {
+			busy: "idle",
+			sending: false,
+			editingExternally: false,
+			modelSetting: false,
+			effortSetting: false,
+			compacting: false,
+		};
 		for (const entry of outstanding) {
 			switch (entry.kind) {
 				case "setting-model":
@@ -662,6 +677,9 @@ export function createController(
 					break;
 				case "editing-externally":
 					read.editingExternally = true;
+					break;
+				case "compacting":
+					read.compacting ||= entry.handle === selected;
 					break;
 			}
 			read.busy = entry.kind;
@@ -1538,47 +1556,18 @@ export function createController(
 			}
 			// Only a session this tab holds live, as `submit` (OW-forinu).
 			if (paneMode(view) !== "live") return;
-			// Marked and cleared under the handle, which a rename landing while the
-			// request is in flight (D9) leaves naming the session that holds the
-			// mark. The pane is live, so the selection names a view and the handle
-			// is its key (OW-forinu): a click before the snapshot, on a preview or
-			// between an attach reply and its snapshot, was refused just above.
-			const handle = handleOf(view.state, selected)!;
-			// The session reads "requesting" from the click itself rather than from
-			// the server: its own "requesting" status races the POST response (D2),
-			// and the composer needs the acknowledgment either way (OW-natiha).
-			// Server status/snapshot events overwrite it from here on -- the request
-			// resolving is admission, not completion, so nothing here clears it.
-			const entry: Outstanding = { kind: "compacting" };
+			// Keyed by the handle, which a rename landing while the request is
+			// out (D9) leaves naming the session. The pane is live, so the
+			// selection names a view and the handle is its key (OW-forinu). The
+			// request answering is admission, not completion: the phase is the
+			// server's, from its status events (OW-natiha).
+			const entry: Outstanding = { kind: "compacting", handle: handleOf(view.state, selected)! };
 			outstanding.add(entry);
-			publish({
-				error: null,
-				state: setSessionCompaction(view.state, handle, "requesting"),
-			});
+			publish({ error: null });
 			try {
-				await api.compact(handle);
+				await api.compact(entry.handle);
 			} catch (error: unknown) {
-				if (!disposed) {
-					// Failed admission, so our own optimistic mark has to go. The
-					// guard reads "requesting" and cannot tell whose it is: in a
-					// multi-client session it is usually another client's wire truth,
-					// because the live compaction that made the backend refuse us is
-					// the same one that raised it (Codex's `TURN_ACTIVE_ERROR`). We
-					// clear it anyway, and it stays cleared until that compaction
-					// reaches "running". Accepted, with what it costs recorded at
-					// `setSessionCompaction` (OW-husivu).
-					//
-					// Threshold compaction is why this is narrow rather than
-					// unconditional: it enters at "running", never "requesting", so
-					// only a click-shaped mark is in scope here. The view itself may be
-					// gone by now -- a gap, a stream drop or an `ended` can take it while the
-					// request is out -- and then there is no mark left to clear.
-					const current = view.state.sessions[handle]?.compaction;
-					const state = current === "requesting"
-						? setSessionCompaction(view.state, handle, null)
-						: view.state;
-					publish({ error: errorMessage(error), state });
-				}
+				if (!disposed) publish({ error: errorMessage(error) });
 			} finally {
 				settled(entry);
 			}

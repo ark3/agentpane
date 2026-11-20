@@ -177,6 +177,7 @@ function initialView(selectedTurns: number): ControllerView {
 		models: [],
 		modelSetting: false,
 		effortSetting: false,
+		compacting: false,
 		preview: null,
 		previewFailure: null,
 		forkIndices: null,

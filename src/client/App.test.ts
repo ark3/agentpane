@@ -99,6 +99,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		models: [],
 		modelSetting: false,
 		effortSetting: false,
+		compacting: false,
 		preview: null,
 		previewFailure: null,
 		forkIndices: null,
@@ -3128,6 +3129,18 @@ describe("App", () => {
 		await fireEvent.click(screen.getByRole("button", { name: "Edit last message" }));
 		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "Enter", ctrlKey: true });
 		expect(controller.forked).toEqual([]);
+		expect(controller.submitted).toBe(0);
+	});
+
+	// The click writes no phase (D31 point 7), so until the server's first
+	// status it is the request out that holds the composer.
+	it("blocks Compact and Send while this tab's compaction request is out, before the server names a phase (D31 point 7)", async () => {
+		const controller = new FakeController(view({ draft: "queued up", busy: "compacting", compacting: true, state: compactingState(null) }));
+		render(App, { props: { controller } });
+
+		expect(screen.getByRole("menuitem", { name: "Compact", hidden: true })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "Enter", ctrlKey: true });
 		expect(controller.submitted).toBe(0);
 	});
 

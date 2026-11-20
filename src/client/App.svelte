@@ -55,6 +55,7 @@
 		models: [],
 		modelSetting: false,
 		effortSetting: false,
+		compacting: false,
 		preview: null,
 		previewFailure: null,
 		forkIndices: null,
@@ -322,8 +323,10 @@
 	const streamingNow = $derived(selectedSession?.isStreaming ?? false);
 	/**
 	 * The selected session's live compaction phase (OW-natiha), per session and
-	 * server-fed, so it survives request admission, reconnection (snapshots carry
-	 * it), and shows a backend compacting on its own.
+	 * server-fed alone (D31 point 7), so it survives request admission,
+	 * reconnection (snapshots carry it), and shows a backend compacting on its
+	 * own. Between the click and the server's first status, `view.compacting`
+	 * holds Compact and Send.
 	 */
 	const compaction = $derived(selectedSession?.compaction ?? null);
 	/**
@@ -1204,7 +1207,7 @@
 	/**
 	 * Compact the selected session's context (OW-72). The menu entry's own
 	 * declarative `popovertargetaction="hide"` cannot close the menu here
-	 * (OW-natiha): the "requesting" mark disables the entry synchronously in
+	 * (OW-natiha): the request going out disables the entry synchronously in
 	 * this same click, and a button that is disabled by the time its activation
 	 * behavior runs skips that behavior -- observed in Chromium, the menu
 	 * stayed open. So this closes it by hand; jsdom has no Popover API, hence
@@ -1416,7 +1419,7 @@
 		// The buttons are disabled while a compaction runs, but Ctrl/Cmd-Enter
 		// reaches here directly: the backends cannot safely admit a concurrent
 		// turn, so neither Send nor Fork starts one (OW-natiha).
-		if (compaction) return;
+		if (compaction || view.compacting) return;
 		if (!view.draft) return;
 		const edit = editing;
 		// A second Ctrl/Cmd-Enter while the first send is still in flight is
@@ -1816,7 +1819,7 @@
 						popovertarget="tools-menu"
 						popovertargetaction="hide"
 						onclick={compactSession}
-						disabled={view.state.selected === null || view.busy === "compacting" || compaction !== null}
+						disabled={view.state.selected === null || view.compacting || compaction !== null}
 					>Compact</button>
 					<button
 						type="button"
@@ -1859,7 +1862,7 @@
 						{stopsBeforeFork ? "Stop and edit" : "Edit last message"}
 					</button>
 				{/if}
-				<button type="submit" disabled={!view.draft || view.sending || view.editingExternally || compaction !== null}>{sendLabel}</button>
+				<button type="submit" disabled={!view.draft || view.sending || view.editingExternally || view.compacting || compaction !== null}>{sendLabel}</button>
 				{#if streamingAction}
 					<button type="button" class="abort" onclick={stop}>Stop</button>
 				{/if}
