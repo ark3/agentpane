@@ -7705,12 +7705,11 @@ reply is handed on (OW-tifiva), as in wire order
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
 fail HOW -- `timeout', `reply-exit' (handling its reply signals),
 \(refused CODE) (the helper answers with a refusal whose `data' carries
-CODE: the server's, or one of the helper's own for a request it never
-wrote, `unreachable', `unauthorized' or `frame_too_large' (`toRpcError'
-in src/emacs/helper.ts)), `internal' (the helper answers with an error
-of its own, the -32603 of a throw it did not expect, which carries no
-code) or `send-exit' (sending it signals) -- then run a turn that ends
-unseen, and return whether the indicator is raised."
+CODE, `toRpcError' in src/emacs/helper.ts), `internal' (the helper
+answers with an error of its own, the -32603 of a throw it did not
+expect, which carries no code) or `send-exit' (sending it signals) --
+then run a turn that ends unseen, and return whether the indicator is
+raised."
   (let ((request (symbol-function 'agentpane--request))
         (calls nil))
     (agentpane-test--submitting
@@ -7745,14 +7744,15 @@ unseen, and return whether the indicator is raised."
   "A prompt whose reply outlasts its timeout, whose reply's handling
 signals, or that the helper answers with an error of its own, carrying no
 server code, may have been admitted, so its watch stands and the turn's
-end raises the indicator; one the server refused, one the helper
-refused as never written, or one that never went out, abandons it, as
-the browser's `watchAbandon' does (OW-dunahe, OW-hiliti)."
+end raises the indicator; one refused with a code, or one that never went
+out, abandons it, as the browser's `watchAbandon' does (OW-dunahe,
+OW-hiliti).  The helper's own codes for a request it never wrote,
+`unreachable', `unauthorized' and `frame_too_large', take the one branch
+any code takes (`agentpane--request'), so one code stands for them all."
   (should (agentpane-test--prompt-failing 'timeout))
   (should (agentpane-test--prompt-failing 'reply-exit))
   (should (agentpane-test--prompt-failing 'internal))
-  (dolist (code '("backend_refused" "unreachable" "unauthorized" "frame_too_large"))
-    (should-not (agentpane-test--prompt-failing `(refused ,code))))
+  (should-not (agentpane-test--prompt-failing '(refused "backend_refused")))
   (should-not (agentpane-test--prompt-failing 'send-exit)))
 
 (defun agentpane-test--pi-fork-during-a-turn (order)
