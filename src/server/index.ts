@@ -2,8 +2,8 @@
  * Server entry point: the Bun binding, and nothing else.
  *
  * Everything with behaviour lives in `src/server/http/`, behind a plain
- * `fetch(Request) => Response` and, for the socket (D31), `connect(send, end)`,
- * so the transport is testable in-process without opening a socket. This file
+ * `fetch(Request) => Response` for the bundle and `connect(send, end)` for the
+ * socket (D31), so the server is testable in-process without opening one. This file
  * only decides *where* those are exposed and *what* they are wired to.
  *
  * The wiring is deliberately thin: production dependencies are composed once
@@ -37,9 +37,6 @@ const productionDeps = createProductionDeps();
 const app = createApp({
 	...productionDeps,
 	apiToken,
-	// Comfortably inside Bun's idle timeout below, and enough to notice a dead
-	// stream without generating noticeable traffic.
-	heartbeatMs: 15_000,
 	// `Bun.file` is the only runtime-specific piece; the handler itself is
 	// tested in `http/static.test.ts` against an injected filesystem.
 	staticHandler: createStaticHandler(clientDir, (path) => {
@@ -53,10 +50,6 @@ const app = createApp({
 const server = Bun.serve<{ connection?: Connection }>({
 	hostname: "127.0.0.1",
 	port,
-	// SSE streams are idle by design between turns; the default 10s would reap
-	// them. The heartbeat above keeps well inside this. It does not reach an
-	// upgraded socket (D31 point 8).
-	idleTimeout: 60,
 	fetch(request, server) {
 		if (!app.isSocketRequest(request)) return app.fetch(request);
 		const refusal = app.admitUpgrade(request);
@@ -64,9 +57,10 @@ const server = Bun.serve<{ connection?: Connection }>({
 		if (server.upgrade(request, { data: {} })) return undefined;
 		return new Response("this path takes a WebSocket upgrade", { status: 426, headers: { upgrade: "websocket" } });
 	},
-	// The socket beside the routes (D31). Its limits are set rather than
-	// inherited (D31 point 8): the default pings keep an idle socket open, so
-	// there is no heartbeat of ours; a frame past `maxPayloadLength` closes the
+	// The socket (D31). Its limits are set rather than inherited (D31 point
+	// 8): the default pings keep an idle socket open, so there is no heartbeat
+	// of ours, and `Bun.serve`'s own `idleTimeout`, at its default here, does
+	// not reach an upgraded socket; a frame past `maxPayloadLength` closes the
 	// socket, which is why a client refuses a prompt over it before sending;
 	// and a socket buffered past `backpressureLimit` is closed rather than left
 	// to drop frames, a reply among them, so its client detaches and

@@ -1,15 +1,15 @@
 /**
  * The socket (D31), through the connection entry point `createApp` exposes:
  * a `send` that pushes each frame into an array, and the frames a client
- * would write handed to `receive`. The upgrade and Bun's framing are not
- * reached from here; `admitUpgrade` is, as a plain `Request`.
+ * would write handed to `receive` (`testing/socket-client.ts`). The upgrade
+ * and Bun's framing are not reached from here; the upgrade's admission is
+ * `app.test.ts`'s.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type CommandName,
 	type Commands,
-	ROUTES,
 	SOCKET_CLOSE,
 	type SessionPreviewTurn,
 	type SessionRef,
@@ -1092,7 +1092,7 @@ describe("events", () => {
 		// A send that starts throwing is what a socket closing under us looks
 		// like from in here.
 		let thrown = 0;
-		app.broadcaster.addEventClient(() => {
+		app.broadcaster.addClient(() => {
 			thrown++;
 			throw new Error("EPIPE");
 		});
@@ -1370,35 +1370,5 @@ describe("closing", () => {
 		app.broadcaster.sessionsChanged();
 		expect(app.broadcaster.clientCount).toBe(0);
 		expect(sent).toHaveLength(1);
-	});
-});
-
-describe("the upgrade", () => {
-	const upgrade = (headers: Record<string, string>, method = "GET") =>
-		new Request(`http://127.0.0.1:4173${ROUTES.socket}`, { method, headers: { host: "127.0.0.1:4173", ...headers } });
-
-	it("is the socket's path and nothing else", () => {
-		expect(app.isSocketRequest(upgrade({}))).toBe(true);
-		expect(app.isSocketRequest(new Request("http://127.0.0.1:4173/api/events"))).toBe(false);
-		expect(app.isSocketRequest(new Request(`http://127.0.0.1:4173${ROUTES.socket}/x`))).toBe(false);
-	});
-
-	it("is admitted from a local page with no token, which the first frame carries", () => {
-		expect(app.admitUpgrade(upgrade({ origin: "http://localhost:5173", "sec-fetch-site": "same-origin" }))).toBeNull();
-		expect(app.admitUpgrade(upgrade({}))).toBeNull();
-	});
-
-	it("is refused for a page elsewhere, a host that is not loopback, and a method that is not GET", async () => {
-		const cases: [Request, number, string][] = [
-			[upgrade({ origin: "https://evil.example" }), 403, "forbidden_origin"],
-			[upgrade({ "sec-fetch-site": "cross-site" }), 403, "forbidden_origin"],
-			[upgrade({ origin: "null" }), 403, "forbidden_origin"],
-			[upgrade({ host: "evil.example" }), 403, "forbidden_host"],
-			[upgrade({}, "POST"), 405, "method_not_allowed"],
-		];
-		for (const [request, status, code] of cases) {
-			const refusal = app.admitUpgrade(request);
-			expect([refusal?.status, ((await refusal?.json()) as { error: string }).error]).toEqual([status, code]);
-		}
 	});
 });

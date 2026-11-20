@@ -1,7 +1,6 @@
 /**
- * One mapper from a failure to the code a client reads, shared by the HTTP
- * routes and the socket while both exist (D31 point 2). The HTTP routes read
- * the status as well; the socket reads only the code.
+ * One mapper from a failure to the code a client reads in a refused reply
+ * (D31 point 2).
  */
 
 import type { ApiError } from "../../shared/protocol.ts";
@@ -18,13 +17,12 @@ import {
 } from "./session-manager.ts";
 
 /**
- * A request refused for what it asked, by code that both transports share
- * (`operations.ts`, `socket.ts`): a bad parameter, a session gone, an editor
- * that failed. Each transport's own framing checks answer without it.
+ * A command refused for what it asked (`operations.ts`, `socket.ts`): a bad
+ * parameter, a session gone, an editor that failed. A frame the socket cannot
+ * read at all is not refused but closes it (`SOCKET_CLOSE`).
  */
 export class Refusal extends Error {
 	constructor(
-		readonly status: number,
 		readonly code: string,
 		detail: string,
 	) {
@@ -37,7 +35,6 @@ export class Refusal extends Error {
 export type Named = Pick<ApiError, "fork" | "attached">;
 
 export interface Failure {
-	status: number;
 	code: string;
 	detail: string;
 	named: Named;
@@ -47,7 +44,7 @@ export interface Failure {
 
 export function classifyFailure(thrown: unknown): Failure {
 	// A fork-and-prompt that failed after its fork was created, and a prompt
-	// naming no handle refused after its attach, answer as their cause would,
+	// naming a ref refused after its attach, answer as their cause would,
 	// and name the fork or the session beside it (D30).
 	const err = thrown instanceof ForkNotPromptedError || thrown instanceof AttachedNotPromptedError ? thrown.cause : thrown;
 	const named: Named =
@@ -56,16 +53,16 @@ export function classifyFailure(thrown: unknown): Failure {
 			: thrown instanceof AttachedNotPromptedError
 				? { attached: thrown.attached }
 				: {};
-	const known = (status: number, code: string): Failure => ({ status, code, detail: describe(err), named, unexpected: false });
-	if (err instanceof Refusal) return known(err.status, err.code);
-	if (err instanceof UnknownSessionError) return known(404, "not_found");
-	if (err instanceof HandleEndedError) return known(409, "not_attached");
-	if (err instanceof UnknownBackendError) return known(501, "no_backend");
-	if (err instanceof ServerShuttingDownError) return known(503, "server_shutting_down");
-	if (err instanceof BackendRefusedError) return known(400, "backend_refused");
-	if (err instanceof EffortNotOfferedError) return known(400, "bad_request");
-	if (err instanceof NotAForkPointError) return known(409, "not_a_fork_point");
-	return { ...known(500, "internal_error"), unexpected: true };
+	const known = (code: string): Failure => ({ code, detail: describe(err), named, unexpected: false });
+	if (err instanceof Refusal) return known(err.code);
+	if (err instanceof UnknownSessionError) return known("not_found");
+	if (err instanceof HandleEndedError) return known("not_attached");
+	if (err instanceof UnknownBackendError) return known("no_backend");
+	if (err instanceof ServerShuttingDownError) return known("server_shutting_down");
+	if (err instanceof BackendRefusedError) return known("backend_refused");
+	if (err instanceof EffortNotOfferedError) return known("bad_request");
+	if (err instanceof NotAForkPointError) return known("not_a_fork_point");
+	return { ...known("internal_error"), unexpected: true };
 }
 
 export function describe(err: unknown): string {

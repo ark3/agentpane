@@ -9,8 +9,8 @@
  *    filesystem walk; a subprocess is only created when a session is actually
  *    opened or prompted.
  *  - **The subprocess outlives the connection.** Its lifetime is tied to the
- *    server, not to an `EventSource`. A browser refresh drops the stream and the
- *    agent keeps working; reconnect is a repaint. Only an explicit close (or
+ *    server, not to a client's socket. A browser refresh drops the socket and
+ *    the agent keeps working; reconnect is a repaint. Only an explicit close (or
  *    server shutdown) disposes an adapter.
  */
 
@@ -137,7 +137,7 @@ interface ManagedSession {
 	 * `virtual:` id, each id a rename brought, and each spelling `#start`
 	 * canonicalised onto it (OW-fumegi). While the container is in the table
 	 * `#names` resolves each to `handle`, which is D9's promise that an old id
-	 * keeps working on REST routes. A fork takes none of them.
+	 * keeps working on every command that names a ref. A fork takes none of them.
 	 */
 	readonly names: Set<string>;
 	/** The workspace the subprocess is (or will be) jailed to. */
@@ -528,7 +528,7 @@ export class SessionManager {
 	/**
 	 * Whether this manager holds `ref` under any name: a container in the
 	 * table, a startup in flight (`#attaching`, whose entries `#retire` deletes
-	 * once empty), or a parked fork. What the preview route asks before it
+	 * once empty), or a parked fork. What `sessions/preview` asks before it
 	 * reads a missing file as the session gone (D26 point 5, D24). Not
 	 * `#disposing`: a close retires what it stops at once, and a session it is
 	 * still disposing with nothing on disk is going.
@@ -716,9 +716,10 @@ export class SessionManager {
 	 * Run one of a session's mutating verbs once every verb queued on it before
 	 * has settled (D24, OW-sewewe). Six verbs join: `submit`, `fork`,
 	 * `setModel`, `setEffort`, `setName` and `compact`, and `forkAndPrompt`
-	 * joins as a fork and then as a `submit` on the fork. Every route is a
-	 * concurrent `Bun.serve` handler and any number of clients can drive one
-	 * session, so without this two of them overlap on one adapter -- two
+	 * joins as a fork and then as a `submit` on the fork. Every command runs
+	 * as its frame arrives, beside any still running, and any number of
+	 * clients can drive one session, so without this two of them overlap on
+	 * one adapter -- two
 	 * `setModel`s sharing Pi's one `settingModel` flag (OW-woyifu), or an
 	 * effort checked against the model a set-model in flight is replacing
 	 * (OW-zayefe).
@@ -745,9 +746,9 @@ export class SessionManager {
 	 *    and its answer can be stale by the time a client acts on it whether or
 	 *    not it waits.
 	 *  - `attach`. It creates the adapter this queues on, and `#attaching`
-	 *    already collapses concurrent attaches. Only the attach route,
-	 *    `create` and a prompt that names no handle call it (D25, D30); every
-	 *    other route queues on an adapter already there, or is refused.
+	 *    already collapses concurrent attaches. Only `sessions/attach`,
+	 *    `create` and a prompt that names a ref call it (D25, D30); every
+	 *    other command queues on an adapter already there, or is refused.
 	 *  - `close` and `disposeAll`. Teardown is ordered by `#disposing`,
 	 *    `PendingStart.torndown` and `#terminate`, and waits behind nothing. A
 	 *    verb still queued when it runs reaches the disposed adapter, as an
@@ -803,7 +804,7 @@ export class SessionManager {
 	 * clears the session's `virtual` flag, and one that starts or joins a
 	 * turn its error. An id the backend names for it arrives through
 	 * `onRefChanged`, like every other (`#rename`).
-	 * Resolves with the adapter's disposition, so the route can tell its
+	 * Resolves with the adapter's disposition, so the reply can tell its
 	 * sender when no turn was started for the prompt (OW-dulipe).
 	 * A prompt sent for a `handle` goes only to the live session under it,
 	 * and is refused with `HandleEndedError` once that has ended (D30).
@@ -1074,7 +1075,7 @@ export class SessionManager {
 	 * `stored`, `onDisk` and `createdAt` below.
 	 *
 	 * The parent's container leaves the table with every one of its names, as
-	 * any detached session's does, and keeps no adapter: a route on any of its
+	 * any detached session's does, and keeps no adapter: a command on any of its
 	 * names misses from here on, a verb queued on it behind this fork fails
 	 * rather than running on the fork (`#serially`), and the next attach
 	 * resumes the parent from the index into a container of its own (D9, D12).

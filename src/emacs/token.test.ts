@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FakeSocket } from "$client/test-support.ts";
-import { ROUTES, SOCKET_CLOSE } from "$shared/protocol.ts";
+import { SOCKET_CLOSE, SOCKET_PATH } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { runHelper } from "./helper.ts";
 import { readApiToken } from "./token.ts";
@@ -46,7 +46,7 @@ function start(accepted: string | null) {
 	const input = new ReadableStream<Uint8Array>({ start: (c) => (controller = c) });
 	const out: Record<string, unknown>[] = [];
 	const decoder = new FrameDecoder();
-	const socket = new FakeSocket(ROUTES.socket, (from, frame) => {
+	const socket = new FakeSocket(SOCKET_PATH, (from, frame) => {
 		if (frame["cmd"] === "hello") {
 			if (frame["token"] === accepted) from.deliver({ type: "reply", id: frame["id"] as string, ok: true, result: null });
 			else from.drop(SOCKET_CLOSE.unauthorized, "the first frame must be a hello carrying the token");

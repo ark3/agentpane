@@ -1,9 +1,7 @@
 /**
- * The SSE hub: one multiplexed stream per browser, every session on it.
- *
- * D2 -- browsers cap ~6 connections per origin and an open `EventSource` holds
- * one permanently, so a stream per session walls at six. Every event therefore
- * carries its `SessionRef` and clients filter.
+ * The event hub: every session's events, fanned out to every socket that has
+ * said hello (D31). One socket carries every session, so every event carries
+ * its `SessionRef` and clients filter.
  *
  * D3 -- `seq` is monotonic *per session*. A gap tells the client it missed an
  * update, and since D25 the client detaches the session rather than taking a
@@ -25,22 +23,12 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AgentNotice, ServerEvent, SessionRef } from "../../shared/protocol.ts";
 
-/**
- * A connected client: one per `EventSource`, or one per socket since D31
- * (`addEventClient`), until the stream goes (ark3/agentpane#55).
- */
-export interface SseClient {
+/** A connected client: one per socket that has said hello. */
+export interface EventClient {
 	readonly id: number;
 	send(event: ServerEvent): void;
 	close(): void;
 	readonly closed: boolean;
-}
-
-export type SseWriter = (chunk: string) => void;
-
-/** Serialise one event into an SSE frame. JSON never contains a raw newline. */
-export function formatSseFrame(event: ServerEvent): string {
-	return `data: ${JSON.stringify(event)}\n\n`;
 }
 
 /**
@@ -79,9 +67,6 @@ export class Broadcaster {
 	readonly #seq = new Map<string, number>();
 	#nextClientId = 1;
 	#snapshotSource: SnapshotSource = () => null;
-	#heartbeat: ReturnType<typeof setInterval> | null = null;
-
-	constructor(private readonly heartbeatMs = 0) {}
 
 	/** Wired by the session manager once; avoids a construction-order cycle. */
 	setSnapshotSource(source: SnapshotSource): void {
@@ -92,40 +77,27 @@ export class Broadcaster {
 		return this.#clients.size;
 	}
 
-	addClient(write: SseWriter, onClose?: () => void): SseClient {
-		const client = this.#add((event) => write(formatSseFrame(event)), write, onClose);
-		// Reconnect fast: this is loopback and recovery is just a re-snapshot.
-		client.raw("retry: 500\n\n");
-		this.#startHeartbeat();
-		return client;
-	}
-
 	/**
-	 * A socket's client (D31): each event handed over as the object, in the
-	 * same synchronous fan-out as the stream's, and no retry directive or
-	 * heartbeat, since the runtime's own pings keep a socket open (D31 point 8).
+	 * Each event is handed to `send` as the object, synchronously as it is
+	 * fanned out. No heartbeat: the runtime's own pings keep a socket open
+	 * (D31 point 8).
 	 */
-	addEventClient(send: (event: ServerEvent) => void, onClose?: () => void): SseClient {
-		return this.#add(send, () => {}, onClose);
-	}
-
-	#add(send: (event: ServerEvent) => void, raw: SseWriter, onClose?: () => void): InternalClient {
-		const client = new InternalClient(this.#nextClientId++, send, raw, () => {
+	addClient(send: (event: ServerEvent) => void, onClose?: () => void): EventClient {
+		const client = new InternalClient(this.#nextClientId++, send, () => {
 			this.#clients.delete(client);
 			onClose?.();
-			if (this.#clients.size === 0) this.#stopHeartbeat();
 		});
 		this.#clients.add(client);
 		return client;
 	}
 
 	/** Every session with live state, snapshotted to one client. Attach/reconnect (D3). */
-	sendOpeningSnapshots(client: SseClient, handles: string[]): void {
+	sendOpeningSnapshots(client: EventClient, handles: string[]): void {
 		for (const handle of handles) this.sendSnapshot(client, handle);
 	}
 
 	/** Targeted snapshot. Does not touch the counter -- see the class comment. */
-	sendSnapshot(client: SseClient, handle: string): void {
+	sendSnapshot(client: EventClient, handle: string): void {
 		const state = this.#snapshotSource(handle);
 		if (!state) return;
 		client.send({
@@ -220,7 +192,6 @@ export class Broadcaster {
 
 	closeAll(): void {
 		for (const client of [...this.#clients]) client.close();
-		this.#stopHeartbeat();
 	}
 
 	/** What names the session on an event: its ref as of now, its handle, and the handle's next seq. */
@@ -233,30 +204,14 @@ export class Broadcaster {
 	#fanout(event: ServerEvent): void {
 		for (const client of [...this.#clients]) client.send(event);
 	}
-
-	#startHeartbeat(): void {
-		if (this.heartbeatMs <= 0 || this.#heartbeat) return;
-		this.#heartbeat = setInterval(() => {
-			for (const client of [...this.#clients]) client.raw(": ping\n\n");
-		}, this.heartbeatMs);
-		// Never hold the process open for a keepalive.
-		(this.#heartbeat as { unref?: () => void }).unref?.();
-	}
-
-	#stopHeartbeat(): void {
-		if (!this.#heartbeat) return;
-		clearInterval(this.#heartbeat);
-		this.#heartbeat = null;
-	}
 }
 
-class InternalClient implements SseClient {
+class InternalClient implements EventClient {
 	#closed = false;
 
 	constructor(
 		readonly id: number,
 		private readonly deliver: (event: ServerEvent) => void,
-		private readonly write: SseWriter,
 		private readonly onClose: () => void,
 	) {}
 
@@ -265,18 +220,9 @@ class InternalClient implements SseClient {
 	}
 
 	send(event: ServerEvent): void {
-		this.#guarded(() => this.deliver(event));
-	}
-
-	/** Write a pre-framed chunk (comments, retry directives). A socket's client drops it. */
-	raw(chunk: string): void {
-		this.#guarded(() => this.write(chunk));
-	}
-
-	#guarded(output: () => void): void {
 		if (this.#closed) return;
 		try {
-			output();
+			this.deliver(event);
 		} catch {
 			// The socket went away between our last write and this one. A dead
 			// client is a normal event -- it must never propagate into the

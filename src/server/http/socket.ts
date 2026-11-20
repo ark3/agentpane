@@ -1,7 +1,6 @@
 /**
- * The socket beside the HTTP routes (D31, ark3/agentpane#52): one connection
- * carries a client's commands in and their replies and every event out, in
- * the order the server wrote them.
+ * The socket (D31): one connection carries a client's commands in and their
+ * replies and every event out, in the order the server wrote them.
  *
  * No runtime types: `openConnection` takes a `send` for one text frame and an
  * `end` that closes the socket, and answers `receive` for each frame that
@@ -28,7 +27,7 @@ import {
 	sessionKey,
 } from "../../shared/protocol.ts";
 import type { BackendAdapter } from "../adapters/types.ts";
-import type { Broadcaster, SseClient } from "./broadcaster.ts";
+import type { Broadcaster, EventClient } from "./broadcaster.ts";
 import type { AppDeps } from "./deps.ts";
 import { classifyFailure, Refusal } from "./failure.ts";
 import { createSession, editDraft, isBackendId, listModels, previewSession, sessionName } from "./operations.ts";
@@ -74,7 +73,7 @@ export function openConnection(
 	// Registered at the `hello`, not before: the server sends nothing and runs
 	// nothing on a socket until a first frame has carried the token (D31
 	// point 5), opening snapshots included.
-	let client: SseClient | undefined;
+	let client: EventClient | undefined;
 
 	function write(frame: ServerFrame): void {
 		if (closed) return;
@@ -101,15 +100,15 @@ export function openConnection(
 			finish(SOCKET_CLOSE.unauthorized, "the first frame must be a hello carrying the token");
 			return;
 		}
-		client = broadcaster.addEventClient(
+		client = broadcaster.addClient(
 			(event) => write({ type: "event", event }),
 			// The broadcaster lets go of its clients only at shutdown, or when a
 			// write throws, which `write` above has already taken as closed.
 			() => finish(SOCKET_CLOSE.goingAway, "the server is shutting down"),
 		);
-		// Attach and reconnect are the same thing (D3), as on the stream: the
-		// client's first events are a snapshot of everything live, and the
-		// hello's reply follows them.
+		// Attach and reconnect are the same thing (D3): the client's first
+		// events are a snapshot of everything live, and the hello's reply
+		// follows them. There is no resume protocol.
 		broadcaster.sendOpeningSnapshots(client, sessions.liveHandles());
 		write({ type: "reply", id: frame.id, ok: true, result: null });
 	}
@@ -117,7 +116,7 @@ export function openConnection(
 	async function run(frame: Frame): Promise<void> {
 		try {
 			const command = typeof frame.cmd === "string" && Object.hasOwn(handlers, frame.cmd) ? handlers[frame.cmd as CommandName] : undefined;
-			if (!command) throw new Refusal(400, "bad_request", `unknown command ${JSON.stringify(frame.cmd)}`);
+			if (!command) throw new Refusal("bad_request", `unknown command ${JSON.stringify(frame.cmd)}`);
 			const result = await command(frame);
 			write({ type: "reply", id: frame.id, ok: true, result });
 		} catch (thrown) {
@@ -135,13 +134,13 @@ export function openConnection(
 	function live(frame: Frame): { handle: string; ref: SessionRef; adapter: BackendAdapter } {
 		const handle = requireString(frame, "handle");
 		const found = sessions.live(handle);
-		if (!found) throw new Refusal(409, "not_attached", `no live session under handle ${handle}`);
+		if (!found) throw new Refusal("not_attached", `no live session under handle ${handle}`);
 		return { handle, ...found };
 	}
 
 	const handlers: Record<CommandName, Handler> = {
 		async hello() {
-			throw new Refusal(400, "bad_request", "this socket has already said hello");
+			throw new Refusal("bad_request", "this socket has already said hello");
 		},
 		async "sessions/list"(frame) {
 			const cwd = optionalString(frame, "cwd");
@@ -161,7 +160,7 @@ export function openConnection(
 			// (D9). The snapshot the attach broadcast under `session.handle`,
 			// already written, carries it too.
 			const session = sessions.summaryOf(ref);
-			if (!session) throw new Refusal(404, "not_found", `no such session: ${sessionKey(ref)}`);
+			if (!session) throw new Refusal("not_found", `no such session: ${sessionKey(ref)}`);
 			return { session };
 		},
 		async "sessions/close"(frame) {
@@ -173,13 +172,18 @@ export function openConnection(
 			const images = frame.images as Commands["sessions/prompt"]["params"]["images"];
 			const { priorErrorId } = frame;
 			if (priorErrorId !== undefined && priorErrorId !== null && typeof priorErrorId !== "string") {
-				throw new Refusal(400, "bad_request", "priorErrorId must be a string or null");
+				throw new Refusal("bad_request", "priorErrorId must be a string or null");
 			}
 			if ((frame.handle === undefined) === (frame.ref === undefined)) {
-				throw new Refusal(400, "bad_request", "a prompt names exactly one of handle and ref");
+				throw new Refusal("bad_request", "a prompt names exactly one of handle and ref");
 			}
-			// As the prompt route reads it, before any attach below, whose start
-			// may raise an error newer still (`PromptRequest.priorErrorId`).
+			// Which error the sender held when the user sent, by id: only that one
+			// may go at admission. One raised after -- while this command was on
+			// its way, or during admission with this one's text -- is not one the
+			// sender saw (OW-31, OW-bipume, OW-lameke, OW-jokoto); see
+			// `SessionManager.submit`. A sender that names none gets the error
+			// held now. Read before any attach below, whose start may raise one
+			// newer still (`PromptRequest.priorErrorId`).
 			if (frame.handle !== undefined) {
 				const session = live(frame);
 				const priorError = priorErrorId === undefined ? sessions.errorIdOf(session.ref) : priorErrorId;
@@ -233,7 +237,7 @@ export function openConnection(
 			return { ref: await sessions.fork(session.ref, entryId, session.handle) };
 		},
 		async "sessions/forkAndPrompt"(frame) {
-			if (!Number.isInteger(frame.index)) throw new Refusal(400, "bad_request", "index must be an integer");
+			if (!Number.isInteger(frame.index)) throw new Refusal("bad_request", "index must be an integer");
 			const text = requireString(frame, "text");
 			const images = frame.images as Commands["sessions/forkAndPrompt"]["params"]["images"];
 			const session = live(frame);
@@ -281,23 +285,23 @@ function parseFrame(text: string): Frame | null {
 
 function requireString(frame: Frame, field: string): string {
 	const value = frame[field];
-	if (typeof value !== "string") throw new Refusal(400, "bad_request", `${field} is required and must be a string`);
+	if (typeof value !== "string") throw new Refusal("bad_request", `${field} is required and must be a string`);
 	return value;
 }
 
 function optionalString(frame: Frame, field: string): string | undefined {
 	const value = frame[field];
 	if (value === undefined) return undefined;
-	if (typeof value !== "string") throw new Refusal(400, "bad_request", `${field} must be a string`);
+	if (typeof value !== "string") throw new Refusal("bad_request", `${field} must be a string`);
 	return value;
 }
 
 function requireRef(frame: Frame): SessionRef {
 	const ref = frame.ref as Partial<SessionRef> | null | undefined;
 	if (ref === null || typeof ref !== "object" || typeof ref.id !== "string") {
-		throw new Refusal(400, "bad_request", "ref is required and must be { backend, id }");
+		throw new Refusal("bad_request", "ref is required and must be { backend, id }");
 	}
-	if (!isBackendId(ref.backend)) throw new Refusal(400, "bad_backend", `unknown backend "${String(ref.backend)}"`);
+	if (!isBackendId(ref.backend)) throw new Refusal("bad_backend", `unknown backend "${String(ref.backend)}"`);
 	return { backend: ref.backend, id: ref.id };
 }
 

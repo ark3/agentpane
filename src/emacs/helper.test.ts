@@ -14,7 +14,7 @@ import { ApiClientError } from "$client/api.ts";
 import { FakeSocket, socketServer, type Script, type SocketServer } from "$client/test-support.ts";
 import { CodexReducer } from "$server/adapters/codex/reducer.ts";
 import { readFixture } from "$server/adapters/codex/test-support.ts";
-import { ROUTES, SOCKET_CLOSE, type PaneMessage, type ServerEvent, type SessionRef, type LiveSessionSummary } from "$shared/protocol.ts";
+import { SOCKET_CLOSE, SOCKET_PATH, type PaneMessage, type ServerEvent, type SessionRef, type LiveSessionSummary } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { runHelper } from "./helper.ts";
 import type { Render } from "./nodes.ts";
@@ -185,7 +185,7 @@ describe("the socket", () => {
 	// agentpane-mode reads as a refusal (OW-pezelo).
 	it("answers each request read before a first open that fails as unreachable, before it exits", async () => {
 		const io = stdio();
-		const socket = new FakeSocket(ROUTES.socket);
+		const socket = new FakeSocket(SOCKET_PATH);
 		const done = runHelper({ input: io.input, write: io.write, openSocket: () => socket, token: () => ({ value: null, refusal: "" }), render });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, token: 2 } });

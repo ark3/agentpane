@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MAX_SOCKET_FRAME_BYTES, ROUTES, SOCKET_CLOSE } from "$shared/protocol.ts";
+import { MAX_SOCKET_FRAME_BYTES, SOCKET_CLOSE, SOCKET_PATH } from "$shared/protocol.ts";
 import type { ServerEvent, SessionRef, SessionSummary } from "$shared/protocol.ts";
 import { ApiClientError, ConnectionLostError, createAgentpaneApi, type EventHandlers } from "./api.ts";
 import { FakeSocket } from "./test-support.ts";
@@ -55,7 +55,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 describe("agentpane API over the socket", () => {
 	it("opens the socket at its route and sends the token as the first frame", () => {
 		const { socket } = setup({ token: () => "secret" });
-		expect(socket.path).toBe(ROUTES.socket);
+		expect(socket.path).toBe(SOCKET_PATH);
 		expect(socket.sent).toEqual([]);
 		socket.open();
 		expect(socket.sent).toEqual([{ id: expect.any(String), cmd: "hello", token: "secret" }]);

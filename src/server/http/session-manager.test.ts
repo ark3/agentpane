@@ -56,11 +56,7 @@ beforeEach(() => {
 /** Every event `broadcaster` sends from here on, as a client receives it. */
 function broadcastEvents(): ServerEvent[] {
 	const events: ServerEvent[] = [];
-	broadcaster.addClient((chunk) => {
-		for (const line of chunk.split("\n")) {
-			if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
-		}
-	});
+	broadcaster.addClient((event) => events.push(event));
 	return events;
 }
 
@@ -110,10 +106,10 @@ describe("attach", () => {
 
 		// A failed adapter must not stay subscribed: its events would be
 		// broadcast for a session that is not running.
-		const frames: string[] = [];
-		broadcaster.addClient((chunk) => frames.push(chunk));
+		const frames: ServerEvent[] = [];
+		broadcaster.addClient((event) => frames.push(event));
 		flaky.created[0]?.append(userMessage("ghost"));
-		expect(frames.filter((frame) => frame.startsWith("data: "))).toEqual([]);
+		expect(frames).toEqual([]);
 
 		sessions = new SessionManager({ index, adapters: { pi } }, broadcaster);
 		await expect(sessions.attach(REF)).resolves.toBeDefined();
@@ -331,7 +327,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 
 		expect(sessions.canonicalRef(REF)).toEqual({ backend: "pi", id: REAL });
 		expect(sessions.liveRefs()).toEqual([{ backend: "pi", id: REAL }]);
-		// The summary the attach route hands back is the browser's other way of
+		// The summary an attach's reply carries is a client's other way of
 		// learning the new id, so it must not still carry the index's stale one.
 		expect(sessions.summaryOf(REF)?.ref).toEqual({ backend: "pi", id: REAL });
 		expect(sessions.summaryOf(REF)?.preview).toBe("hello");
@@ -926,11 +922,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 
 		function collectEvents(): ServerEvent[] {
 			const events: ServerEvent[] = [];
-			broadcaster.addClient((chunk) => {
-				for (const line of chunk.split("\n")) {
-					if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
-				}
-			});
+			broadcaster.addClient((event) => events.push(event));
 			return events;
 		}
 
@@ -1029,11 +1021,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 				return forked;
 			};
 			const events: ServerEvent[] = [];
-			const client = broadcaster.addClient((chunk) => {
-				for (const line of chunk.split("\n")) {
-					if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
-				}
-			});
+			const client = broadcaster.addClient((event) => events.push(event));
 			const forking = sessions.fork(REF, "e1");
 			await rewound.promise;
 
@@ -1133,9 +1121,9 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	});
 
 	it("leaves the fork's live adapter alone when the parent's ref is closed", async () => {
-		// `close()` is what the DELETE route calls (app.ts). The parent is
-		// detached, so the call finds nothing and returns silently -- the route
-		// still answers 204 -- and the agent the fork is driving lives on.
+		// `close()` is what `sessions/close` calls (socket.ts). The parent is
+		// detached, so the call finds nothing and returns silently -- the
+		// command is still admitted -- and the agent the fork is driving lives on.
 		await sessions.attach(REF);
 		const parentAdapter = pi.forRef(REF);
 
@@ -1192,9 +1180,8 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		// unsubscribed in that same run, it would re-insert the disposed
 		// container under the fork's id, into the table shutdown just emptied.
 		// `liveRefs()` then hands that dead session to a browser reconnecting
-		// mid-shutdown (the event stream sends `retry: 500`), and
-		// `isAttached()`/`adapterFor()` hand out its disposed adapter to the
-		// abort and compact routes.
+		// mid-shutdown, and `isAttached()`/`adapterFor()` hand out its
+		// disposed adapter to the commands on it.
 		await sessions.attach(REF);
 		const adapter = pi.created[0];
 		if (!adapter) throw new Error("no adapter");
@@ -1596,12 +1583,12 @@ describe("a container keyed by a handle", () => {
 		const forked = await sessions.fork(REF, "e1");
 
 		await sessions.close(forked);
-		const frames: string[] = [];
-		broadcaster.addClient((chunk) => frames.push(chunk));
+		const frames: ServerEvent[] = [];
+		broadcaster.addClient((event) => frames.push(event));
 		adapter.append(userMessage("after the close"));
 		adapter.materialiseAs("/home/u/.pi/agent/sessions/after.jsonl");
 
-		expect(frames.filter((frame) => frame.startsWith("data: "))).toEqual([]);
+		expect(frames).toEqual([]);
 		expect(sessions.liveHandles()).toEqual([]);
 		expect(sessions.summaryOf({ backend: "pi", id: "/home/u/.pi/agent/sessions/after.jsonl" })).toBeNull();
 	});
@@ -2255,7 +2242,7 @@ describe("onDisk", () => {
 	});
 });
 
-describe("holds, what the preview route asks before it answers gone (D26 point 5)", () => {
+describe("holds, what sessions/preview asks before it answers gone (D26 point 5)", () => {
 	it("holds a name in the table, and nothing it never heard of", async () => {
 		const ref = await sessions.create(WORKSPACE, "pi");
 		expect(sessions.holds(ref)).toBe(true);
@@ -2926,8 +2913,8 @@ describe("teardown racing a startup", () => {
 		// adapter and before it returns, so a client that shuts the server down
 		// on hearing it lands in exactly that window.
 		let shutdown: Promise<void> | undefined;
-		broadcaster.addClient((chunk) => {
-			if (!shutdown && chunk.includes('"type":"sessions-changed"')) shutdown = sessions.disposeAll();
+		broadcaster.addClient((event) => {
+			if (!shutdown && event.type === "sessions-changed") shutdown = sessions.disposeAll();
 		});
 
 		await sessions.attach(REF);
@@ -2948,11 +2935,7 @@ describe("teardown racing a startup", () => {
 describe("turn boundaries", () => {
 	function collectEvents(): ServerEvent[] {
 		const events: ServerEvent[] = [];
-		broadcaster.addClient((chunk) => {
-			for (const line of chunk.split("\n")) {
-				if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
-			}
-		});
+		broadcaster.addClient((event) => events.push(event));
 		return events;
 	}
 
@@ -3375,11 +3358,7 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 	/** A client connecting now: its opening snapshots, then whatever is fanned out. */
 	function connect(): ServerEvent[] {
 		const events: ServerEvent[] = [];
-		const client = broadcaster.addClient((chunk) => {
-			for (const line of chunk.split("\n")) {
-				if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
-			}
-		});
+		const client = broadcaster.addClient((event) => events.push(event));
 		broadcaster.sendOpeningSnapshots(client, sessions.liveHandles());
 		return events;
 	}

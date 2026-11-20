@@ -1,8 +1,9 @@
 /**
- * The queries and commands whose bodies the HTTP routes and the socket share
- * while both exist (D31), each taking its parameters as parsed values and
- * refusing with `Refusal`. The commands on a live session are not here: the
- * routes address them by ref and the socket by handle (D31 point 9).
+ * The bodies of the socket's queries and commands that need more than one
+ * call into the session manager, each taking its parameters as parsed values
+ * and refusing with `Refusal`; `socket.ts` reads them off the frame. The
+ * commands on a live session are not here, since each is one call on the
+ * session its handle names (D31 point 9).
  */
 
 import { spawn } from "node:child_process";
@@ -36,13 +37,13 @@ export function isBackendId(value: unknown): value is BackendId {
  */
 export function sessionName(raw: unknown): string {
 	const name = typeof raw === "string" ? raw.replace(/[\r\n]+/g, " ").trim() : "";
-	if (name === "") throw new Refusal(400, "bad_request", "name is required and must not be blank");
+	if (name === "") throw new Refusal("bad_request", "name is required and must not be blank");
 	return name;
 }
 
 export async function editDraft(text: string): Promise<string> {
 	const editor = process.env.EDITOR;
-	if (!editor) throw new Refusal(500, "editor_failed", "$EDITOR is not set");
+	if (!editor) throw new Refusal("editor_failed", "$EDITOR is not set");
 
 	const directory = await mkdtemp(join(tmpdir(), "agentpane-draft-"));
 	// Markdown gave multiline prompts useful editor mode in practice; there is no format setting to maintain.
@@ -61,12 +62,12 @@ export async function editDraft(text: string): Promise<string> {
 			child.once("close", (code) => resolve(code ?? 1));
 		});
 		if (exitCode !== 0) {
-			throw new Refusal(500, "editor_failed", `external editor exited with status ${exitCode}`);
+			throw new Refusal("editor_failed", `external editor exited with status ${exitCode}`);
 		}
 		return await readFile(filename, "utf8");
 	} catch (err: unknown) {
 		if (err instanceof Refusal) throw err;
-		throw new Refusal(500, "editor_failed", describe(err));
+		throw new Refusal("editor_failed", describe(err));
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
@@ -79,7 +80,7 @@ export async function createSession(
 	model: string | undefined,
 ): Promise<CreateSessionResponse> {
 	if (typeof cwd !== "string" || !isAbsolute(cwd)) {
-		throw new Refusal(400, "bad_request", "cwd is required and must be an absolute path");
+		throw new Refusal("bad_request", "cwd is required and must be an absolute path");
 	}
 	let isDirectory = false;
 	try {
@@ -87,12 +88,12 @@ export async function createSession(
 	} catch {
 		// Not there is not a directory either.
 	}
-	if (!isDirectory) throw new Refusal(400, "bad_request", "cwd must name an existing directory");
-	if (!isBackendId(backend)) throw new Refusal(400, "bad_backend", `unknown backend "${String(backend)}"`);
+	if (!isDirectory) throw new Refusal("bad_request", "cwd must name an existing directory");
+	if (!isBackendId(backend)) throw new Refusal("bad_backend", `unknown backend "${String(backend)}"`);
 	// Starts the agent too, and a start that fails leaves nothing (D30).
 	const ref = await sessions.create(cwd, backend, model);
 	const session = sessions.summaryOf(ref);
-	if (!session) throw new Refusal(404, "not_found", `no such session: ${sessionKey(ref)}`);
+	if (!session) throw new Refusal("not_found", `no such session: ${sessionKey(ref)}`);
 	return { session };
 }
 
@@ -113,7 +114,7 @@ export async function previewSession(
 ): Promise<SessionPreviewResponse> {
 	const held = sessions.holds(ref);
 	const turns = await deps.index.preview(ref);
-	if (turns === null && !held) throw new Refusal(404, "gone", `no such session: ${sessionKey(ref)}`);
+	if (turns === null && !held) throw new Refusal("gone", `no such session: ${sessionKey(ref)}`);
 	return { ref, turns: turns ?? [] };
 }
 
@@ -123,7 +124,7 @@ export async function listModels(
 	backend: string | null,
 ): Promise<ModelsResponse> {
 	if (backend !== null && !isBackendId(backend)) {
-		throw new Refusal(400, "bad_backend", `unknown backend "${backend}"`);
+		throw new Refusal("bad_backend", `unknown backend "${backend}"`);
 	}
 	const wanted = backend ? [backend] : BACKENDS;
 	const models: ModelsResponse["models"] = [];

@@ -1,5 +1,5 @@
 /**
- * The seams the HTTP layer is built against.
+ * The seams the server's transport is built against.
  *
  * The transport owns no backends and no session store. Everything it needs
  * from the rest of the server arrives through this module, which is what lets
@@ -41,7 +41,7 @@ export interface SessionIndex {
 	 * its transcript messages, spawning nothing. Like the rest of this seam it
 	 * touches exactly the one session's file, never the whole corpus. Null when
 	 * no file backs the ref, which is not the same answer as a file with no
-	 * turns: the preview route reads it, for a ref the manager does not hold,
+	 * turns: `sessions/preview` reads it, for a ref the manager does not hold,
 	 * as the session gone (D26 point 5).
 	 */
 	preview(ref: SessionRef): Promise<SessionPreviewTurn[] | null>;
@@ -63,8 +63,8 @@ export const emptySessionIndex: SessionIndex = {
 export interface AppDeps {
 	index: SessionIndex;
 	/**
-	 * The secret every `/api` request but `GET /api/events` must carry as
-	 * `Authorization: Bearer <token>`. Required, so a composition that forgets
+	 * The secret a socket's first frame, its `hello`, must carry (D29, D31
+	 * point 5). Required, so a composition that forgets
 	 * it does not typecheck: the loopback bind and the Host and Origin checks
 	 * stop a browser, and only this stops a local process, which can forge every
 	 * header but cannot read the token.
@@ -72,25 +72,20 @@ export interface AppDeps {
 	apiToken: string;
 	/**
 	 * One factory per backend. Partial because a deployment may be missing one
-	 * (or a test may only care about one); requests for an absent backend get a
-	 * clean 501 rather than a crash.
+	 * (or a test may only care about one); a command for an absent backend is
+	 * refused `no_backend` rather than crashing.
 	 */
 	adapters: Partial<Record<BackendId, AdapterFactory>>;
-	/**
-	 * SSE keepalive comment interval. 0 disables it, which is what tests want --
-	 * a live interval keeps the process (and vitest) alive.
-	 */
-	heartbeatMs?: number;
 	/** Id generator for `virtual` sessions. Injectable so tests are deterministic. */
 	newId?: () => string;
 	/** ISO clock, injectable for the same reason. */
 	now?: () => string;
-	/** Unexpected request failures. Defaults to stderr in production. */
+	/** Unexpected command failures. Defaults to stderr in production. */
 	logError?: (message: string) => void;
 	/**
 	 * Anything not under `/api`. The SPA bundle, in practice. Returning null
-	 * falls through to a 404. Kept out of here so the API is testable without a
-	 * filesystem or a Bun global.
+	 * falls through to a 404. Kept out of here so the server is testable
+	 * without a filesystem or a Bun global.
 	 */
 	staticHandler?: (request: Request) => Promise<Response | null> | Response | null;
 }

@@ -28,8 +28,8 @@
 
 import {
 	MAX_SOCKET_FRAME_BYTES,
-	ROUTES,
 	SOCKET_CLOSE,
+	SOCKET_PATH,
 	type AbortResponse,
 	type ApiError,
 	type CommandName,
@@ -263,7 +263,7 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 	}
 
 	function connect(handlers: EventHandlers): EventConnection {
-		const socket = openSocket(ROUTES.socket);
+		const socket = openSocket(SOCKET_PATH);
 		const connection: Connection = { socket, queued: [], opened: false, closed: false, pending: new Map() };
 		current = connection;
 		const helloId = String(++lastId);

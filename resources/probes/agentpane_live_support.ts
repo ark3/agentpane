@@ -22,7 +22,7 @@ import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, readdirSync
 import { join, resolve } from "node:path";
 
 import { apiTokenPath } from "../../src/server/api-token.ts";
-import { type CommandName, type Commands, ROUTES } from "../../src/shared/protocol.ts";
+import { type CommandName, type Commands, SOCKET_PATH } from "../../src/shared/protocol.ts";
 
 /** The checkout this file sits in. */
 export const REPO = resolve(import.meta.dir, "../..");
@@ -132,7 +132,7 @@ export class AgentpaneSocket {
 	 * server does with a first frame that is not a valid `hello`.
 	 */
 	static async connect(port: number, host = HOST, timeoutSeconds = 10): Promise<AgentpaneSocket> {
-		const socket = new WebSocket(`ws://${host}:${port}${ROUTES.socket}`);
+		const socket = new WebSocket(`ws://${host}:${port}${SOCKET_PATH}`);
 		const opened = new Promise<void>((done, fail) => {
 			socket.addEventListener("open", () => done(), { once: true });
 			socket.addEventListener("error", () => fail(new Error("the socket did not open")), { once: true });

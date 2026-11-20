@@ -1,5 +1,6 @@
 /**
- * The wire contract between server and browser.
+ * The wire contract between the server and its clients, the browser and the
+ * Emacs helper.
  *
  * FROZEN INTERFACE (DESIGN D11). Both ends of the transport are ours and are
  * written by different people at different times, so this is the one place
@@ -8,13 +9,13 @@
  * `handle` on `SessionSummary` and beside `session` on every per-session
  * event (OW-suyinu), and the retirement of the event that had said a rename,
  * once both clients keyed by that handle (OW-mofuho). D27 raised it for
- * `SessionSummary.name` and the route that sets it (OW-jamaha). D31 raised it
- * for the socket's frames (ark3/agentpane#52), which sit beside the SSE and
- * REST types until the clients have moved and those go.
+ * `SessionSummary.name` and the command that sets it (OW-jamaha). D31 raised it
+ * for the socket's frames (ark3/agentpane#52), and again to retire the event
+ * stream and the REST routes once no client used them (ark3/agentpane#55).
  *
- * Shape follows DESIGN D2 (SSE for server->client, REST for client->server)
- * and D3 (the server is authoritative; it sends assembled state, never raw
- * backend protocol events); the socket is D31's.
+ * Shape follows D31 (one WebSocket carries commands in, and replies and
+ * events out) and D3 (the server is authoritative; it sends assembled state,
+ * never raw backend protocol events).
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -153,13 +154,11 @@ export interface AgentNotice {
 }
 
 // ---------------------------------------------------------------------------
-// SSE: server -> browser
+// Events: server -> client
 // ---------------------------------------------------------------------------
 
 /**
- * One multiplexed stream for every session (D2: browsers cap ~6 connections
- * per origin and an EventSource holds one permanently, so a stream per session
- * would wall at six).
+ * Every session's events on one socket, each naming its session (D31).
  *
  * `seq` is monotonic *per session*. A gap means the client missed an update;
  * since D25 the client, the browser or the Emacs helper, detaches the
@@ -176,8 +175,9 @@ export interface AgentNotice {
  * minted id at attach, and the first prompt may move it again (D9), so the id
  * a client created a session with is not the id it keeps. Each time, a
  * `snapshot` under the handle carrying the new ref goes out, and every event
- * after it carries that ref. The server honours the old id on REST routes
- * indefinitely, so a request in flight across the move still lands.
+ * after it carries that ref. The server honours the old id on every command
+ * that names a ref, indefinitely, so a request in flight across the move
+ * still lands.
  */
 export type ServerEvent =
 	| {
@@ -254,10 +254,10 @@ export type ServerEvent =
 			/**
 			 * The server no longer holds the session's turn error: a prompt that
 			 * started or joined a turn was admitted over it, or a client dismissed
-			 * it (`ROUTES.error`) (OW-jopifu). Drop it. What lets a client learn an
+			 * it (`sessions/dismissError`) (OW-jopifu). Drop it. What lets a client learn an
 			 * error went without a snapshot, which no longer arrives at every prompt
 			 * (OW-yirosu). Carries no message:
-			 * the stream is ordered, so the error a client holds from it when
+			 * the socket is ordered, so the error a client holds from it when
 			 * this arrives is the one the server cleared, and a newer one comes
 			 * after it.
 			 */
@@ -305,10 +305,10 @@ export type ServerEvent =
 	| { type: "sessions-changed" };
 
 // ---------------------------------------------------------------------------
-// REST: browser -> server
+// What each command takes and answers (`Commands`, below)
 // ---------------------------------------------------------------------------
 
-/** GET /api/sessions?cwd=<abs path> -- omit cwd for every session everywhere. */
+/** `sessions/list` -- omit cwd for every session everywhere. */
 export interface ListSessionsQuery {
 	cwd?: string;
 }
@@ -317,9 +317,9 @@ export interface ListSessionsResponse {
 }
 
 /**
- * POST /api/sessions -- creates a `virtual` session and starts its agent, as
+ * `sessions/create` -- creates a `virtual` session and starts its agent, as
  * one operation (D30): it answers once the session is attached, with its live
- * summary, as the attach route below does, and nothing hits disk until its
+ * summary, as an attach does, and nothing hits disk until its
  * first turn (D9). A start that fails is refused as an attach's would be and
  * leaves nothing behind -- no session, no name, no row -- so a retry is a new
  * create.
@@ -334,25 +334,25 @@ export interface CreateSessionResponse {
 }
 
 /**
- * GET /api/sessions/:backend/:id -- "open this session": spawns if needed and
- * snapshots over SSE. It and the create above are the only routes that spawn
- * (D25, D30): every other session route acts on a session already attached,
- * or refuses. The
- * transcript is deliberately not in this body (D3); what is here is the
- * summary, whose `ref` is *authoritative*. It can differ from the ref in the
- * URL, because a session adopts its backend id on attach -- see
- * `ServerEvent`, whose snapshot under the summary's `handle` carries it too.
+ * `sessions/attach` -- "open this session": spawns if needed and snapshots
+ * to every client. It, the create above and a prompt naming a ref are the
+ * only commands that spawn (D25, D30): every other command on a session names
+ * the handle of one already attached, or is refused. The transcript is
+ * deliberately not in this reply (D3); what is here is the summary, whose
+ * `ref` is *authoritative*. It can differ from the ref asked for, because a
+ * session adopts its backend id on attach -- see `ServerEvent`, whose
+ * snapshot under the summary's `handle`, written before this reply, carries
+ * it too.
  */
 export interface AttachSessionResponse {
 	session: LiveSessionSummary;
 }
 
 /**
- * GET /api/sessions/:backend/:id/preview -- a read-only, non-attaching
- * transcript preview (OW-38). Unlike the attach route above, this spawns
- * nothing: it reads exactly one stored session file by ref and maps that
- * backend's store records to the same transcript structure an attached
- * session streams over SSE.
+ * `sessions/preview` -- a read-only, non-attaching transcript preview
+ * (OW-38). Unlike an attach, this spawns nothing: it reads exactly one
+ * stored session file by ref and maps that backend's store records to the
+ * same transcript structure an attached session's events carry.
  *
  * The wire keeps store timestamps as ISO strings, matching `SessionSummary`;
  * the client edge performs the one conversion to the epoch-ms timestamps the
@@ -371,7 +371,7 @@ export interface SessionPreviewResponse {
 	turns: SessionPreviewTurn[];
 }
 
-/** POST /api/sessions/:backend/:id/prompt */
+/** `sessions/prompt`, beside the handle or the ref it names (`PromptParams`). */
 export interface PromptRequest {
 	text: string;
 	images?: { mimeType: string; base64: string }[];
@@ -389,21 +389,23 @@ export interface PromptRequest {
 	/**
 	 * The handle of the live session the sender's view holds (D30). Named, the
 	 * prompt goes only to the live session under it and starts nothing: one
-	 * that has ended is refused 409 `not_attached`, and the sender keeps the
-	 * text. Absent, the sender's view knows the session is not running, and the
-	 * server attaches it if it must, then prompts it; the answer then names
-	 * the live session (`PromptResponse.session`).
+	 * that has ended is refused `not_attached`, and the sender keeps the text.
+	 * Absent, the sender's view knows the session is not running, and the
+	 * prompt names the session's ref instead, which the server attaches if it
+	 * must, then prompts; the answer then names the live session
+	 * (`PromptResponse.session`). On the socket it is one of the two
+	 * `PromptParams` name.
 	 */
 	handle?: string;
 }
 
 /**
  * What a prompt the backend admitted led to. `"started"`: a turn runs, or the
- * prompt joined the one running (D16), and its events come over SSE.
+ * prompt joined the one running (D16), and its events follow the reply.
  * `"handled"`: the backend consumed the prompt itself and started no turn for
  * it (OW-dulipe). Only Pi answers that, for a prompt an extension command or
  * input handler takes, and the extension may still start work of its own,
- * whose events arrive on the stream as usual: `docs/rpc-commands.md` "prompt"
+ * whose events arrive as usual: `docs/rpc-commands.md` "prompt"
  * in `pi 1.2.0` says the disposition "describes the submitted prompt, not
  * independent work started by an extension" (read at the installed package,
  * not measured). After `/refs`, `/llama` and `/mcp` on `pi 1.2.0`, on
@@ -413,15 +415,9 @@ export interface PromptRequest {
 export type PromptDisposition = "started" | "handled";
 
 /**
- * The prompt route's body. The status says the disposition: 200 for a
- * handled prompt, for which no turn was started, though work an extension
- * started of its own may still stream (`PromptDisposition`), and 202 for a
- * started one. A prompt that named its handle gets a body only when handled,
- * a started one 202 with no body, as before the outcome existed, so a client
- * that reads only the status still reads it as today. One that named no
- * handle always gets a body, naming the live session it attached as well
- * (`PromptRequest.handle`, D30); like an attach's reply it can precede that
- * session's snapshot (D2).
+ * A prompt's reply: its disposition, and for a prompt that named a ref, the
+ * live session it attached as well (`PromptParams`, D30), whose snapshot was
+ * written before this.
  */
 export interface PromptResponse {
 	disposition: PromptDisposition;
@@ -429,23 +425,21 @@ export interface PromptResponse {
 }
 
 /**
- * The abort route's body, sent with 200 only when the stop took prompts out
- * of the backend's queue: the text of each steered prompt the backend had not
+ * `sessions/abort`'s reply: the text of each steered prompt the backend had not
  * yet delivered, the steering queue's in order and then the follow-up queue's
  * (D16, OW-wisifo). Only Pi queues
  * any, and only their text comes back -- a steered prompt's images do not,
  * and a skill or prompt template comes back as Pi expanded it.
  *
  * It answers the request that pressed Stop and goes nowhere else, because the
- * composer to put them back in is that client's. A stop that took nothing out
- * is answered 204 with no body, as before the texts existed, the way
- * `PromptResponse` grew a body only for the outcome that needs one.
+ * composer to put them back in is that client's. Empty when the stop took
+ * nothing out.
  */
 export interface AbortResponse {
 	queued: string[];
 }
 
-/** POST /api/edit-draft */
+/** `draft/edit` */
 export interface EditDraftRequest {
 	text: string;
 }
@@ -453,7 +447,7 @@ export interface EditDraftResponse {
 	text: string;
 }
 
-/** POST /api/sessions/:backend/:id/fork */
+/** `sessions/fork` */
 export interface ForkRequest {
 	entryId: string;
 }
@@ -462,17 +456,17 @@ export interface ForkResponse {
 }
 
 /**
- * POST /api/sessions/:backend/:id/fork-and-prompt -- an edit of an earlier
+ * `sessions/forkAndPrompt` -- an edit of an earlier
  * message, as one server operation (D30): fork the session at the user
  * message whose transcript index is `index`, attach the fork, and prompt it
  * with `text` and `images`. Only an attached session forks (D25), and an
- * index no fork point names is refused 409 `not_a_fork_point` with nothing
+ * index no fork point names is refused `not_a_fork_point` with nothing
  * forked (D20). Admitting the prompt clears no turn error: nobody has seen
  * one on the fork (`PromptRequest.priorErrorId`).
  *
- * Answered 201 once the fork's prompt is admitted. A failure after the fork
- * exists answers as that failure would on its own, and its body names the
- * fork (`ApiError.fork`); the server removes nothing (D17).
+ * Answered once the fork's prompt is admitted. A failure after the fork
+ * exists is refused as that failure would be on its own, naming the fork
+ * (`ApiError.fork`); the server removes nothing (D17).
  */
 export interface ForkAndPromptRequest {
 	index: number;
@@ -480,12 +474,12 @@ export interface ForkAndPromptRequest {
 	images?: { mimeType: string; base64: string }[];
 }
 export interface ForkAndPromptResponse {
-	/** The fork's, under its own handle. The reply can precede the fork's snapshot, as an attach's can (D2). */
+	/** The fork's, under its own handle, whose snapshot was written before this reply. */
 	session: LiveSessionSummary;
 	disposition: PromptDisposition;
 }
 
-/** GET /api/sessions/:backend/:id/fork-points */
+/** `sessions/forkPoints` */
 export interface ForkPoint {
 	id: string;
 	text: string;
@@ -517,26 +511,26 @@ export interface ForkPointsResponse {
 	forkStopsTurn: boolean;
 }
 
-/** POST /api/sessions/:backend/:id/model */
+/** `sessions/setModel` */
 export interface SetModelRequest {
 	model: string;
 }
 
 /**
- * POST /api/sessions/:backend/:id/name -- written through to the backend,
- * which holds it; agentpane keeps none (D13, "Names are not marks"). Only an
- * attached session can be named, since a detached one has no process to
- * write through: the route answers 409 `not_attached` for one. Line breaks
- * become one space and leading and trailing whitespace is trimmed, as Pi
- * stores a name, and a name empty after that answers 400 `bad_request`.
+ * `sessions/setName` -- written through to the backend, which holds it;
+ * agentpane keeps none (D13, "Names are not marks"). Only an attached session
+ * can be named, since a detached one has no process to write through, which
+ * is why the command names a handle. Line breaks become one space and leading
+ * and trailing whitespace is trimmed, as Pi stores a name, and a name empty
+ * after that is refused `bad_request`.
  */
 export interface SetNameRequest {
 	name: string;
 }
 
 /**
- * POST /api/sessions/:backend/:id/effort -- one of the model's `efforts` ids,
- * taking effect from the next turn. Any other answers 400 `bad_request`, as
+ * `sessions/setEffort` -- one of the model's `efforts` ids, taking effect
+ * from the next turn. Any other is refused `bad_request`, as
  * does any effort while the session's model lists none or is not in the
  * listing, and never reaches the backend (OW-tewofe).
  */
@@ -545,18 +539,20 @@ export interface SetEffortRequest {
 }
 
 /**
- * DELETE /api/sessions/:backend/:id/error -- `errorId` is the error being
- * dismissed, the one the client showed, as its `error` event or snapshot
- * named it. It is named because another client's turn can fail while the
- * dismissal is on its way, and that newer error must survive it (OW-bipume)
- * -- by id, not text, since the newer one can repeat it word for word
- * (OW-jokoto). A body without one answers 400 `bad_request`.
+ * `sessions/dismissError` -- dismiss the session's turn error, so no later
+ * snapshot carries it (OW-bipume). `errorId` is the error being dismissed,
+ * the one the client showed, as its `error` event or snapshot named it. It is
+ * named because another client's turn can fail while the dismissal is on its
+ * way, and that newer error must survive it, so only it is cleared, and the
+ * reply is the same whether or not anything was -- by id, not text, since the
+ * newer one can repeat it word for word (OW-jokoto). A command without one is
+ * refused `bad_request`.
  */
 export interface DismissErrorRequest {
 	errorId: string;
 }
 
-/** GET /api/models?backend=pi|codex */
+/** `models/list`, for one backend or every one */
 export interface ModelInfo {
 	id: string;
 	label: string;
@@ -587,19 +583,22 @@ export interface ModelsResponse {
 	models: ModelInfo[];
 }
 
-/** Every non-2xx response body. */
+/**
+ * A refusal: `error` is the code a `ReplyFailed` carries as `code`. Also the
+ * body of each HTTP refusal, of an upgrade or a path that is not served.
+ */
 export interface ApiError {
 	error: string;
 	detail?: string;
 	/**
-	 * Only from fork-and-prompt, for a failure after the fork was created: the
+	 * Only from `sessions/forkAndPrompt`, for a failure after the fork was created: the
 	 * fork, by its ref, and by its handle where it was attached, null where its
 	 * own start failed (D30). A client moves to it, so that sending again
 	 * prompts that fork rather than forking the parent a second time.
 	 */
 	fork?: { ref: SessionRef; handle: string | null };
 	/**
-	 * Only from a prompt that named no handle, for a refusal after the server
+	 * Only from a prompt that named a ref, for a refusal after the server
 	 * attached its session: that session, by its ref and the handle it is live
 	 * under, so a client binds the view that sent it (D30).
 	 */
@@ -634,9 +633,8 @@ export type PromptParams = Omit<PromptRequest, "handle"> & (
 /**
  * Every command and query the socket carries, by its `cmd`, with what it
  * takes beside `id` and what a reply that admits it carries. The names are
- * the Emacs helper's methods where it has one (`src/emacs/protocol.ts`); the
- * results are the REST bodies, with `null` where a route answers 204, and a
- * prompt's and an abort's always present.
+ * the Emacs helper's methods where it has one (`src/emacs/protocol.ts`), and
+ * `null` is a result that carries nothing.
  *
  * `hello` is the socket's first frame and carries the token (D31 point 5).
  * The server sends nothing and runs nothing until one has; a first frame that
@@ -686,9 +684,8 @@ export interface ReplyOk<K extends CommandName = CommandName> {
 }
 
 /**
- * The command was refused. `code` is what `ApiError.error` carries on the
- * REST routes, from the same mapper, and `fork` and `attached` are as there
- * (D30). An `id` no command frame carried is never answered: a frame that is
+ * The command was refused. `code` is what `ApiError.error` names, from one
+ * mapper (`classifyFailure`), and `fork` and `attached` are as there (D30). An `id` no command frame carried is never answered: a frame that is
  * not a JSON object with a string `id` closes the socket with
  * `SOCKET_CLOSE.badFrame`.
  */
@@ -723,45 +720,12 @@ export const SOCKET_CLOSE = {
  */
 export const MAX_SOCKET_FRAME_BYTES = 32 * 1024 * 1024;
 
-// ---------------------------------------------------------------------------
-// Routes
-// ---------------------------------------------------------------------------
-
 /**
- * Single source of truth for paths, so client and server cannot drift.
- * Loopback only (D8), and every route but `GET events` and the socket's
- * upgrade needs the bearer token.
+ * The path of the upgrade to the socket, which with the static bundle is all
+ * the server answers over HTTP (D31). Loopback only (D8); its token arrives in
+ * the first frame, not a header (D31 point 5).
  */
-export const ROUTES = {
-	events: "/api/events",
-	/** The upgrade to the socket (D31); its token arrives in the first frame, not a header. */
-	socket: "/api/socket",
-	sessions: "/api/sessions",
-	models: "/api/models",
-	editDraft: "/api/edit-draft",
-	session: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}`,
-	preview: (ref: SessionRef) =>
-		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/preview`,
-	prompt: (ref: SessionRef) =>
-		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/prompt`,
-	abort: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/abort`,
-	compact: (ref: SessionRef) =>
-		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/compact`,
-	fork: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork`,
-	forkPoints: (ref: SessionRef) =>
-		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork-points`,
-	forkAndPrompt: (ref: SessionRef) =>
-		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork-and-prompt`,
-	model: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/model`,
-	effort: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/effort`,
-	name: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/name`,
-	/**
-	 * DELETE with a `DismissErrorRequest` -- dismiss the session's turn error,
-	 * so no later snapshot carries it (OW-bipume). Only the error the body names
-	 * is cleared; a newer one stays. 204 whether or not anything was cleared.
-	 */
-	error: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/error`,
-} as const;
+export const SOCKET_PATH = "/api/socket";
 
 export const DEFAULT_PORT = 4173;
 
