@@ -1349,30 +1349,6 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// The listing owns the row and its `status`, and the server's `ended` alone
-	// says the handle is gone (D26): a listing that reads the session detached
-	// before the `ended` lands moves the row and leaves the view.
-	it("keeps a live view a fresh listing reports detached until its handle ends (D26)", async () => {
-		const server = fakeServer();
-		const controller = createController(server.api());
-		await controller.start();
-		attachesWith(server, { type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
-		await controller.select(ref);
-		const detached = { ...summary(ref), status: "detached" as const, isStreaming: false };
-		server.on["sessions/list"].mockResolvedValueOnce({ sessions: [detached] });
-
-		server.emit({ type: "sessions-changed" });
-		await vi.waitFor(() => expect(controller.getView().state.summaries).toEqual([detached]));
-		expect(controller.getView().state.sessions[h(ref)]).toBeDefined();
-
-		server.on["sessions/preview"].mockClear();
-		server.emit({ type: "ended", session: ref, handle: h(ref) });
-		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
-		expect(controller.getView().state.summaries[0]?.isStreaming).toBe(false);
-		await controller.preview(ref);
-		expect(server.on["sessions/preview"]).toHaveBeenCalledWith({ ref: ref });
-	});
-
 	// The server writes the `ended` and the `sessions-changed` before it
 	// answers the close (D31 point 3), and the view goes on the `ended` (D26),
 	// so by the time the close answers the pane reads the preview.
@@ -1951,30 +1927,6 @@ describe("client controller", () => {
 		expect(controller.getView().state.selected).toEqual(ref);
 		expect(controller.getView().preview).toEqual({ ref, turns: [] });
 		controller.dispose();
-	});
-
-	it("does not forget or demote a session updated while a detached listing is in flight", async () => {
-		const server = fakeServer();
-		const listed = deferred<SessionSummary[]>();
-		const controller = createController(server.api());
-		await controller.start();
-		attachesWith(server, { type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
-		await controller.select(ref);
-		server.on["sessions/list"].mockClear();
-		// The second broadcast is owed a listing of its own (OW-sabova), held so
-		// that what is asserted below is the first listing's landing alone.
-		const owed = deferred<SessionSummary[]>();
-		server.on["sessions/list"].mockReturnValueOnce(listed.promise.then((sessions) => ({ sessions }))).mockReturnValueOnce(owed.promise.then((sessions) => ({ sessions })));
-
-		server.emit({ type: "sessions-changed" });
-		server.emit({ type: "sessions-changed" });
-		server.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 2, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
-		const detached = { ...summary(ref), status: "detached" as const, isStreaming: false };
-		listed.resolve([detached]);
-		await vi.waitFor(() => expect(server.on["sessions/list"]).toHaveBeenCalledTimes(2));
-
-		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
-		expect(controller.getView().state.sessions[h(ref)]?.seq).toBe(2);
 	});
 
 	it("rejects a relative workspace before creating a session", async () => {

@@ -9,7 +9,6 @@ import {
 	handleOf,
 	initialClientState,
 	reduceServerEvent,
-	replaceSessionSummaries,
 	viewOf,
 	type ClientState,
 } from "./session-state.ts";
@@ -245,19 +244,6 @@ describe("client session state", () => {
 			message: userMessage("streamed"),
 		}).state;
 		expect(viewOf(streamed, ref)?.messages).toEqual([userMessage("before"), userMessage("after the re-attach"), userMessage("streamed")]);
-	});
-
-	// The listing owns rows and their `status`, and no longer says a handle
-	// ended: a view it lacks the handle of, or pairs by ref with a `detached`
-	// summary, stays until the server's `ended` drops it (D26).
-	it("leaves a view whose handle the listing lacks, or that a detached summary pairs with, in place (D26)", () => {
-		const listedWith = stateAtSequence(ref, 3);
-		expect(replaceSessionSummaries(listedWith, [], listedWith.sessions).sessions).toBe(listedWith.sessions);
-
-		const detached: SessionSummary = { ...summary(ref), status: "detached" };
-		const relisted = replaceSessionSummaries(listedWith, [detached], listedWith.sessions);
-		expect(relisted.sessions).toBe(listedWith.sessions);
-		expect(relisted.summaries).toEqual([detached]);
 	});
 
 	it("finds a ref's handle through the view carrying it alone, and none for a preview or a row (D31 point 3)", () => {

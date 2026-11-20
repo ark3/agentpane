@@ -19,7 +19,6 @@ import {
 	handleOf,
 	initialClientState,
 	reduceServerEvent,
-	replaceSessionSummaries,
 	viewOf,
 	type ClientState,
 	type Recovery,
@@ -107,10 +106,7 @@ export interface ControllerView {
 	 * Whether a user message is offered an Edit control at all reads this.
 	 *
 	 * On the view rather than on each `SessionView` because only the selected
-	 * session draws Edit controls and only the selected session is ever asked --
-	 * and because a `SessionView` write is how `replaceSessionSummaries` tells a
-	 * touched session from an untouched one, which a fork-points reply has no
-	 * business answering.
+	 * session draws Edit controls and only the selected session is ever asked.
 	 *
 	 * Not-yet-known is a third state on purpose, and it offers every user message
 	 * a control: a session is attached and drawn before this can answer, and a
@@ -874,11 +870,13 @@ export function createController(
 			// the button's promise covers both.
 			const previewRefresh = refreshPreview();
 			try {
-				const sessionsWhenListed = view.state.sessions;
+				// The listing owns the rows and their `status`, and nothing else: a
+				// handle ends by its `ended` alone (D26). It is no older than any
+				// view the tab holds by now, since the server writes a listing
+				// that read a session detached before any snapshot of it that
+				// followed (D28; the socket test of that interleaving).
 				const summaries = await api.listSessions(undefined);
-				if (!disposed) {
-					publish({ state: replaceSessionSummaries(view.state, summaries, sessionsWhenListed) });
-				}
+				if (!disposed) publish({ state: { ...view.state, summaries } });
 			} catch (error: unknown) {
 				if (!disposed && surface) publish({ error: errorMessage(error) });
 			} finally {

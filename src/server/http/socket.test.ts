@@ -283,6 +283,62 @@ describe("what a reply means (D31 point 3)", () => {
 		const replies = socket.frames.flatMap((frame) => (frame.type === "reply" ? [frame.id] : []));
 		expect(replies.slice(-2)).toEqual([quick, slow]);
 	});
+
+	// `SessionManager.list` reads the live overlay after its last await, and
+	// the reply is written a few microtasks later, so an attach that publishes
+	// its adapter in between leaves a listing that says `detached`. Its
+	// snapshot is written later still, after the reply, so no client holds a
+	// view the listing it is handed then contradicts, and the browser weighs a
+	// listing against nothing it handled since asking (D28). Every offset
+	// between the listing's index read and the attach's start is tried, and
+	// the run must see both outcomes, or the window was never straddled.
+	it("writes a listing that read a session detached before the snapshot of an attach that started in its window", async () => {
+		const outcomes = new Set<string>();
+		for (let offset = -6; offset <= 8; offset++) {
+			const started = deferred();
+			build({ holdStart: started.promise });
+			const indexed = deferred();
+			const list = index.list.bind(index);
+			index.list = async (query) => {
+				await indexed.promise;
+				return list(query);
+			};
+			const socket = await connected();
+			const attachId = socket.send("sessions/attach", { ref: PI_SESSION });
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+			const listId = socket.send("sessions/list", {});
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+			socket.clear();
+
+			const [first, second] = offset < 0 ? [started, indexed] : [indexed, started];
+			first.resolve();
+			for (let i = 0; i < Math.abs(offset); i++) await Promise.resolve();
+			second.resolve();
+			const listed = await socket.reply(listId);
+			await socket.reply(attachId);
+
+			if (!listed.ok) throw new Error(listed.code);
+			const { sessions } = listed.result as Commands["sessions/list"]["result"];
+			const status = sessions.find((s) => sessionKey(s.ref) === sessionKey(PI_SESSION))?.status;
+			const handle = app.sessions.summaryOf(PI_SESSION)?.handle ?? null;
+			const order = socket.order.map(([type]) => type);
+			outcomes.add(`${status}`);
+			if (status === "detached") {
+				expect([offset, socket.order]).toEqual([
+					offset,
+					[
+						["reply", listId],
+						["sessions-changed", null],
+						["snapshot", handle],
+						["reply", attachId],
+					],
+				]);
+			} else {
+				expect([offset, status, order.indexOf("snapshot") >= 0]).toEqual([offset, "attached", true]);
+			}
+		}
+		expect([...outcomes].sort()).toEqual(["attached", "detached"]);
+	});
 });
 
 describe("queries", () => {

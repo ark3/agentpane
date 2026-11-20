@@ -94,54 +94,6 @@ export function viewOf(state: ClientState, ref: SessionRef | null): SessionView 
 	return handle === undefined ? undefined : state.sessions[handle];
 }
 
-/** Each view's current ref -> its handle. */
-function handlesByRef(sessions: Readonly<Record<string, SessionView>>): Map<string, string> {
-	const byRef = new Map<string, string>();
-	for (const [handle, view] of Object.entries(sessions)) byRef.set(sessionKey(view.ref), handle);
-	return byRef;
-}
-
-/**
- * Replace the disk listing, which owns the rows and their `status`
- * (OW-forinu) and no longer says which live views stand. While the stream is
- * up a handle ends by the server's `ended` alone (D26), and a stream that
- * drops takes every view with it (D25), so a view whose handle the listing
- * lacks, or that a `detached` summary pairs with, stays until its `ended`
- * drops it.
- *
- * What the listing does not write is a row a view has outrun. A listed
- * summary pairs with a view by ref, not by handle: `list()` gives a summary a
- * handle only for a container still in the server's table. A view an event
- * has touched since the listing was asked for, or one that did not stand
- * then, is newer than the listing, so a `detached` summary paired with it
- * gives way to the summary the view had (OW-fihuma). That answers a stale
- * listing racing an attach. A listing that lands between a view's last event
- * and its `ended` restores the row too, and the re-list the end's
- * `sessions-changed` asks writes it back.
- */
-export function replaceSessionSummaries(
-	state: ClientState,
-	summaries: SessionSummary[],
-	sessionsWhenListed: Readonly<Record<string, SessionView>>,
-): ClientState {
-	const listedHandles = handlesByRef(sessionsWhenListed);
-	const currentHandles = handlesByRef(state.sessions);
-	let nextSummaries = summaries;
-	for (const [index, summary] of summaries.entries()) {
-		if (summary.status !== "detached") continue;
-		const key = sessionKey(summary.ref);
-		const handle = listedHandles.get(key) ?? currentHandles.get(key);
-		if (handle === undefined) continue;
-		const currentView = state.sessions[handle];
-		if (currentView === undefined || currentView === sessionsWhenListed[handle]) continue;
-		const current = state.summaries.find((item) => sessionKey(item.ref) === key);
-		if (current === undefined) continue;
-		if (nextSummaries === summaries) nextSummaries = [...summaries];
-		nextSummaries[index] = current;
-	}
-	return { ...state, summaries: nextSummaries };
-}
-
 function emptySession(ref: SessionRef): SessionView {
 	return {
 		ref,
