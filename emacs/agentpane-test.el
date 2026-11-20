@@ -1755,7 +1755,7 @@ the error's `data', in the buffer that absorbed it (OW-larele).  Through
            (list :session canonical :handle "h1" :token 1 :nodes []))
           (should-not (buffer-live-p holder))
           (funcall (plist-get (cdr (assq 'test/refused calls)) :error-fn)
-                   '(:code 409 :message "Refused" :data (:error "not_attached")))
+                   '(:code -32000 :message "Refused" :data (:error "not_attached")))
           (funcall (plist-get (cdr (assq 'test/timeout calls)) :timeout-fn))
           (should (equal (reverse ran)
                          `((failed ,previewing) (erred ,previewing (:error "not_attached"))
@@ -4569,7 +4569,7 @@ one's `gone', carried in the error's `data', kills it."
         (sent nil)
         (ids 0)
         (said nil)
-        (gone '(:code 404 :message "No such session" :data (:error "gone"))))
+        (gone '(:code -32000 :message "No such session" :data (:error "gone"))))
     (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t))
               ((symbol-function 'jsonrpc-async-request)
                (lambda (_connection method _params &rest args)
@@ -4581,7 +4581,7 @@ one's `gone', carried in the error's `data', kills it."
       (agentpane-test--with-session ref
         (agentpane-refetch)
         (funcall (cdr (pop sent))
-                 '(:code 500 :message "Boom" :data (:error "internal")))
+                 '(:code -32000 :message "Boom" :data (:error "internal_error")))
         (should (buffer-live-p buffer))
         (should (seq-some (lambda (text) (string-search "sessions/preview failed" text)) said))
         (agentpane-refetch)
@@ -6417,7 +6417,7 @@ so a turn from elsewhere that then ends unseen raises nothing.  Through
                          (list :ref canonical :handle "h1"))
                 (should-not (buffer-live-p holder))
                 (funcall (plist-get prompt :error-fn)
-                         '(:code 409 :message "Refused"
+                         '(:code -32000 :message "Refused"
                            :data (:error "turn_active" :detail "Refused"))))
               (funcall status t)
               (funcall status nil)
@@ -6515,7 +6515,7 @@ does."
                   (pcase-exhaustive answer
                     ('handled (funcall (plist-get held :success-fn) '(:disposition "handled")))
                     ('refused (funcall (plist-get held :error-fn)
-                                       '(:code 409 :message "Refused"
+                                       '(:code -32000 :message "Refused"
                                          :data (:error "turn_active"
                                                 :detail "Refused")))))
                   (funcall (plist-get joined :success-fn) nil)))
@@ -7227,7 +7227,7 @@ attach's reply (D2), and a helper can exit before it replies (OW-bukupu)."
   (agentpane-test--snapshot-then-death nil))
 
 (ert-deftest agentpane-test-late-error-reply-fails-once ()
-  "An error reply a dead helper wrote, an HTTP refusal as `toRpcError' in
+  "An error reply a dead helper wrote, the server's refusal as `toRpcError' in
 src/emacs/helper.ts builds one, handled once the helper reads as dead,
 is the request's one answer, as one from a live helper is: UNSENT
 runs once, then FAILED once, and the echo area shows the helper's own
@@ -7240,7 +7240,7 @@ answered it, read as unsent."
         (unsents 0))
     (agentpane-test--outliving
         (list (list :jsonrpc "2.0" :id 1
-                    :error (list :code 404 :message "no such session"
+                    :error (list :code -32000 :message "no such session"
                                  :data (list :error "gone"
                                              :detail "no such session"))))
       (agentpane-test--noting
@@ -7258,7 +7258,7 @@ answered it, read as unsent."
 
 (ert-deftest agentpane-test-error-reply-before-a-death-abandons-the-watch ()
   "A prompt the helper refuses with an error reply it writes just before
-it exits, the server's 409 for a turn already running as `toRpcError'
+it exits, the server's refusal of one as `toRpcError'
 builds it, after a status under the buffer's handle said a turn from
 elsewhere streams, abandons the turn-done watch it armed, as a refusal
 from a live helper does, and the teardown raises nothing for that turn,
@@ -7270,7 +7270,7 @@ there, raising the indicator."
         (list (list :jsonrpc "2.0" :method "session/status"
                     :params (list :session ref :handle "h1" :isStreaming t))
               (list :jsonrpc "2.0" :id 1
-                    :error (list :code 409 :message "a turn is already running"
+                    :error (list :code -32000 :message "a turn is already running"
                                  :data (list :error "turn_active"
                                              :detail "a turn is already running"))))
       (let ((dead (agentpane--connection)))
@@ -7610,8 +7610,8 @@ reply is handed on (OW-tifiva), as in wire order
 (defun agentpane-test--prompt-failing (how)
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
 fail HOW -- `timeout', `reply-exit' (handling its reply signals), `error'
-\(the helper answers with the server's refusal, an HTTP error carrying its
-status), `transport' (the helper answers with an error of its own, which
+\(the helper answers with the server's refusal, an error carrying its
+code), `transport' (the helper answers with an error of its own, which
 carries none) or `send-exit' (sending it signals) -- then run a turn that
 ends unseen, and return whether the indicator is raised."
   (let ((request (symbol-function 'agentpane--request))
@@ -7633,7 +7633,7 @@ ends unseen, and return whether the indicator is raised."
               (pcase how
                 ('timeout (funcall (plist-get prompt :timeout-fn)))
                 ('error (funcall (plist-get prompt :error-fn)
-                                 '(:code 409 :message "Refused"
+                                 '(:code -32000 :message "Refused"
                                    :data (:error "turn_active" :detail "Refused"))))
                 ('transport (funcall (plist-get prompt :error-fn)
                                      '(:code -32603 :message "fetch failed")))
