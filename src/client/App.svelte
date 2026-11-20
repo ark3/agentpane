@@ -351,7 +351,8 @@
 	 * and the Compact item three lines below already refuses on that field, so
 	 * this conjunct is what makes the two agree (OW-pehile). Whether any backend
 	 * reaches it unseen by `isStreaming` is unmeasured; the guard is one line
-	 * either way.
+	 * either way. `view.compacting` is that window's `view.sending`: this
+	 * tab's compaction request is out and the server has named no phase yet.
 	 *
 	 * The streaming truth is the live `state.sessions` entry, as the list row
 	 * reads it (OW-furinu), not `selectedSummary.isStreaming`, which is only as
@@ -361,6 +362,7 @@
 		(selectedSummary?.status === "attached" || selectedSummary?.status === "virtual") &&
 			!streamingNow &&
 			!view.sending &&
+			!view.compacting &&
 			compaction === null,
 	);
 	/**
@@ -382,6 +384,7 @@
 		selectedSummary?.status === "attached" &&
 			!streamingNow &&
 			!view.sending &&
+			!view.compacting &&
 			compaction === null &&
 			!(view.state.selected?.backend === "codex" && (selectedSession?.messages.length ?? 0) === 0),
 	);

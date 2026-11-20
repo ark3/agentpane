@@ -881,6 +881,16 @@ describe("App", () => {
 				sessions: { [sessionKey(piSession)]: { ...live, compaction: "running" } },
 			}),
 		});
+		// This tab's compaction request out, before the server names a phase
+		// (D31 point 7): the session says nothing yet, and only `compacting` does.
+		refusedWhen({
+			compacting: true,
+			state: state({
+				selected: piSession,
+				summaries: [summary(piSession, "P")],
+				sessions: { [sessionKey(piSession)]: live },
+			}),
+		});
 		// Already detached -- there is no subprocess to end, and this client is
 		// only holding a stale live view of one.
 		refusedWhen({
@@ -946,10 +956,11 @@ describe("App", () => {
 		expect(offeredWhen({ state: selectedWith({ status: "detached" }) })).toBe(false);
 		expect(offeredWhen({ state: selectedWith({ status: "virtual" }) })).toBe(false);
 		// Mid-turn, read as Detach reads it: the live entry, a prompt in flight,
-		// a compaction.
+		// a compaction, and a compaction request out.
 		expect(offeredWhen({ state: selectedWith({ isStreaming: false }, { isStreaming: true }) })).toBe(false);
 		expect(offeredWhen({ sending: true, state: selectedWith({}) })).toBe(false);
 		expect(offeredWhen({ state: selectedWith({}, { compaction: "running" }) })).toBe(false);
+		expect(offeredWhen({ compacting: true, state: selectedWith({}) })).toBe(false);
 		// Codex before its first prompt, which the adapter refuses because the
 		// rename alone writes the thread into Codex's store (OW-kametu). Pi and
 		// Claude Code hold a name until the first turn, so the Pi cases above stand.

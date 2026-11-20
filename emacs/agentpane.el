@@ -3628,8 +3628,9 @@ virtual one is an attached buffer here; one streaming or compacting,
 since a kill mid-turn loses the reply, on Claude Code all of it
 \(OW-japuzo); and one with a prompt or a fork in flight, both of which the
 browser's `sending' covers.  Compacting counts from the moment
-`agentpane-compact' sends, as the browser's `compact' marks it from the
-click, not from the first status that carries it.  Refused too, beyond
+`agentpane-compact' sends, as the browser counts it from its request
+going out (`compacting' in src/client/controller.ts), not from the first
+status that carries it.  Refused too, beyond
 the browser's predicate, with an attach
 in flight, whose answer would count the buffer attached to what was
 closed.  That clause stays: an attach sent before the close is an
