@@ -5215,6 +5215,13 @@ The first turn's text grew across nine upserts, and a second socket, opened once
 The long turn, sent on that second socket, streamed 72 s and was aborted at 20002 assistant characters (`abort_wait: "filled"`); it went idle 54 ms after the abort's request, `queued: []`, and still held 20002 1.5 s later.
 The server exited 0 at SIGTERM, leaving no worker, and the state directory and the server's log were removed.
 
+**`agentpane_pi_steer_probe.ts` found the mid-turn prompt steered into the running turn.**
+On `pi 1.5.2` with `--model openrouter/deepseek/deepseek-v4.1-flash:high`, read back off a `status` event, in a throwaway state directory, through `bun`, `bwrap`, `bwrap`, the tapping shim and `pi`; 53 s with the build.
+The mid-turn prompt was sent by the create's handle at 1279 assistant characters with the turn streaming, and its reply was `disposition: "started"`.
+Pi's `queue_update` put the text in `steering`, `followUp` empty, 17 tap lines after the cut, all of them text deltas, where the OW-yuyofu run had it on the next line.
+The user message carrying the marker came after the essay's assistant `message_end` (13602 characters), a `turn_end` and a `turn_start`, with no `agent_end` and no `agent_settled` between, and its answer followed: `steered_into_running_turn`.
+Nothing was left running, and the state directory, the shim and its tap were removed.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
