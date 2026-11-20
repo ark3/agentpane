@@ -7270,43 +7270,6 @@ there, raising the indicator."
         (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
                        "hello"))))))
 
-(ert-deftest agentpane-test-transport-error-before-a-death-keeps-the-watch ()
-  "A prompt the helper answers, just before it exits, with an error that
-carries no server code -- its own -32603, as when the server was killed
-with the prompt's POST in flight and the socket's error reached the
-helper before the stream's drop -- keeps the turn-done watch it armed,
-since nothing says whether the server had admitted it: after a status
-under the buffer's handle said the turn streams, the teardown ends that
-turn and raises the indicator for the buffer no window shows, as
-`agentpane-test-death-ends-a-turn-seen-streaming' does for a prompt
-never answered, and the helper's message is still shown (OW-zedawo,
-OW-hiliti).  Read as a refusal, as it was until OW-hiliti's third cut,
-it abandoned the watch, and the indicator was lost at 7 of 8 server
-deaths (bun 1.4.0, Emacs 31.1, measured 2026-09-29)."
-  (agentpane-test--watching
-    (agentpane-test--outliving
-        (list (list :jsonrpc "2.0" :method "session/status"
-                    :params (list :session ref :handle "h1" :isStreaming t))
-              (list :jsonrpc "2.0" :id 1
-                    :error (list :code -32603
-                                 :message "The socket connection was closed unexpectedly.")))
-      (agentpane-test--noting
-        (let ((dead (agentpane--connection)))
-          (setq agentpane--attached dead
-                agentpane--handle "h1")
-          (goto-char (point-max))
-          (insert "hello")
-          (agentpane-send)
-          (should (assoc "h1" agentpane--turn-watches))
-          (agentpane-test--heard-out dead)
-          (should (agentpane-test--turn-done-p))
-          (should (memq (current-buffer) agentpane--turns-done))
-          (should-not agentpane--turn-watches)
-          (should-not agentpane--sending)
-          (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
-                         "hello"))
-          (should (agentpane-test--said-p "sessions/prompt failed: The socket connection" said)))))))
-
 (ert-deftest agentpane-test-fork-answered-as-its-helper-dies-is-shown ()
   "A fork whose reply is among the last messages a dying helper wrote
 opens the fork's buffer and shows it, not attached, so a `g' can bring it
@@ -7591,11 +7554,14 @@ reply is handed on (OW-tifiva), as in wire order
 
 (defun agentpane-test--prompt-failing (how)
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
-fail HOW -- `timeout', `reply-exit' (handling its reply signals), `error'
-\(the helper answers with the server's refusal, an error carrying its
-code), `transport' (the helper answers with an error of its own, which
-carries none) or `send-exit' (sending it signals) -- then run a turn that
-ends unseen, and return whether the indicator is raised."
+fail HOW -- `timeout', `reply-exit' (handling its reply signals),
+\(refused CODE) (the helper answers with a refusal whose `data' carries
+CODE: the server's, or one of the helper's own for a request it never
+wrote, `unreachable', `unauthorized' or `frame_too_large' (`toRpcError'
+in src/emacs/helper.ts)), `internal' (the helper answers with an error
+of its own, the -32603 of a throw it did not expect, which carries no
+code) or `send-exit' (sending it signals) -- then run a turn that ends
+unseen, and return whether the indicator is raised."
   (let ((request (symbol-function 'agentpane--request))
         (calls nil))
     (agentpane-test--submitting
@@ -7614,11 +7580,12 @@ ends unseen, and return whether the indicator is raised."
             (let ((prompt (cdr (assq 'sessions/prompt calls))))
               (pcase how
                 ('timeout (funcall (plist-get prompt :timeout-fn)))
-                ('error (funcall (plist-get prompt :error-fn)
-                                 '(:code -32000 :message "Refused"
-                                   :data (:error "backend_refused" :detail "Refused"))))
-                ('transport (funcall (plist-get prompt :error-fn)
-                                     '(:code -32603 :message "fetch failed")))
+                (`(refused ,code)
+                 (funcall (plist-get prompt :error-fn)
+                          (list :code -32000 :message "Refused"
+                                :data (list :error code :detail "Refused"))))
+                ('internal (funcall (plist-get prompt :error-fn)
+                                    '(:code -32603 :message "x is not a function")))
                 ('reply-exit (should-error (funcall (plist-get prompt :success-fn) nil))))))
           (should-not agentpane--sending)
           (funcall status t)
@@ -7629,13 +7596,14 @@ ends unseen, and return whether the indicator is raised."
   "A prompt whose reply outlasts its timeout, whose reply's handling
 signals, or that the helper answers with an error of its own, carrying no
 server code, may have been admitted, so its watch stands and the turn's
-end raises the indicator; one the server refused, or that never went
-out, abandons it, as the browser's `watchAbandon' does (OW-dunahe,
-OW-hiliti)."
+end raises the indicator; one the server refused, one the helper
+refused as never written, or one that never went out, abandons it, as
+the browser's `watchAbandon' does (OW-dunahe, OW-hiliti)."
   (should (agentpane-test--prompt-failing 'timeout))
   (should (agentpane-test--prompt-failing 'reply-exit))
-  (should (agentpane-test--prompt-failing 'transport))
-  (should-not (agentpane-test--prompt-failing 'error))
+  (should (agentpane-test--prompt-failing 'internal))
+  (dolist (code '("backend_refused" "unreachable" "unauthorized" "frame_too_large"))
+    (should-not (agentpane-test--prompt-failing `(refused ,code))))
   (should-not (agentpane-test--prompt-failing 'send-exit)))
 
 (defun agentpane-test--pi-fork-during-a-turn (order)

@@ -575,9 +575,9 @@ buffer, which a buffer killed meanwhile must not strand, as a prompt's
 turn-done watch is (`agentpane--send-prompt').  A timeout, the helper's
 death, and a non-local exit running CALLBACK run FAILED alone, the
 request having perhaps been carried out; so, with ERRED, does an error
-reply carrying no code -- the helper's own -32603, a failure of the
-request's transport or its abort, or its -32601 -- which says nothing
-of whether the server acted on it (OW-hiliti).  At a death the teardown
+reply carrying no code -- the helper's own -32603, for a throw it did
+not expect, or its -32601 -- which says nothing of whether the server
+acted on it (OW-hiliti).  At a death the teardown
 settles a prompt's watch itself (`agentpane--helper-gone').
 REPLIED, when given, is UNSENT's counterpart for a reply: it runs with the
 result, before CALLBACK, in no buffer in particular, whether or not this
