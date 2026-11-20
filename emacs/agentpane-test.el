@@ -1108,34 +1108,6 @@ whatever ref the summary names, so no second buffer opens on the session."
                    (list :ref '(:backend "claude" :id "pending-1") :handle "h1"))
                   holder)))))
 
-(defun agentpane-test--attach-answered-under-a-new-ref (snapshot-first)
-  "Attach a buffer whose reply names another ref and a handle than the one
-it asked for, with the snapshot under that ref and handle, which the
-helper tags with the attach's token, handled before the reply's
-callback if SNAPSHOT-FIRST, else after it, the reply delivered alone, and
-check that the buffer that asked drew it and holds the snapshot's handle
-and ref."
-  (let ((asked '(:backend "claude" :id "pending-1"))
-        (ref '(:backend "claude" :id "real-2")))
-    (agentpane-test--forking nil nil
-      (setq hold '(sessions/attach)
-            attached (list :ref ref :handle "h1"))
-      (let ((buffer (agentpane--transcript-buffer (list :ref asked)))
-            (snapshot (list :session ref :handle "h1" :token 1
-                            :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>")))))
-        (with-current-buffer buffer (agentpane--attach))
-        (if snapshot-first
-            (progn
-              (agentpane--on-notification nil 'session/snapshot snapshot)
-              (funcall (cdr (pop held)) t))
-          (funcall (cdr (pop held)) 'reply)
-          (agentpane--on-notification nil 'session/snapshot snapshot))
-        (with-current-buffer buffer
-          (should (equal (agentpane-test--indices) '(3)))
-          (should (equal agentpane--handle "h1"))
-          (should (agentpane--same-ref-p (agentpane--ref agentpane--session) ref)))
-        (should (equal (agentpane-test--holders ref) (list buffer)))))))
-
 (ert-deftest agentpane-test-attach-answered-under-a-new-ref-draws-a-snapshot-handled-before-its-reply ()
   "An attach whose reply names another ref than the one asked for draws the
 snapshot under the new ref that was handled before the reply's callback,
@@ -1143,13 +1115,23 @@ which the helper sends before the reply (`sessions/attach' in
 src/emacs/helper.ts), and which jsonrpc.el may also run first after a
 reply it held back as an anxious continuation: the snapshot's `token'
 finds the buffer that asked, which takes the handle from it."
-  (agentpane-test--attach-answered-under-a-new-ref t))
-
-(ert-deftest agentpane-test-attach-answered-under-a-new-ref-draws-a-snapshot-handled-after-its-reply ()
-  "An attach whose reply names another ref than the one asked for draws the
-snapshot under the new ref handled after the reply's callback, which
-finds the buffer by its `token', the reply having given it nothing."
-  (agentpane-test--attach-answered-under-a-new-ref nil))
+  (let ((asked '(:backend "claude" :id "pending-1"))
+        (ref '(:backend "claude" :id "real-2")))
+    (agentpane-test--forking nil nil
+      (setq hold '(sessions/attach)
+            attached (list :ref ref :handle "h1"))
+      (let ((buffer (agentpane--transcript-buffer (list :ref asked))))
+        (with-current-buffer buffer (agentpane--attach))
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :handle "h1" :token 1
+               :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>"))))
+        (funcall (cdr (pop held)) t)
+        (with-current-buffer buffer
+          (should (equal (agentpane-test--indices) '(3)))
+          (should (equal agentpane--handle "h1"))
+          (should (agentpane--same-ref-p (agentpane--ref agentpane--session) ref)))
+        (should (equal (agentpane-test--holders ref) (list buffer)))))))
 
 (ert-deftest agentpane-test-attach-under-a-new-ref-holds-the-handle-its-snapshot-gave-when-the-reply-fails ()
   "An attach answered under another ref whose reply fails in Emacs -- a
