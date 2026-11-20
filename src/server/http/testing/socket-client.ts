@@ -111,6 +111,17 @@ export class TestSocket {
 		return this.frames.map((frame) => (frame.type === "event" ? frame.event.type : `reply:${frame.id}`));
 	}
 
+	/**
+	 * Each frame as `[type, handle]` for an event, the handle null for one
+	 * that carries none, or `["reply", id]`: what a test of the order the
+	 * server writes in asserts exactly (D31 point 3).
+	 */
+	get order(): [string, string | null][] {
+		return this.frames.map((frame) =>
+			frame.type === "reply" ? ["reply", frame.id] : [frame.event.type, "handle" in frame.event ? frame.event.handle : null],
+		);
+	}
+
 	/** Forget the frames so far; what the client holds from them stays. */
 	clear(): void {
 		this.frames.length = 0;

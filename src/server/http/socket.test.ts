@@ -485,6 +485,7 @@ describe("commands that name a ref", () => {
 
 	it("creates a session started and live, with its model and no resumeId, and lists it attached (D30)", async () => {
 		const socket = await connected();
+		socket.clear();
 		const id = socket.send("sessions/create", { cwd: WORKSPACE, backend: "pi", model: "pi-1" });
 		const reply = await socket.reply(id);
 		if (!reply.ok) throw new Error(reply.code);
@@ -492,7 +493,11 @@ describe("commands that name a ref", () => {
 
 		expect(session).toEqual(expect.objectContaining({ status: "attached", cwd: WORKSPACE, onDisk: false, handle: expect.any(String) }));
 		expect(session.ref.id).toMatch(/^virtual:/);
-		expect(socket.events.some((event) => event.type === "snapshot" && event.handle === session.handle)).toBe(true);
+		expect(socket.order).toEqual([
+			["sessions-changed", null],
+			["snapshot", session.handle],
+			["reply", id],
+		]);
 		expect(pi.forRef(session.ref)?.startOptions).toEqual({ cwd: WORKSPACE, model: "pi-1" });
 		const { sessions } = await socket.ok("sessions/list", {});
 		expect(sessions.find((s) => sessionKey(s.ref) === sessionKey(session.ref))?.status).toBe("attached");
@@ -538,13 +543,18 @@ describe("commands that name a ref", () => {
 
 	it("prompts by ref, attaching the session, and names it in the reply after its snapshot (D30)", async () => {
 		const socket = await connected();
+		socket.clear();
 		const id = socket.send("sessions/prompt", { ref: PI_SESSION, text: "hello" });
 		const reply = await socket.reply(id);
 		if (!reply.ok) throw new Error(reply.code);
 
 		expect(reply.result).toEqual({ disposition: "started", session: app.sessions.summaryOf(PI_SESSION) });
 		expect(reply.result).toMatchObject({ session: { ref: PI_SESSION, status: "attached" } });
-		expect(socket.shape.indexOf("snapshot")).toBeLessThan(socket.shape.indexOf(`reply:${id}`));
+		expect(socket.order).toEqual([
+			["sessions-changed", null],
+			["snapshot", app.sessions.summaryOf(PI_SESSION)?.handle],
+			["reply", id],
+		]);
 		expect(pi.forRef(PI_SESSION)?.prompts).toEqual([{ text: "hello", images: undefined }]);
 	});
 
@@ -580,10 +590,16 @@ describe("commands that name a ref", () => {
 			},
 		});
 		const socket = await connected();
+		socket.clear();
 		const reply = await socket.refused("sessions/prompt", { ref: PI_SESSION, text: "hello" });
 
 		expect([reply.code, reply.detail]).toEqual(["backend_refused", "not now"]);
 		expect(reply.attached).toEqual({ ref: PI_SESSION, handle: app.sessions.summaryOf(PI_SESSION)?.handle });
+		expect(socket.order).toEqual([
+			["sessions-changed", null],
+			["snapshot", reply.attached?.handle],
+			["reply", reply.id],
+		]);
 		expect(app.sessions.isAttached(PI_SESSION)).toBe(true);
 	});
 });
@@ -672,10 +688,14 @@ describe("commands that name a handle (D31 point 9)", () => {
 
 	it("names a session through its adapter, then says sessions-changed and lists the name (D27, OW-jamaha)", async () => {
 		const { socket, handle } = await attached();
-		await socket.ok("sessions/setName", { handle, name: "  probe\r\nname " });
+		const id = socket.send("sessions/setName", { handle, name: "  probe\r\nname " });
+		expect((await socket.reply(id)).ok).toBe(true);
 		// Line breaks collapsed and trimmed, as Pi stores it (`pi 1.0.0`), so every backend holds the same string.
 		expect(pi.forRef(PI_SESSION)?.name).toBe("probe name");
-		expect(socket.typed("sessions-changed")).not.toEqual([]);
+		expect(socket.order).toEqual([
+			["sessions-changed", null],
+			["reply", id],
+		]);
 		const { sessions } = await socket.ok("sessions/list", {});
 		expect(sessions.find((summary) => sessionKey(summary.ref) === sessionKey(PI_SESSION))?.name).toBe("probe name");
 		for (const params of [{ name: "   " }, {}]) {
@@ -822,12 +842,21 @@ describe("commands that name a handle (D31 point 9)", () => {
 	it("forks and prompts, answering the fork live", async () => {
 		build({ forkPoints: [{ id: "e1", text: "first", index: 0 }] });
 		const { socket, handle } = await attached();
-		const reply = await socket.ok("sessions/forkAndPrompt", { handle, index: 0, text: "again" });
+		const id = socket.send("sessions/forkAndPrompt", { handle, index: 0, text: "again" });
+		const answer = await socket.reply(id);
+		if (!answer.ok) throw new Error(answer.code);
+		const reply = answer.result as Commands["sessions/forkAndPrompt"]["result"];
 
 		expect(reply.disposition).toBe("started");
 		expect(reply.session.handle).not.toBe(handle);
 		expect(pi.forRef(reply.session.ref)?.prompts.map((p) => p.text)).toEqual(["again"]);
-		expect(socket.events.some((event) => event.type === "snapshot" && event.handle === reply.session.handle)).toBe(true);
+		// A Pi fork moves the parent's process onto the fork (`#forkOnto`).
+		expect(socket.order).toEqual([
+			["ended", handle],
+			["sessions-changed", null],
+			["snapshot", reply.session.handle],
+			["reply", id],
+		]);
 	});
 
 	it("refuses an index no fork point names, and names the fork in a refusal after it exists", async () => {
@@ -850,10 +879,17 @@ describe("commands that name a handle (D31 point 9)", () => {
 		// Nothing above forked (D20).
 		expect(pi.forRef(PI_SESSION)?.forks).toEqual([]);
 
+		socket.clear();
 		const reply = await socket.refused("sessions/forkAndPrompt", { handle, index: 0, text: "again" });
 		expect(reply.code).toBe("backend_refused");
 		expect(reply.fork?.ref).toEqual({ backend: "pi", id: `${PI_SESSION.id}#fork-e1` });
 		expect(reply.fork?.handle).toEqual(expect.any(String));
+		expect(socket.order).toEqual([
+			["ended", handle],
+			["sessions-changed", null],
+			["snapshot", reply.fork?.handle],
+			["reply", reply.id],
+		]);
 	});
 
 	describe("a fork whose own start or prompt failed is named, and stays (D17, D30)", () => {
@@ -871,6 +907,11 @@ describe("commands that name a handle (D31 point 9)", () => {
 			const reply = await socket.refused("sessions/forkAndPrompt", { handle, index: 0, text: "again" });
 
 			expect([reply.code, reply.detail, reply.fork]).toEqual(["backend_refused", "not now", { ref: FORK, handle: expect.any(String) }]);
+			expect(socket.order).toEqual([
+				["sessions-changed", null],
+				["snapshot", reply.fork?.handle],
+				["reply", reply.id],
+			]);
 			const { session } = await socket.ok("sessions/attach", { ref: FORK });
 			expect(session.handle).toBe(reply.fork?.handle);
 		});
@@ -905,7 +946,7 @@ describe("commands that name a handle (D31 point 9)", () => {
 			expect(reply.fork?.handle).not.toBe(handle);
 			// The parent's handle ends, and the refusal follows a view of the fork,
 			// so a client moving to the fork finds it live (D30).
-			expect(socket.frames.map((frame) => (frame.type === "reply" ? ["reply", frame.id] : [frame.event.type, "handle" in frame.event ? frame.event.handle : null]))).toEqual([
+			expect(socket.order).toEqual([
 				["ended", handle],
 				["sessions-changed", null],
 				["snapshot", reply.fork?.handle],
