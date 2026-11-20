@@ -3438,6 +3438,34 @@ parent's old branch (`agentpane--refuse-forking')."
     (should-not agentpane--sending)
     (should-not agentpane--fork-sent)))
 
+(ert-deftest agentpane-test-edit-send-parent-killed-gives-up-the-fork ()
+  "Killing the buffer whose edit's `sessions/forkAndPrompt' is out gives
+up the fork's attach with its own: the detach carries the request's
+token, so the helper binds no attachment of the fork for a buffer no
+one will make (ark3/agentpane#63), and none is made when the answer
+comes.  Once the fork's snapshot has made the fork's buffer, holding
+that token as its own attach, the kill leaves the token to it."
+  (dolist (snapshot-first '(nil t))
+    (agentpane-test--editing "codex"
+      (setq agentpane--handle "h-parent"
+            agentpane--attach-sent 7
+            hold '(sessions/forkAndPrompt))
+      (agentpane-send)
+      (let ((token agentpane--fork-sent)
+            (forked '(:backend "codex" :id "fork")))
+        (when snapshot-first
+          (agentpane--on-notification
+           agentpane--connection 'session/snapshot
+           (list :session forked :handle "h-fork" :token token :nodes []))
+          (should (agentpane--buffer-for forked)))
+        (setq sent nil)
+        (kill-buffer (current-buffer))
+        (should (equal sent `((sessions/detach :session (:backend "codex" :id "parent")
+                                               :handle "h-parent"
+                                               :tokens ,(if snapshot-first [7] (vector token 7))))))
+        (funcall (cdr (pop held)) t)
+        (should (eq (and (agentpane--buffer-for forked) t) snapshot-first))))))
+
 (ert-deftest agentpane-test-edit-opens-nothing-while-a-send-is-in-flight ()
   "No edit opens while a send from the buffer is in flight, whether pressed
 then or pressed before and its fork points answering then: the region

@@ -3096,7 +3096,12 @@ one a buffer it absorbed sent, save those a close of its has released
 \(`agentpane--tokens-sent'), and the helper gives up each such attach no
 snapshot has answered yet, and no other: `agentpane-refetch' attaches a
 buffer already holding a handle, and one killed then must still give up
-its own attach.  Until OW-wukako the helper gave up every attach of the
+its own attach.  So it carries that of an edit's `sessions/forkAndPrompt'
+still out (`agentpane--fork-sent'), until the fork's snapshot has made
+the buffer holding it as its own attach: a buffer killed mid-edit left
+the helper attached to the fork, with no buffer made for it, since the
+snapshot finds no parent (`agentpane--fork-answered').
+Until OW-wukako the helper gave up every attach of the
 ref instead, so a buffer killed while holding the handle left another
 buffer's attach of the same ref in flight beside it not attached
 \(OW-jofodu).  Each token answered under a handle releases its claim
@@ -3154,16 +3159,19 @@ standing raised the indicator for a turn from elsewhere.  For a Pi
 fork's parent it ends a watch not yet seen streaming, which the abort
 before the fork did not reach; see `agentpane--watch-turn'."
   (agentpane--watch-forget agentpane--handle)
-  (when (and agentpane--connection (jsonrpc-running-p agentpane--connection)
-             (agentpane--tokens-sent))
-    (condition-case err
-        (agentpane--request 'sessions/detach
-                            (append (list :session (agentpane--ref agentpane--session))
-                                    (and agentpane--handle
-                                         (list :handle agentpane--handle))
-                                    (list :tokens (vconcat (agentpane--tokens-sent))))
-                            #'ignore t)
-      (error (message "agentpane: sessions/detach failed: %s" (error-message-string err))))))
+  (let ((tokens (if (and agentpane--fork-sent
+                         (not (agentpane--buffer-sent agentpane--fork-sent)))
+                    (cons agentpane--fork-sent (agentpane--tokens-sent))
+                  (agentpane--tokens-sent))))
+    (when (and agentpane--connection (jsonrpc-running-p agentpane--connection) tokens)
+      (condition-case err
+          (agentpane--request 'sessions/detach
+                              (append (list :session (agentpane--ref agentpane--session))
+                                      (and agentpane--handle
+                                           (list :handle agentpane--handle))
+                                      (list :tokens (vconcat tokens)))
+                              #'ignore t)
+        (error (message "agentpane: sessions/detach failed: %s" (error-message-string err)))))))
 
 (defvar-local agentpane--composer nil
   "This transcript's composer buffer, once `agentpane-prompt' has made one.")
@@ -3200,8 +3208,9 @@ while it has not answered, or nil.
 The snapshot carrying it binds the fork's buffer, which
 `agentpane--notified-buffer' makes for it, as the snapshot answering an
 attach binds the buffer that sent it (`sessions/forkAndPrompt' in
-src/emacs/protocol.ts).  It is also the one record of that request being
-out: while it is, nothing attaches this buffer
+src/emacs/protocol.ts), and until it has, a kill of this buffer gives
+that attach up (`agentpane--detach').  It is also the one record of that
+request being out: while it is, nothing attaches this buffer
 \(`agentpane--refuse-forking'), as while `agentpane--forking' holds for
 `agentpane-fork'.")
 
