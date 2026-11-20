@@ -60,8 +60,6 @@ CODEX_HOME="$CODEX_SMOKE_HOME" PORT="$SMOKE_PORT" \
 SERVER_PID=$!
 ```
 
-The calls below read the API token from `~/.ssh/agentpane-token`, which is the server's own token only when the server runs outside `sbox`, since a server started inside it creates a throwaway token in its own tmpfs `~/.ssh`.
-
 Once the server reports that it is listening, confirm the built SPA is being
 served as a browser navigation:
 
@@ -72,96 +70,24 @@ curl --fail --silent --show-error \
   | grep '<div id="app"></div>'
 ```
 
-Open one SSE stream before creating a session and retain it across the turn:
-
-```bash
-AUTH="Authorization: Bearer $(cat ~/.ssh/agentpane-token)"
-SSE_LOG="$(mktemp /var/tmp/agentpane-live-sse-XXXXXX.log)"
-curl --no-buffer --silent --show-error -H "$AUTH" \
-  "http://127.0.0.1:$SMOKE_PORT/api/events" >"$SSE_LOG" &
-SSE_PID=$!
-
-CREATE_RESPONSE="$(curl --fail --silent --show-error -H "$AUTH" \
-  -H 'content-type: application/json' \
-  -d "{\"cwd\":\"$WORKSPACE\",\"backend\":\"codex\"}" \
-  "http://127.0.0.1:$SMOKE_PORT/api/sessions")"
-VIRTUAL_ID="$(jq -r '.ref.id' <<<"$CREATE_RESPONSE")"
-ENCODED_VIRTUAL_ID="$(jq -rn --arg value "$VIRTUAL_ID" '$value|@uri')"
-
-ATTACH_RESPONSE="$(curl --fail --silent --show-error -H "$AUTH" \
-  "http://127.0.0.1:$SMOKE_PORT/api/sessions/codex/$ENCODED_VIRTUAL_ID")"
-CODEX_ID="$(jq -r '.session.ref.id' <<<"$ATTACH_RESPONSE")"
-ENCODED_CODEX_ID="$(jq -rn --arg value "$CODEX_ID" '$value|@uri')"
-SESSION_URL="http://127.0.0.1:$SMOKE_PORT/api/sessions/codex/$ENCODED_CODEX_ID"
-```
-
-Submit a text-only prompt, then inspect the SSE log structurally. Do not assert
-on live model wording: look for multiple `upsert` events and a lifecycle
-`snapshot` or `status` whose `isStreaming` value returns to `false`.
-
-```bash
-curl --fail --silent --show-error -H "$AUTH" \
-  -H 'content-type: application/json' \
-  -d '{"text":"Do not use tools. Write one sentence of at least 120 words explaining why deterministic tests are useful."}' \
-  "$SESSION_URL/prompt"
-
-grep '^data: ' "$SSE_LOG" | sed 's/^data: //' \
-  | jq -c 'select(.type == "upsert" or .type == "snapshot" or .type == "status")'
-```
-
-To test reconnect, stop only the curl process started above, start a new SSE
-request, and verify its opening events include a complete `snapshot`. Compare
-the server-scoped process tree before and after; the native `codex app-server`
-PID must be unchanged.
-
-```bash
-kill "$SSE_PID"
-wait "$SSE_PID" 2>/dev/null || true
-pstree -ap "$SERVER_PID"
-
-SSE_LOG_2="$(mktemp /var/tmp/agentpane-live-sse-reconnect-XXXXXX.log)"
-curl --no-buffer --silent --show-error -H "$AUTH" \
-  "http://127.0.0.1:$SMOKE_PORT/api/events" >"$SSE_LOG_2" &
-SSE_PID_2=$!
-```
-
-For abort, submit work deliberately long enough to remain active, wait for
-`isStreaming:true`, then abort and require the following lifecycle state to be
-`false`:
-
-```bash
-curl --fail --silent --show-error -H "$AUTH" \
-  -H 'content-type: application/json' \
-  -d '{"text":"Do not use tools. Write a long, detailed handbook on growing vegetables in a home garden. Write twenty chapters, each under its own title and each at least 400 words long, covering in order: planning the plot, soil testing, soil preparation, raised beds, choosing varieties, starting seeds indoors, transplanting, direct sowing, watering, mulching, sunlight and siting, fertilising, composting, companion planting, pest control, disease control, weeding, crop rotation, harvesting, and storing the harvest. Write every chapter in full and do not summarise or abbreviate any of them."}' \
-  "$SESSION_URL/prompt"
-
-curl --fail --silent --show-error -H "$AUTH" -X POST "$SESSION_URL/abort"
-```
-
-This is the prompt `LONG_PROMPT` in `resources/probes/agentpane_live_support.py` holds; the integers 1 through 10000 this step asked for until OW-sofige drew a turn that ended on its own holding 76 characters of reply on `codex-cli 0.157.1` with `gpt-5.6-luna`, which is not long enough to remain active.
+The rest of the run goes over the socket, which since ark3/agentpane#55 is the only thing the server answers besides the bundle (D31).
+Drive it from a Bun script through `AgentpaneSocket` in `resources/probes/agentpane_live_support.ts`, as the harness does: it says `hello` with the token from `~/.ssh/agentpane-token`, which is the server's own token only when the server runs outside `sbox`, since a server started inside it creates a throwaway token in its own tmpfs `~/.ssh`.
+Create a session, prompt it by the handle the create answered, and read the events structurally rather than for wording: several `upsert`s, and a `status` whose `isStreaming` returns to `false`.
+For abort, prompt with `LONG_PROMPT` from the same module, wait for `isStreaming: true`, abort by the handle, and require the next status to say `false`; for reconnect, close the socket and open another, whose opening snapshot carries the transcript.
 
 Finally, send `SIGTERM` only to the server started for this run, wait for it,
-and confirm the native Codex PID previously found beneath it no longer exists.
-Use the durable harness above when a machine-checked process assertion is
-required: it walks `/proc` recursively from its own server PID and never
-inspects or kills unrelated Codex processes.
+and confirm the native Codex PID beneath it no longer exists. Use the durable
+harness above when a machine-checked process assertion is required: it walks
+`/proc` recursively from its own server PID and never inspects or kills
+unrelated Codex processes. Then remove only this run's temporary files:
 
 ```bash
-kill "$SSE_PID_2"
-wait "$SSE_PID_2" 2>/dev/null || true
 kill -TERM "$SERVER_PID"
 wait "$SERVER_PID"
-```
-
-After the server and SSE curl have stopped, remove only this run's temporary
-files:
-
-```bash
 case "$CODEX_SMOKE_HOME" in
   /var/tmp/agentpane-live-codexhome-*) rm -rf -- "$CODEX_SMOKE_HOME" ;;
 esac
-rm -f -- "$SERVER_LOG" "$SSE_LOG"
-test -z "${SSE_LOG_2:-}" || rm -f -- "$SSE_LOG_2"
+rm -f -- "$SERVER_LOG"
 ```
 
 ## Observed Codex results
@@ -5242,6 +5168,18 @@ In the fork-first-turn probe, the create answered a Pi JSONL ref with no file on
 Before any prompt, `sessions/forkPoints` answered no points, and a fork-and-prompt at index 9999 was refused `not_a_fork_point` with nothing sent to Pi but two `get_fork_messages`; in the OW-tigaye run the fork route had passed an unknown entry to Pi and answered 500.
 A fork-and-prompt at the first user message, sent at 335 assistant characters before any assistant `message_end`, answered `started` in 0.20 s with the fork under its own handle and streaming; Pi's stdin read `clear_queue`, `abort`, `fork`, then the fork's `get_state`, `get_messages`, `get_entries`, `get_available_models` and `prompt`, the stop-first order of ark3/agentpane#47.
 The parent's reply ended `aborted` at 335 characters, and the fork's file was on disk at the reply, which now comes once the fork's prompt is admitted rather than at Pi's `fork` response.
+
+## HTTP after the routes went (ark3/agentpane#55)
+
+Run on the home server on 2026-11-19, on its system `bun 1.4.0`, against this checkout once the HTTP command routes, the event stream and `Bun.serve`'s `idleTimeout: 60` were gone (D31).
+A throwaway Bun script, kept outside the repo, started `bun src/server/index.ts` on a free loopback port with the production composition and the token in `~/.ssh/agentpane-token`, with no client bundle built; no session was attached, so no backend took part.
+
+**Only the upgrade answered under `/api`.**
+`GET /api/sessions`, `GET /api/events` and `POST /api/sessions`, each with the bearer token, answered 404 `not_found`; a plain `GET /api/socket` answered 426.
+`GET /` answered 404 too, since no bundle was built.
+
+**A socket left idle past Bun's default idle timeout stayed open.**
+After a `hello` and a `sessions/list`, both answered, the socket sat idle for 15 s, past the 10 s `idleTimeout` `Bun.serve` now runs at by default, and a `models/list` sent then was answered.
 
 ## HANDOFF findings 1–49
 

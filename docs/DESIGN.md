@@ -34,10 +34,11 @@ It is intent, not orders: where it names a specific file or type, that is verifi
 ## Architecture
 
 ```
-Browser (SPA, Svelte 5 + Vite)
-   │  REST:  static bundle, commands (prompt/abort/fork/set-model),
-   │         queries (sessions, models, fork points)
-   │  SSE:   one multiplexed stream — transcript snapshots, tail upserts
+Browser (SPA, Svelte 5 + Vite), or the Emacs helper
+   │  HTTP:       the static bundle, and the upgrade to the socket
+   │  WebSocket:  one per client (D31) — commands (prompt/abort/fork/set-model)
+   │              and queries (sessions, models, fork points) in; their replies
+   │              and every session's snapshots and tail upserts out, in order
    ▼
 One server process (Bun)
    ├── SessionIndex:    walks the Pi, Codex, and Claude Code session stores
@@ -49,7 +50,7 @@ One server process (Bun)
    ├── Backend adapter (per session):  Pi | Codex | Claude Code
    │      • owns the child's stdio
    │      • owns the transcript: maintains AgentMessage[] + isStreaming
-   └── serves the SPA + SSE + REST on one loopback port
+   └── serves the SPA + the socket on one loopback port
         │  (stdio pipes, sbox-transparent)
         ▼
    sbox-wrapped agent:  `sbox pi --mode rpc` | `sbox codex app-server` | `sbox claude -p ...`
@@ -58,7 +59,7 @@ One server process (Bun)
 
 ### Why the subprocess outlives the connection
 
-A browser refresh drops the event stream but must not kill the agent.
+A browser refresh drops the socket but must not kill the agent.
 A subprocess's lifetime is decoupled from any connection: the server, not the client, decides when it dies.
 Because the server owns the transcript (D3), reconnect is a *repaint*, not a lifecycle event — the client re-subscribes and receives a fresh snapshot.
 
@@ -80,7 +81,7 @@ D12 is decided but not yet built (OW-33, OW-34, OW-35); today only shutdown reap
 ### The shared interfaces
 
 - `src/shared/protocol.ts` — the wire contract (D11).
-  SSE event union, REST request/response types, the socket's frames (D31), `ROUTES`, `SessionRef`, `SessionSummary`.
+  The event union, the socket's frames and what each command takes and answers (D31), `SOCKET_PATH`, `SessionRef`, `SessionSummary`.
 - `src/server/adapters/types.ts` — `BackendAdapter`, which all adapters implement identically.
 
 Change these interfaces deliberately: each one joins several slices.
@@ -109,16 +110,18 @@ If you write another adapter, `ref` is not stable — fire `onRefChanged` where 
 - **Drive turns through `SessionManager.submit`, not `adapter.submit`.**
   That is where the prompt joins the session's queue (D24, OW-sewewe) and clears its error and its `virtual` flag.
   The rename above no longer depends on it: the manager hears it through `onRefChanged` whoever drove the turn.
-- **`SessionSummary.ref` from `GET /api/sessions/:backend/:id` is authoritative** and may differ from the ref in the URL, for the same reason.
+- **`SessionSummary.ref` in the reply to `sessions/attach` is authoritative** and may differ from the ref it was asked for, for the same reason.
 - **A client keys what it holds for a live session by its `handle`**, which every per-session event carries beside the ref and a rename never moves (D24, OW-suyinu), and takes the ref from the events as an attribute that may change under it.
   The browser's reducer does (OW-kimaya): an event under a known handle whose `session` is a new ref moves the view, the summary carrying that handle and the selection onto it.
   agentpane-mode does the same since OW-danifa, taking the ref from any notification under the handle; the one notification that can reach Emacs before the buffer that asked for it holds the handle is the snapshot that answers an attach, and the helper tags every such snapshot with the `token` agentpane-mode minted for that attach (OW-wukako; until then `askedFor`, the ref it asked for), by which `agentpane--notified-buffer` in `emacs/agentpane.el` finds the buffer that asked, which takes the handle from it.
   The attach's reply could not carry that link: as of jsonrpc.el 1.0.29 on Emacs 31.1, a reply to an asynchronous request that arrives while a synchronous one is outstanding is held back as an "anxious continuation" until that one returns, while notifications arriving meanwhile are handled at once (`docs/MANUAL_TESTING.md`, "jsonrpc.el runs an async reply after later notifications").
   No event says a rename, on either wire, since OW-mofuho retired the `renamed` event and the helper's `session/renamed` that forwarded it: the server sends a snapshot under the handle carrying the new ref.
-  A new ref under a handle a client already holds means one conversation took a new id, and nothing else does: the old id keeps working on REST routes indefinitely, so an in-flight POST is safe, but no *event* will ever carry it again, and a client is right to move its selection across.
+  A new ref under a handle a client already holds means one conversation took a new id, and nothing else does: the old id keeps working on every command that names a ref, indefinitely, so a request in flight across the change is safe, but no *event* will ever carry it again, and a client is right to move its selection across.
   A fork never sends one, on any backend (OW-suhoto) — a fork creates a second conversation under a handle of its own and the parent keeps its own id, so all a fork tells other clients is `sessions-changed`, and on Pi, whose fork moves the process off the parent, `ended` under the parent's handle (D26, OW-sodohi).
-- **`/api` rejects a non-loopback `Origin`** (D8).
-  Nothing to do from the app; it matters if you ever test the API from a page served from somewhere else.
+- **The socket's upgrade rejects a non-loopback `Origin`** (D8), **and its first frame must be a `hello` carrying the token** (D29, D31 point 5).
+  Nothing to do from the app; it matters if you ever drive the socket from a page served from somewhere else, or from a script, which reads the token from the file the server keeps it in (`resources/probes/agentpane_live_support.ts`).
+- **HTTP answers only the static bundle and the upgrade** (D31 point 1).
+  Every other path under `/api` is a 404, so there is nothing left to `curl`; a script speaks the socket.
 
 #### The renderer
 

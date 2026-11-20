@@ -88,7 +88,7 @@ The absolute paths below are evidence addresses on the work laptop, not portable
   - `src/server/process-pool.ts`, `attached-session.ts` — subprocess lifecycle / session-to-process binding
   - `src/client/fork-modal.ts`, `session-picker.ts` — fork UI, session list
   - `src/client/tool-renderers.ts` — 663 lines of coding-tool renderers, the clearest evidence for how much of this is ours to write either way
-  - Superseded by DESIGN decisions, useful only as contrast: `src/server/ws-handler.ts` + `src/client/ws-agent-adapter.ts` (WebSocket bridge — we use SSE, D2), `src/shared/jsonl-sync.ts` (SHA-256 delta sync — unnecessary on loopback, D3), and `patches/@mariozechner+pi-web-ui+0.55.3.patch` (see finding 14).
+  - Superseded by DESIGN decisions, useful only as contrast: `src/server/ws-handler.ts` + `src/client/ws-agent-adapter.ts` (its WebSocket RPC — D2 chose SSE and REST over it, and D31 later one WebSocket of agentpane's own), `src/shared/jsonl-sync.ts` (SHA-256 delta sync — unnecessary on loopback, D3), and `patches/@mariozechner+pi-web-ui+0.55.3.patch` (see finding 14).
   - **Borrow patterns, not files.**
     The client stack diverges entirely, and the server-side API has drifted ~20 minor versions.
 - **sbox** (the sandbox): `/home/asa0717/src/sandbox/sbox`.

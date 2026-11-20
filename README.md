@@ -52,6 +52,6 @@ bun run check
 ```
 
 Live runs against Pi, Codex, and Claude Code are recorded in [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
-The Pi and Codex smoke runs are reproducible from `resources/probes/agentpane_{codex,pi}_smoke.py`; they exercise the built client's reachability and the REST/SSE path with a real agent subprocess: create/attach, streaming, idle, reconnect, abort, and shutdown without an orphan.
+The Pi and Codex smoke runs are reproducible from `resources/probes/agentpane_{codex,pi}_smoke.ts`; they exercise the built client's reachability and the socket with a real agent subprocess: create/attach, streaming, idle, reconnect, abort, and shutdown without an orphan.
 
 **For what is left, see the [GitHub issues](https://github.com/ark3/agentpane/issues)**; the list is deliberately not repeated here.
