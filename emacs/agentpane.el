@@ -874,8 +874,10 @@ workspace.  The snapshot carrying TOKEN is about a buffer no one has
 made yet, since no transcript buffer sent the request, and is made for
 it (`agentpane--create-answered').  An entry stays when
 `agentpane-new-session' stops waiting on its request, by a quit or a
-timeout, so a snapshot that comes after still finds it; one whose create
-was refused stays too, and nothing ever matches it.")
+timeout, so a snapshot that comes after still finds it, and when the
+error it failed with carries no server code, which says nothing of
+whether the server made the session.  One whose create the server
+refused goes, since that create left nothing for a snapshot to be about.")
 
 (defvar agentpane--creating nil
   "The `token' of the `sessions/create' `agentpane-new-session' is waiting
@@ -4452,7 +4454,8 @@ model is read after that, as the browser reads it: the server answers
 \"codex adapter not started\" before one exists (measured 2026-09-22).
 The create is synchronous for the same reason the model list is; see
 `agentpane--read-model'.  A create the server refused leaves no session
-behind, and no buffer; one quit or timed out leaves its token waiting,
+behind, and no buffer, and its token waits for nothing; one quit or
+timed out leaves its token waiting,
 so the session's buffer is made when its snapshot comes, though not
 shown.  A reply with no snapshot having attached a buffer, which the
 helper sends only once it expects none, shows the session's buffer, not
@@ -4473,10 +4476,16 @@ in the echo area, and the effort read for it is never sent."
          (token (agentpane--attach-token))
          (summary (progn
                     (push (cons token cwd) agentpane--creates-sent)
-                    (let ((agentpane--creating token))
-                      (jsonrpc-request (agentpane--connection) 'sessions/create
-                                       (list :cwd cwd :backend backend :token token)
-                                       :timeout agentpane--spawn-timeout))))
+                    (condition-case err
+                        (let ((agentpane--creating token))
+                          (jsonrpc-request (agentpane--connection) 'sessions/create
+                                           (list :cwd cwd :backend backend :token token)
+                                           :timeout agentpane--spawn-timeout))
+                      (jsonrpc-error
+                       ;; Only the server's code says the create left nothing.
+                       (when (plist-get (alist-get 'jsonrpc-error-data (cdr err)) :error)
+                         (setq agentpane--creates-sent (assq-delete-all token agentpane--creates-sent)))
+                       (signal (car err) (cdr err))))))
          (buffer (or (agentpane--buffer-sent token)
                      (agentpane--token-buffer cwd (plist-get summary :ref) token))))
     (setq agentpane--creates-sent (assq-delete-all token agentpane--creates-sent))

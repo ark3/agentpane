@@ -7927,14 +7927,22 @@ made and forget every create it left waiting."
          (dolist (buffer (buffer-list))
            (unless (memq buffer buffers) (kill-buffer buffer)))))))
 
-(ert-deftest agentpane-test-new-session-refused-makes-no-buffer ()
-  "A create the server refused leaves no session behind, so it makes no
-buffer, and the error reaches the caller (D30)."
-  (let ((ref '(:backend "codex" :id "virtual:1")))
-    (agentpane-test--with-create-stub
-        (lambda (_) (signal 'jsonrpc-error '("sbox: no git root")))
-      (should-error (agentpane-new-session "codex") :type 'jsonrpc-error)
-      (should-not (agentpane--buffer-for ref)))))
+(ert-deftest agentpane-test-new-session-refused-forgets-its-token ()
+  "A create the server refused leaves no session behind, so no snapshot
+will carry its token, and it waits for none: the error reaches the
+caller and `agentpane--creates-sent' is left empty (D30).  The refusal
+arrives as jsonrpc.el signals an error reply whose `data' carries the
+server's code, here the `internal_error' of a start that failed."
+  (agentpane-test--with-create-stub
+      (lambda (_)
+        (signal 'jsonrpc-error
+                '("request id=1 failed:"
+                  (jsonrpc-error-code . -32000)
+                  (jsonrpc-error-message . "sbox: Could not detect workspace")
+                  (jsonrpc-error-data . (:error "internal_error"
+                                         :detail "sbox: Could not detect workspace")))))
+    (should-error (agentpane-new-session "codex") :type 'jsonrpc-error)
+    (should-not agentpane--creates-sent)))
 
 (ert-deftest agentpane-test-new-session-quit-makes-the-buffer-at-its-snapshot ()
   "A create quit before its snapshot came leaves its token waiting: the
