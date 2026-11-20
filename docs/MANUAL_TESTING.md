@@ -1829,7 +1829,7 @@ So the tool window holds across two hands and four runs, and it has been empty i
 
 `resources/probes/agentpane_pi_steer_probe.py` carries the run.
 The first four runs were made from the `card/OW-yuyofu` worktree cut at `891d487`, at the probe's content as it landed here in `0b39003`; the probe has since been corrected twice by review, as the closing paragraphs of this section record, and the current file is the one to re-run.
-Re-run it with `python3 resources/probes/agentpane_pi_steer_probe.py`.
+Re-run it with `bun resources/probes/agentpane_pi_steer_probe.ts`, its port to the socket since ark3/agentpane#54.
 It passes `--model openrouter/deepseek/deepseek-v4.1-flash:high` through the create-session route rather than relying on `~/.pi/agent/settings.json` the way `agentpane_pi_smoke.py` does, and every run below read back `openrouter/deepseek/deepseek-v4.1-flash` off a `snapshot` event — the wire spelling, carrying the provider prefix the settings file's string does not, as OW-guvojo's section explains.
 `copied_credential_files` was `["auth.json", "models-store.json", "settings.json"]` in all six runs; this machine still has no `models.json` and no `trust.json`.
 One half of the pin is confirmed only in argv: the flag carries `:high` and the wire spelling does not, so what came back confirms the model and not the thinking level.
@@ -3692,6 +3692,7 @@ What `agentpane--refetch-sessions` does with the reply after, folding it into th
 So an unfiltered listing costs Emacs about a millisecond per picker per `sessions/changed`, two of which each turn sends, and the picker keeps asking for every session.
 
 To re-run, start a server as above, then from the checkout root run `emacs --batch -l /tmp/listing-size/e2e.el` on the file below, and `curl -s -o /dev/null -H "Authorization: Bearer $(cat ~/.ssh/agentpane-token)" -w '%{size_download} %{time_total}\n' http://127.0.0.1:4999/api/sessions` for the server alone.
+That route went with ark3/agentpane#55; the listing is `sessions/list` over the socket, which `resources/probes/agentpane_live_support.ts` speaks.
 
 ```elisp
 ;;; -*- lexical-binding: t; -*-

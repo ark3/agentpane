@@ -12,7 +12,7 @@
 ;; transcript buffer that is also a client (OW-gunuke).  It talks to the
 ;; helper `bun run src/emacs/main.ts' -- JSON-RPC 2.0 with Content-Length
 ;; framing over stdio, which Emacs's bundled `jsonrpc.el' speaks -- and the
-;; helper is a client of the agentpane HTTP API on loopback.  One helper per
+;; helper is a client of the agentpane server's socket on loopback.  One helper per
 ;; Emacs, started lazily and shared by every buffer.  Browsing spawns no
 ;; agent subprocess, since `sessions/preview' reads the stored transcript
 ;; and opens no stream; attaching a session does, on the server's side.
@@ -490,7 +490,7 @@ so the helper is forgotten once this returns (Emacs 31.1, jsonrpc.el
 The process is marked first as one this stopped, so the teardown lets
 each buffer go as `shutdown' rather than as the server letting go
 \(`agentpane--let-go'): the server keeps a turn running when a client's
-stream closes, so nothing is raised for it and its turn-done watch is
+socket closes, so nothing is raised for it and its turn-done watch is
 dropped (D25 point 4, OW-nuzoto)."
   (interactive)
   (when (and agentpane--connection (jsonrpc-running-p agentpane--connection))
@@ -629,7 +629,7 @@ elsewhere that watch had seen streaming, unless another prompt still
 claims it (OW-hiliti, OW-kakasu).  Until OW-hiliti the error handler answered
 nothing once the helper read as dead, so such a request failed as the
 death, running FAILED alone, and the reason the helper gave was never
-shown.  Only the status tells a refusal from the rest: with the server
+shown.  Only the server's code tells a refusal from the rest: with the server
 killed and a prompt in flight, the helper answered with the socket's
 error, a -32603 carrying no `data', and read as a refusal it abandoned
 the watch of a prompt whose turn was streaming, so the teardown raised
@@ -893,7 +893,7 @@ below; else nil.  A `session/detached' is only ever about the buffer
 holding its handle: no buffer holding the ref alone ever held it.
 Only a snapshot attaches the buffer it finds (`agentpane--attach-by'),
 and the helper sends nothing under a handle before the snapshot that
-introduces it (`introduce' in src/emacs/helper.ts).
+introduces it (`bind' in src/emacs/helper.ts).
 
 The snapshot that answers an attach carries `token', the one that attach
 carried (`sessions/attach' in src/emacs/helper.ts), and is about the

@@ -2908,7 +2908,7 @@ and says the message is not forkable."
   "A Pi fork, which leaves its parent detached on the server, detaches the
 parent from the helper, so the helper stops feeding a buffer that counts
 itself detached; and the parent buffer attaches again before compacting,
-since the compact route answers only for an attached session."
+since `sessions/compact' answers only for an attached session."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl"))
         (agentpane--connection 'connection))

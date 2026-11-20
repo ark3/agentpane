@@ -1,7 +1,8 @@
 /**
  * What the server answers over HTTP: the static bundle, and the upgrade to
  * the socket that carries everything else (D31). `src/shared/protocol.ts`
- * is the contract; the socket's half of it is `connect`, in `socket.ts`.
+ * is the contract; the socket's half of it is `connect`, which is
+ * `openConnection` in `socket.ts`.
  *
  * `createApp` has no runtime coupling: `fetch` is a plain
  * `(Request) => Response`, and `connect` takes a `send` and an `end`, so the

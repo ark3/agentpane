@@ -48,7 +48,7 @@ Live backend evidence, the probes and the Emacs client's tests are produced here
   Earlier that same day the directory was read-only, and Pi — unable to take the lock it needs merely to *read* that file — resolved no model at all, answering `get_state` with `"id": "unknown"`.
   That is the failure `AGENTS.md`'s model flag exists to make impossible, and it is why the flag stays mandatory even where the file is readable.
 - **`direnv` is the first link in every spawn, and the home server did not have it until 2026-09-13.**
-  All three backends spawn as `direnv exec <cwd> sbox -- <agent>` (D7, and `src/server/adapters/types.ts` states it as the contract), so without `direnv` on `PATH` the first prompt fails with HTTP 500 and `Failed to spawn <backend> (direnv): Executable not found in $PATH: "direnv"` -- every backend, not one.
+  All three backends spawn as `direnv exec <cwd> sbox -- <agent>` (D7, and `src/server/adapters/types.ts` states it as the contract), so without `direnv` on `PATH` no agent starts, each failing with `Failed to spawn <backend> (direnv): Executable not found in $PATH: "direnv"` -- every backend, not one.
   The home server now has the real thing, `direnv 2.37.1` at `/sbin/direnv`, installed by the owner on 2026-09-13 (OW-naribu).
   Verified through the production shape: `direnv exec /home/ark3/projects/agentpane sbox --dry-run -- claude --version` exits 0 and prints the `bwrap` line with `--permission-mode bypassPermissions` injected.
   This repository has no `.envrc` and needs none -- `direnv exec` against a directory without one runs the command and loads nothing.

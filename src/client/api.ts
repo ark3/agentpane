@@ -54,9 +54,9 @@ import {
 
 export interface EventConnection {
 	/**
-	 * Close the socket from this end. Every request still out on it rejects as
-	 * the connection lost, and `onDisconnect` does not fire: the caller is the
-	 * one leaving.
+	 * Close the socket from this end. Every request written to it and still
+	 * out rejects as the connection lost, one held unsent as `unreachable`,
+	 * and `onDisconnect` does not fire: the caller is the one leaving.
 	 */
 	close(): void;
 }

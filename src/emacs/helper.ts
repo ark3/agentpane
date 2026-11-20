@@ -50,9 +50,9 @@
  *
  * Every per-session notification carries the session's `handle` (D24,
  * OW-suyinu), taken from the raw event being answered, or from the attach
- * reply's summary for what `sessions/attach` says itself. Requests accept one
- * beside `session`, and send it nowhere, `sessions/detach` and
- * `sessions/close` included: those stop an attachment by the `tokens` they
+ * reply's summary for what `sessions/attach` says itself. A request on a live
+ * session sends its own to the server (D31 point 9). `sessions/detach` and
+ * `sessions/close` send none: those stop an attachment by the `tokens` they
  * carry, and the attachment under a handle goes once every token answered
  * under it is released (`forget` below, OW-nowihu). No notification says a
  * rename: agentpane-mode keys its buffers by the handle (OW-danifa) and
@@ -66,7 +66,7 @@
  * sends, and each snapshot that answers an attach carries that attach's
  * `token`, one such snapshot for each attach it answers, and agentpane-mode
  * binds it to the buffer that sent it, which takes the handle from it and
- * absorbs a buffer already holding the handle (`introduce` below,
+ * absorbs a buffer already holding the handle (`bind` below,
  * `agentpane--notified-buffer` and `agentpane--attach-by` in
  * emacs/agentpane.el). The helper keeps each attach it waits on by that
  * token, and a detach or close gives up only the attaches whose tokens it
@@ -437,8 +437,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * absorbed sent, save those a close of its already released
 	 * (`agentpane--detach` and `agentpane--absorb` in emacs/agentpane.el); a
 	 * token released twice releases nothing the second time. Each attach
-	 * they name that no snapshot has answered is abandoned, its reply
-	 * released if held, so no snapshot answers it later, and no other attach
+	 * they name that no snapshot has answered is abandoned,
+	 * so no snapshot answers it later, and no other attach
 	 * is: until OW-wukako every attach of the ref was, another buffer's on
 	 * the same ref included, so a buffer killed while holding the handle, or
 	 * a close carrying it, left the attach in flight beside it not attached

@@ -747,8 +747,9 @@ export class SessionManager {
 	 *    not it waits.
 	 *  - `attach`. It creates the adapter this queues on, and `#attaching`
 	 *    already collapses concurrent attaches. Only `sessions/attach`,
-	 *    `create` and a prompt that names a ref call it (D25, D30); every
-	 *    other command queues on an adapter already there, or is refused.
+	 *    `create`, a prompt that names a ref, and `forkAndPrompt` for the fork
+	 *    it made call it (D25, D30); every other command queues on an adapter
+	 *    already there, or is refused.
 	 *  - `close` and `disposeAll`. Teardown is ordered by `#disposing`,
 	 *    `PendingStart.torndown` and `#terminate`, and waits behind nothing. A
 	 *    verb still queued when it runs reaches the disposed adapter, as an
@@ -770,8 +771,9 @@ export class SessionManager {
 	 *
 	 * A verb sent for a `handle` runs only on the container under it, and only
 	 * while that container is still in the table, at the call and again when
-	 * the verb runs; otherwise it is refused with `HandleEndedError` (D30). The
-	 * prompt names one over HTTP, and every verb does over the socket (D31). So a
+	 * the verb runs; otherwise it is refused with `HandleEndedError` (D30). Every
+	 * command on a live session names one (D31 point 9), and a prompt naming a
+	 * ref is sent for the handle its attach landed on (`attachAndSubmit`). So a
 	 * close that lands while it waits in the queue refuses it, where without a
 	 * handle it reaches the disposed adapter, as above.
 	 */

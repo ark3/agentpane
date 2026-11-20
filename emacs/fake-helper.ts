@@ -14,7 +14,7 @@
  * both in ORDER -- `outer-first` (the preview, then the listing 200ms
  * later) or `inner-first`.  ORDER `lists-reversed` instead holds each odd
  * `sessions/list` until the next one arrives and answers that one first,
- * as the real helper may when two of its HTTP calls finish out of order.
+ * as the real helper may when two of its listings finish out of order.
  * Exits when stdin ends, as the real helper does.
  */
 

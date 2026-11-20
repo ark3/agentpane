@@ -101,7 +101,7 @@ Refuting something nobody would have tried costs twice: it argues with no one, a
 
 The Emacs client is first-class and stays at feature parity with the browser; set by the owner on 2026-09-23.
 A change that adds or changes a user-facing capability lands it in both clients or in neither.
-One that lands it in neither carries the capability onto both wires -- the HTTP API and the Emacs helper's JSON-RPC in `src/emacs/protocol.ts` -- and each client gets its own issue.
+One that lands it in neither carries the capability onto both wires -- the socket's commands in `src/shared/protocol.ts` and the Emacs helper's JSON-RPC in `src/emacs/protocol.ts` -- and each client gets its own issue.
 
 ## Issues
 

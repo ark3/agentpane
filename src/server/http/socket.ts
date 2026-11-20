@@ -51,8 +51,8 @@ export interface ConnectionContext {
 /**
  * Constant-time over equal lengths. A length mismatch still runs the same
  * comparison, of the token against itself, so the time spent says nothing
- * about how much of a guess was right. The bearer header's check and the
- * socket's first frame both use it (D29, D31 point 5).
+ * about how much of a guess was right. The socket's first frame is checked
+ * with it (D29, D31 point 5).
  */
 export function tokenMatches(given: string, expected: Buffer): boolean {
 	const bytes = Buffer.from(given, "utf8");

@@ -48,12 +48,6 @@
  * giving up that attach alone where they gave up every attach of the ref;
  * no snapshot answers an attach before its reply names the handle; and an
  * attach given up on while the stream's open is pending is never sent.
- * D31 raised it a fifteenth, moving the helper onto one socket: every
- * request on a live session names its `handle`, which the server refuses
- * once it has ended; an error the server refused carries its `code` and no
- * HTTP status; an attach's reply follows its snapshot, so nothing waits on
- * a snapshot or on an open; and a request that reached no server is refused
- * as such, where it answered `-32603`.
  * OW-linowe raised it a fifteenth: a `sessions/detach` or `sessions/close`
  * with no `handle` stops the attachment the snapshot answering its
  * `token`'s attach created, if that snapshot created one, where it stopped
@@ -86,6 +80,12 @@
  * sends its `handle` to the server, which prompts only the live session
  * under it, and one naming none carries a `token` and attaches its session
  * for the buffer that minted it, as `sessions/attach` does.
+ * D31 raised it a twenty-third, moving the helper onto one socket: every
+ * request on a live session names its `handle`, which the server refuses
+ * once it has ended; an error the server refused carries its `code` and no
+ * HTTP status; an attach's reply follows its snapshot, so nothing waits on
+ * a snapshot or on an open; and a request that reached no server is refused
+ * as such, where it answered `-32603`.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -202,16 +202,16 @@
  * The JSON-RPC 2.0 link the helper speaks (OW-refibu), `Content-Length`
  * framed over stdio as `jsonrpc-process-connection` expects. Emacs sends
  * requests; the helper answers each and pushes notifications on its own.
- * `session` in every payload is a ref, `{ backend, id }`, exactly as the HTTP
- * API's `SessionRef`; `handle` (string) is the session's
+ * `session` in every payload is a ref, `{ backend, id }`, exactly as the
+ * server's `SessionRef`; `handle` (string) is the session's
  * `SessionSummary.handle`, the name the server gave the live session: opaque,
  * never moved by a rename, and a different one for a fork (D24, OW-suyinu).
  * A rename is said by nothing else: the `session` of any notification under
  * a handle is the session's ref from then on.
  * Every per-session notification below carries it, absent only where the
- * server sent none, and every request that takes a `session` accepts one
- * beside it and sends it nowhere, `sessions/detach` and `sessions/close`
- * included (OW-nowihu), save `sessions/prompt`, which sends it on (D30); `compaction` is `"requesting"`, `"running"` or `null`;
+ * server sent none, and every request on a live session sends its own to the
+ * server, which refuses one that has ended (D31 point 9); `sessions/detach`
+ * and `sessions/close` accept one and send it nowhere (OW-nowihu); `compaction` is `"requesting"`, `"running"` or `null`;
  * `model` is a string or `null`; so is `effort`, the reasoning effort the
  * session's next turn runs at, `null` when the backend reports none; and so
  * is `unrestoredModel`, the model the session's store last recorded when the
@@ -222,7 +222,7 @@
  *
  * Requests, by `method`, with `params` and `result`:
  *
- * - `sessions/list` -- `{ cwd? }` -> array of `SessionSummary` (the HTTP
+ * - `sessions/list` -- `{ cwd? }` -> array of `SessionSummary` (the server's
  *   listing, unchanged: `ref`, `cwd`, `preview`, `createdAt`, `updatedAt`,
  *   `status`, `isStreaming`, `onDisk`, `name`, and `handle` for a session
  *   the server holds, virtual or attached). `name` (string or `null`) is
@@ -251,7 +251,7 @@
  *   ark3/agentpane#48 it carried no token, started nothing, and answered the
  *   bare ref.
  * - `models/list` -- `{ backend }` -> array of `{ id, label, efforts,
- *   defaultEffort }`, the HTTP listing unchanged. `efforts` is an array of
+ *   defaultEffort }`, the server's listing unchanged. `efforts` is an array of
  *   `{ id, description }`, the reasoning efforts that model accepts, empty
  *   when the model or its backend offers none -- and then there is no effort
  *   to choose; `defaultEffort` (string or `null`) is what the backend runs it
@@ -340,7 +340,7 @@
  *   sent, save those a `sessions/close` of its already carried; one
  *   carried twice releases nothing the second time. Each that no snapshot
  *   has answered and whose reply has not gone out yet is given up: its
- *   reply goes out, and nothing answers it. No other attach is, another of the
+ *   reply still goes out, and no snapshot answers it. No other attach is, another of the
  *   same ref included. Each answered under a handle releases its claim
  *   there, and the notifications under a handle stop once every attach
  *   answered under it is released, whichever buffer releases last
@@ -466,7 +466,7 @@
  *   a snapshot drew again goes with it; one Emacs never drew is nothing to
  *   drop.
  * - `session/notice` -- `{ session, handle, notice }`. Something non-fatal the
- *   backend said (OW-tujiya), never a turn error: `notice` is the HTTP API's
+ *   backend said (OW-tujiya), never a turn error: `notice` is the server's
  *   `AgentNotice` unchanged -- `kind` (string, the backend's own name for
  *   it), `message` (string, the text to show, which may span lines, each
  *   drawn as a line), `details` (string or `null`, further guidance) and

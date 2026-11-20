@@ -93,7 +93,7 @@ inspection scoped to this run's server tree. It never invokes Codex.
 the model has to choose to call a tool. It passes; it is separated so the
 default run stays deterministic.
 
-It passes `--model` explicitly, through the create-session route's `model` field, defaulting to the `openrouter/deepseek/deepseek-v4.1-flash:high` that `AGENTS.md` pins, and records that flag in `model_flag` and `checks.model.flag_passed` beside the model and level read back off the wire (OW-yehisa).
+It passes `--model` explicitly, through `sessions/create`'s `model` field, defaulting to the `openrouter/deepseek/deepseek-v4.1-flash:high` that `AGENTS.md` pins, and records that flag in `model_flag` and `checks.model.flag_passed` beside the model and level read back off the wire (OW-yehisa).
 
 Its abort phase is the Codex harness's: it waits for 20000 characters of the long turn's own text and reports the length off that turn's messages alone (OW-sofige).
 Verified with the change: `pi` 0.87.1 on the home server, 2026-09-30, both bare and with `--tool-check`; see the same OW-sofige section.
