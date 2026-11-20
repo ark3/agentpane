@@ -30,26 +30,29 @@ export interface ControllerView {
 	state: ClientState;
 	draft: string;
 	connection: "connecting" | "connected" | "reconnecting";
+	/**
+	 * What the status line says: the latest of this controller's requests
+	 * still out that a gesture made, and `"idle"` with none. Like every flag
+	 * below it is read from that table at each publish (`flags`), and nothing
+	 * writes it (D31 point 7). An attach a newer selection has overtaken is
+	 * not read (OW-nizemu), nor a listing nobody pressed for (OW-dinuwu).
+	 */
 	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting" | "compacting" | "editing-externally";
 	/**
-	 * A prompt this controller sent is still in flight: `submit`'s single POST,
-	 * or `forkAndSubmit`'s one fork-and-prompt request (D30).
-	 * Those two own it between them, and both re-entrancy guards -- the one in
-	 * each of them, and `send()`'s in `App.svelte` -- read it (OW-kelede).
+	 * A prompt this controller sent is still out: `submit`'s, or
+	 * `forkAndSubmit`'s one fork-and-prompt request (D30). One send at a time
+	 * is read from it: both re-entrancy guards -- the one in each of them, and
+	 * `send()`'s in `App.svelte` -- read it (OW-kelede).
 	 *
-	 * `busy` cannot serve: it is one global slot every operation writes, and two
-	 * of them clear it out from under a live POST. `abort` publishes `"aborting"`
-	 * and then `"idle"` in its `finally`, and `attachAndSelect` does the same with
-	 * `"attaching"` -- so pressing Stop on a turn that is already streaming (D2
-	 * lets SSE precede the POST response) left `busy: "idle"` with the prompt
-	 * still outstanding, and a second press went through.
+	 * `busy` cannot serve: it names only the latest request out, so a Stop
+	 * pressed while a prompt is out reads `"aborting"`, and once the stop
+	 * answers, whatever is still out before it.
 	 */
 	sending: boolean;
 	/**
-	 * `editDraft`'s round trip through the external editor is out, owned by
-	 * `editDraft` alone, as `sending` is the prompt's and for the same reason:
-	 * `abort` and `attachAndSelect` write `busy` over its `"editing-externally"`
-	 * mid-trip, which read as idle and let a second editor open (OW-momejo).
+	 * `editDraft`'s round trip through the external editor is out, read as
+	 * `sending` is and for the same reason: `busy` names a later request over
+	 * it, which read as idle and let a second editor open (OW-momejo).
 	 *
 	 * It also holds the draft exclusively of a send and of an edit, as
 	 * `sending` holds it against the editor: `submit` and `forkAndSubmit`
@@ -62,7 +65,7 @@ export interface ControllerView {
 	error: string | null;
 	/** Live options for the selected conversation only while it is `unprompted`. */
 	models: ModelInfo[];
-	/** Only the picker is disabled while this request is in flight. */
+	/** A model set for the selected session is out; only the picker is disabled for it. */
 	modelSetting: boolean;
 	/** The effort select's own flag, as `modelSetting` is the model picker's. */
 	effortSetting: boolean;
@@ -130,6 +133,20 @@ export interface ControllerView {
 }
 
 export type PaneMode = "live" | "preview" | "loading";
+
+/** The view's fields read from the requests still out, which `publish` takes from nobody. */
+type Flag = "busy" | "sending" | "editingExternally" | "modelSetting" | "effortSetting";
+
+/**
+ * One of this controller's requests still out, as far as the view reads it
+ * (D31 point 7). Each is added as its request goes out and removed as it
+ * settles, in the method that made it. A handle says which session's flag
+ * it raises; an attach's intent, which selection it was made under.
+ */
+type Outstanding =
+	| { kind: "listing" | "submitting" | "aborting" | "compacting" | "editing-externally" }
+	| { kind: "attaching"; intent: number }
+	| { kind: "setting-model" | "setting-effort"; handle: string };
 
 /**
  * What the pane shows for the selected session, derived by a fixed precedence
@@ -405,22 +422,15 @@ export function createController(
 	let disposed = false;
 	let started = false;
 	let selectionIntent = 0;
-	/**
-	 * The selection intent the `"attaching"` on the view was published under:
-	 * `attachAndSelect`, its only writer, which `create` goes through too, sets it as it writes it,
-	 * and `publish` returns `busy` to idle once a newer intent ends that claim
-	 * (OW-nizemu).
-	 */
-	let attachingIntent = 0;
 	let modelLoadStartedForSelection: number | null = null;
+	/** The requests still out, oldest first -- see `Outstanding`. */
+	const outstanding = new Set<Outstanding>();
 	/**
 	 * This and every per-session set and map below are keyed by the session's
 	 * handle (D24, OW-kimaya), which a rename never moves, so none of them
 	 * tracks one: the ref a request was sent on may be renamed while it is in
 	 * flight, and the handle it was keyed by still names the same session.
 	 */
-	const pendingModelSets = new Set<string>();
-	const pendingEffortSets = new Set<string>();
 	let refreshInFlight: Promise<void> | undefined;
 	/** The one listing owed to callers that arrived while `refreshInFlight` was out -- see `refreshSessions`. */
 	let refreshOwed: Promise<void> | undefined;
@@ -444,22 +454,20 @@ export function createController(
 	 * is a preview failure no longer on its loading pane (OW-bilogo), and a
 	 * detached-loading pane gets its preview fetched.
 	 *
-	 * An `"attaching"` whose intent a newer selection ended goes back to idle
-	 * here too (OW-nizemu): the attach or create that wrote it clears `busy` in
-	 * its `finally` only while its intent stands, so once superseded nothing
-	 * else would, and "Opening session…" stayed up with `editDraft` refusing
-	 * until some later action reset `busy`. Settled here rather than at each
-	 * bump, so no bump can forget it, and riding the superseding gesture's own
-	 * publish rather than adding one: a publish of its own between `preview`'s
-	 * bump and its read becoming the click's asked a read of the row being
-	 * left, under the click's intent, whose `gone` cleared the selection. Every
-	 * bump publishes at once but the fork's, whose `busy` is its own
-	 * `"submitting"` by then.
+	 * The flags are read here from the requests still out (`flags`), so an
+	 * `"attaching"` whose intent a newer selection ended stops reading at the
+	 * next publish (OW-nizemu): once superseded, "Opening session…" stayed up
+	 * with `editDraft` refusing until some later action reset `busy`. That
+	 * rides the superseding gesture's own publish rather than adding one: a
+	 * publish of its own between `preview`'s bump and its read becoming the
+	 * click's asked a read of the row being left, under the click's intent,
+	 * whose `gone` cleared the selection. Every bump publishes at once but the
+	 * fork's, whose `busy` is its own `"submitting"` by then.
 	 */
-	function publish(next: Partial<ControllerView>): void {
+	function publish(next: Partial<Omit<ControllerView, Flag>>): void {
 		if (disposed) return;
 		view = { ...view, ...next };
-		if (view.busy === "attaching" && attachingIntent !== selectionIntent) view = { ...view, busy: "idle" };
+		view = { ...view, ...flags() };
 		const mode = paneMode(view);
 		if (view.preview !== null && mode !== "preview") view = { ...view, preview: null };
 		const failure = view.previewFailure;
@@ -634,8 +642,43 @@ export function createController(
 		return error instanceof Error ? error.message : String(error);
 	}
 
-	function busyIs(value: ControllerView["busy"]): boolean {
-		return view.busy === value;
+	/** The view's flags, as the requests still out say them -- see `ControllerView.busy`. */
+	function flags(): Pick<ControllerView, Flag> {
+		const selected = handleOf(view.state, view.state.selected);
+		const read: Pick<ControllerView, Flag> = { busy: "idle", sending: false, editingExternally: false, modelSetting: false, effortSetting: false };
+		for (const entry of outstanding) {
+			switch (entry.kind) {
+				case "setting-model":
+					read.modelSetting ||= entry.handle === selected;
+					continue;
+				case "setting-effort":
+					read.effortSetting ||= entry.handle === selected;
+					continue;
+				case "attaching":
+					if (entry.intent !== selectionIntent) continue;
+					break;
+				case "submitting":
+					read.sending = true;
+					break;
+				case "editing-externally":
+					read.editingExternally = true;
+					break;
+			}
+			read.busy = entry.kind;
+		}
+		return read;
+	}
+
+	/** Whether a request of `kind` for the session under `handle` is still out. */
+	function outFor(kind: "setting-model" | "setting-effort", handle: string): boolean {
+		for (const entry of outstanding) if (entry.kind === kind && entry.handle === handle) return true;
+		return false;
+	}
+
+	/** Take a settled request out of `outstanding`, and publish what that changes. */
+	function settled(entry: Outstanding): void {
+		outstanding.delete(entry);
+		publish({});
 	}
 
 	/**
@@ -719,16 +762,6 @@ export function createController(
 		return false;
 	}
 
-	function modelSettingForSession(ref: SessionRef | null): boolean {
-		const handle = handleOf(view.state, ref);
-		return handle !== undefined && pendingModelSets.has(handle);
-	}
-
-	function effortSettingForSession(ref: SessionRef | null): boolean {
-		const handle = handleOf(view.state, ref);
-		return handle !== undefined && pendingEffortSets.has(handle);
-	}
-
 	/** Whether the selection still names the live session `handle`. */
 	function selects(handle: string): boolean {
 		return handleOf(view.state, view.state.selected) === handle;
@@ -781,14 +814,13 @@ export function createController(
 	// costs one extra listing and cannot pile requests up.
 	//
 	// A press that arrives meanwhile owns what a joining press owned before
-	// OW-sabova, and no more: the owed listing's failure, which it reports,
-	// and its idle, if `busy` still reads `"listing"`; silence is only for the
-	// listings nobody asked for. Without that, a Refresh during a broadcast
+	// OW-sabova, and no more: the owed listing's failure, which it reports;
+	// silence is only for the listings nobody asked for. Without that, a Refresh during a broadcast
 	// re-list -- likely, since turns broadcast -- would report nothing at all
 	// when its listing fails. It does not get the owed listing's start: that
-	// comes after the press, possibly after a gesture made in between, and a
-	// `busy: "listing", error: null` there would wipe an attach's unread error
-	// or write over its `"attaching"` -- the clobbering the paragraph above
+	// comes after the press, possibly after a gesture made in between, and
+	// announcing it there would wipe an attach's unread error and read
+	// `"listing"` over its `"attaching"` -- the clobbering the paragraph above
 	// forbids. Only a press that asks a listing itself announces it.
 	//
 	// The owed listing refreshes the preview on screen too, as every listing
@@ -820,7 +852,11 @@ export function createController(
 	 */
 	function listSessions(surface: boolean, owed = false): Promise<void> {
 		const request = (async () => {
-			if (surface && !owed) publish({ busy: "listing", error: null });
+			const entry: Outstanding | undefined = surface && !owed ? { kind: "listing" } : undefined;
+			if (entry) {
+				outstanding.add(entry);
+				publish({ error: null });
+			}
 			// Refresh has to move the transcript too, not just the sidebar (OW-76):
 			// before this, pressing it left a stale preview under a freshened list.
 			// Concurrent with the listing -- two independent reads -- and awaited so
@@ -835,7 +871,7 @@ export function createController(
 			} catch (error: unknown) {
 				if (!disposed && surface) publish({ error: errorMessage(error) });
 			} finally {
-				if (!disposed && surface && view.busy === "listing") publish({ busy: "idle" });
+				if (entry) settled(entry);
 			}
 			await previewRefresh;
 		})();
@@ -998,13 +1034,7 @@ export function createController(
 
 	/** Select a session this tab holds live, as a click on its row does. */
 	async function reselectLive(live: SessionRef, intent: number): Promise<void> {
-		publish({
-			state: { ...view.state, selected: live },
-			error: null,
-			models: [],
-			modelSetting: modelSettingForSession(live),
-			effortSetting: effortSettingForSession(live),
-		});
+		publish({ state: { ...view.state, selected: live }, error: null, models: [] });
 		// A session attached here while another was on screen, by a reconnect's
 		// opening snapshot say, was never asked whether its fork stops a turn.
 		const handle = handleOf(view.state, live);
@@ -1032,8 +1062,9 @@ export function createController(
 	 * the reply.
 	 */
 	async function attachAndSelect(ref: SessionRef | null, intent: number, request: () => Promise<LiveSessionSummary>): Promise<void> {
-		attachingIntent = intent;
-		publish({ busy: "attaching", error: null, models: [], forkIndices: null, modelSetting: modelSettingForSession(ref), effortSetting: effortSettingForSession(ref) });
+		const entry: Outstanding = { kind: "attaching", intent };
+		outstanding.add(entry);
+		publish({ error: null, models: [], forkIndices: null });
 		try {
 			const attached = await request();
 			const requested = ref ?? attached.ref;
@@ -1041,15 +1072,12 @@ export function createController(
 			// intent, and has nothing else to write.
 			if (!disposed && intent === selectionIntent) {
 				selectAttached(attached, true, requested);
-				publish({ modelSetting: modelSettingForSession(view.state.selected), effortSetting: effortSettingForSession(view.state.selected) });
 				await loadModelsForSelected(intent);
 			}
 		} catch (error: unknown) {
 			if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
 		} finally {
-			if (!disposed && intent === selectionIntent && view.busy === "attaching") {
-				publish({ busy: "idle" });
-			}
+			settled(entry);
 		}
 	}
 
@@ -1263,31 +1291,31 @@ export function createController(
 		async setModel(model) {
 			const selected = view.state.selected;
 			const handle = handleOf(view.state, selected);
-			if (!selected || handle === undefined || pendingModelSets.has(handle) || !unprompted(view.state.sessions[handle]?.messages)) return;
-			pendingModelSets.add(handle);
-			publish({ modelSetting: true, error: null });
+			if (!selected || handle === undefined || outFor("setting-model", handle) || !unprompted(view.state.sessions[handle]?.messages)) return;
+			const entry: Outstanding = { kind: "setting-model", handle };
+			outstanding.add(entry);
+			publish({ error: null });
 			try {
 				await api.setModel(handle, model);
 			} catch (error: unknown) {
 				if (!disposed && selects(handle)) publish({ error: errorMessage(error) });
 			} finally {
-				pendingModelSets.delete(handle);
-				if (!disposed) publish({ modelSetting: modelSettingForSession(view.state.selected) });
+				settled(entry);
 			}
 		},
 		async setEffort(effort) {
 			const selected = view.state.selected;
 			const handle = handleOf(view.state, selected);
-			if (!selected || handle === undefined || pendingEffortSets.has(handle) || !unprompted(view.state.sessions[handle]?.messages)) return;
-			pendingEffortSets.add(handle);
-			publish({ effortSetting: true, error: null });
+			if (!selected || handle === undefined || outFor("setting-effort", handle) || !unprompted(view.state.sessions[handle]?.messages)) return;
+			const entry: Outstanding = { kind: "setting-effort", handle };
+			outstanding.add(entry);
+			publish({ error: null });
 			try {
 				await api.setEffort(handle, effort);
 			} catch (error: unknown) {
 				if (!disposed && selects(handle)) publish({ error: errorMessage(error) });
 			} finally {
-				pendingEffortSets.delete(handle);
-				if (!disposed) publish({ effortSetting: effortSettingForSession(view.state.selected) });
+				settled(entry);
 			}
 		},
 		async submit() {
@@ -1309,7 +1337,7 @@ export function createController(
 			// click on Send, while the POST is in flight would issue a second
 			// identical prompt -- the server admits it and what the backend does
 			// with it is nobody's intent. Read off `sending` rather than `busy`,
-			// which an abort or an attach clears mid-POST (OW-kelede). Nor while
+			// which names an abort or an attach made meanwhile (OW-kelede). Nor while
 			// the external editor has the draft (`editingExternally`, OW-momejo).
 			if (view.sending || view.editingExternally) return null;
 			if (!view.draft) return null;
@@ -1318,7 +1346,9 @@ export function createController(
 			// admitting this prompt may clear: one raised while it is on its way
 			// is not one they saw (OW-jokoto).
 			const priorErrorId = view.state.sessions[handle]?.errorId ?? null;
-			publish({ busy: "submitting", sending: true, error: null });
+			const entry: Outstanding = { kind: "submitting" };
+			outstanding.add(entry);
+			publish({ error: null });
 			try {
 				const response = await api.prompt(selected, { text, priorErrorId, handle });
 				if (!disposed) {
@@ -1344,18 +1374,20 @@ export function createController(
 				if (!disposed) publish({ error: errorMessage(error) });
 				return null;
 			} finally {
-				publish({ sending: false, ...(view.busy === "submitting" ? { busy: "idle" } : {}) });
+				settled(entry);
 			}
 		},
 		async editDraft() {
 			if (view.busy !== "idle" || view.editingExternally) return;
 			// Never on text a send is still taking, as no edit opens on it in
-			// `App.svelte`'s `startEdit` (OW-kijuju): a click elsewhere or a stop
-			// returns `busy` to idle while a send is still out, and the answer
-			// would put an edited copy of sent text back under Send (OW-momejo).
+			// `App.svelte`'s `startEdit` (OW-kijuju): the answer would put an
+			// edited copy of sent text back under Send (OW-momejo). The check
+			// above covers it while `busy` reads the send, and this one is the rule's.
 			if (view.sending) return;
 			const text = view.draft;
-			publish({ busy: "editing-externally", editingExternally: true, error: null });
+			const entry: Outstanding = { kind: "editing-externally" };
+			outstanding.add(entry);
+			publish({ error: null });
 			try {
 				const edited = await api.editDraft({ text });
 				// No send and no edit starts while the editor is open
@@ -1384,7 +1416,7 @@ export function createController(
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
 			} finally {
-				if (!disposed) publish({ editingExternally: false, ...(busyIs("editing-externally") ? { busy: "idle" } : {}) });
+				settled(entry);
 			}
 		},
 		async forkAndSubmit(index, images) {
@@ -1413,7 +1445,9 @@ export function createController(
 			// prompts the fork, and the user ends up with both conversations
 			// (OW-miyemo).
 			const intent = selectionIntent;
-			publish({ busy: "submitting", sending: true, error: null });
+			const entry: Outstanding = { kind: "submitting" };
+			outstanding.add(entry);
+			publish({ error: null });
 			try {
 				// The request names the click-time handle, which a rename landing
 				// meanwhile leaves alone (D24). Where the backend
@@ -1471,7 +1505,7 @@ export function createController(
 				publish({ error: errorMessage(error) });
 				return null;
 			} finally {
-				publish({ sending: false, ...(view.busy === "submitting" ? { busy: "idle" } : {}) });
+				settled(entry);
 			}
 		},
 		async abort() {
@@ -1484,14 +1518,16 @@ export function createController(
 			if (paneMode(view) !== "live") return [];
 			const handle = handleOf(view.state, selected);
 			if (handle === undefined) return [];
-			publish({ busy: "aborting", error: null });
+			const entry: Outstanding = { kind: "aborting" };
+			outstanding.add(entry);
+			publish({ error: null });
 			try {
 				return (await api.abort(handle))?.queued ?? [];
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
 				return [];
 			} finally {
-				if (!disposed && view.busy === "aborting") publish({ busy: "idle" });
+				settled(entry);
 			}
 		},
 		async compact() {
@@ -1513,8 +1549,9 @@ export function createController(
 			// and the composer needs the acknowledgment either way (OW-natiha).
 			// Server status/snapshot events overwrite it from here on -- the request
 			// resolving is admission, not completion, so nothing here clears it.
+			const entry: Outstanding = { kind: "compacting" };
+			outstanding.add(entry);
 			publish({
-				busy: "compacting",
 				error: null,
 				state: setSessionCompaction(view.state, handle, "requesting"),
 			});
@@ -1543,7 +1580,7 @@ export function createController(
 					publish({ error: errorMessage(error), state });
 				}
 			} finally {
-				if (!disposed && view.busy === "compacting") publish({ busy: "idle" });
+				settled(entry);
 			}
 		},
 		async detach() {

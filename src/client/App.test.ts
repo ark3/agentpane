@@ -4673,7 +4673,7 @@ describe("App", () => {
 		await tick();
 		await controller.select(piSession);
 		await tick();
-		expect(controller.getView()).toMatchObject({ busy: "idle", sending: true });
+		expect(controller.getView()).toMatchObject({ busy: "submitting", sending: true });
 
 		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
 		await fireEvent.click(screen.getByRole("button", { name: "External Editor" }));

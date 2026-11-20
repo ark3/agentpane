@@ -2860,7 +2860,7 @@ describe("client controller", () => {
 	 * `"idle"` over the `"submitting"` of a prompt that is still outstanding.
 	 * The guards read the flag the two send paths own instead.
 	 */
-	it("refuses a second submit after an abort cleared busy under the first (OW-kelede)", async () => {
+	it("refuses a second submit after an abort answered under the first, and reads busy from the prompt still out (OW-kelede, D31 point 7)", async () => {
 		const api = new FakeApi();
 		const prompt = deferred<void>();
 		api.prompt.mockReturnValue(prompt.promise);
@@ -2873,7 +2873,8 @@ describe("client controller", () => {
 		await settle();
 
 		await controller.abort();
-		expect(controller.getView().busy).toBe("idle");
+		// The stop's answer once wrote idle over the prompt's `"submitting"`.
+		expect(controller.getView()).toMatchObject({ busy: "submitting", sending: true });
 		const second = controller.submit();
 
 		expect(api.prompt).toHaveBeenCalledOnce();
