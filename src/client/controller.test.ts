@@ -411,7 +411,9 @@ describe("client controller", () => {
 
 		expect(api.attach).toHaveBeenCalledWith(ref);
 		expect(controller.getView().state.selected).toEqual(attachedRef);
-		expect(controller.getView().state.summaries).toEqual([summary(attachedRef)]);
+		// The reply writes no row (D28): the startup listing's stands until the
+		// listing the attach's `sessions-changed` asks.
+		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
 	});
 
 	it("previews a stored session read-only, selecting it without attaching or spawning", async () => {
@@ -484,12 +486,9 @@ describe("client controller", () => {
 		await selectingFirst;
 
 		expect(controller.getView().state.selected).toEqual(secondRef);
-		// No listing has named either, and an attach reply writes no `status`
-		// (OW-wazija): the listing that follows each attach is what says attached.
-		expect(controller.getView().state.summaries).toEqual([
-			{ ...summary(secondRef), status: "detached" },
-			{ ...summary(firstRef), status: "detached" },
-		]);
+		// No listing has named either, and an attach reply writes no row (D28):
+		// the listing that follows each attach is what brings it.
+		expect(controller.getView().state.summaries).toEqual([]);
 	});
 
 	it("ignores a stale create response after a newer selection completes", async () => {
@@ -1857,24 +1856,28 @@ describe("client controller", () => {
 	// until the next listing, as a stored session's stale stripe does (D21):
 	// a detach asks no listing of its own. A click on the row reads `gone` and
 	// lands on the startup view, which is what makes it harmless (D26 point 6).
-	// The stream is down here, so no listing comes, and the click reads anyway;
-	// the session is created after the drop, which would otherwise have taken
-	// its view down (D25).
+	// The row is a listing's, as every row is (D28).
 	it("leaves the row of a detached session with nothing on disk to the next listing, and a click on it lands on the startup view", async () => {
 		const api = new FakeApi();
 		createRenamedAtAttach(api, false);
 		const controller = createController(api);
 		await controller.start();
-		api.drop();
+		api.open();
+		await settle();
 		await controller.create("/work", "pi");
+		api.emit(snapshotOf(createdRef));
+		api.listSessions.mockResolvedValue([{ ...summary(createdRef), onDisk: false }]);
+		await controller.refreshSessions();
 		api.listSessions.mockClear();
+		api.preview.mockRejectedValue(gone());
 
 		await controller.detach();
+		api.emit({ type: "ended", session: createdRef, handle: h(createdRef) });
 		await settle();
 		expect(api.listSessions).not.toHaveBeenCalled();
 		expect(controller.getView().state.summaries.map((item) => sessionKey(item.ref))).toContain(sessionKey(createdRef));
 
-		api.preview.mockRejectedValue(gone());
+		api.preview.mockClear();
 		await controller.preview(createdRef);
 
 		expect(api.preview).toHaveBeenCalledExactlyOnceWith(createdRef, expect.any(AbortSignal));
@@ -2543,7 +2546,7 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	it("ends selected on the fork the reply names, and lists it, attaching nothing itself (OW-hezidi, D30)", async () => {
+	it("ends selected on the fork the reply names, attaching nothing itself (OW-hezidi, D30)", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
@@ -2557,7 +2560,6 @@ describe("client controller", () => {
 		// The server attached the fork inside the operation.
 		expect(api.attach).not.toHaveBeenCalled();
 		expect(controller.getView().state.selected).toEqual(forkedRef);
-		expect(controller.getView().state.summaries.map((item) => item.ref)).toContainEqual(forkedRef);
 	});
 
 	/**
@@ -2610,7 +2612,6 @@ describe("client controller", () => {
 
 		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(controller.getView().state.selected).toEqual(other);
-		expect(controller.getView().state.summaries.map((item) => item.ref)).toContainEqual(forkedRef);
 		controller.dispose();
 	});
 
@@ -2678,12 +2679,16 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		const points = deferred<ForkPointsResponse>();
 		api.forkPoints.mockReturnValueOnce(points.promise);
+		// The attach's snapshot comes before its reply (D31 point 3).
+		api.attach.mockImplementationOnce(async (session) => {
+			api.emit(snapshotOf(session));
+			return summary(session);
+		});
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
 		expect(api.forkPoints).toHaveBeenCalledWith(h(ref));
 
-		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 		api.emit({ type: "status", session: renamed, handle: h(ref), seq: 2, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		points.resolve({ points: [{ id: "turn-1", text: "first", index: 0 }], forkStopsTurn: false });
 		await settle();
@@ -3438,30 +3443,6 @@ describe("client controller", () => {
 			expect(paneMode(controller.getView())).toBe("preview");
 			expect(controller.getView().preview).toEqual({ ref, turns });
 			expect(controller.getView().previewFailure).toBeNull();
-			controller.dispose();
-		});
-
-		// Stream up, the attach reply beats its snapshot (D2), and the preview
-		// read the detached-loading pane asks meanwhile fails first.
-		it("keeps an attach's selection when the preview read under its reply fails before the snapshot, and goes live at the snapshot (OW-bilogo)", async () => {
-			const api = new FakeApi();
-			const controller = createController(api);
-			await controller.start();
-			api.open();
-			await settle();
-			api.preview.mockRejectedValue(new Error("preview failed"));
-
-			await controller.select(ref);
-			await settle();
-
-			expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
-			expect(controller.getView().state.selected).toEqual(ref);
-			expect(paneMode(controller.getView())).toBe("loading");
-
-			api.emit(snapshotOf(ref));
-
-			expect(controller.getView().state.selected).toEqual(ref);
-			expect(paneMode(controller.getView())).toBe("live");
 			controller.dispose();
 		});
 

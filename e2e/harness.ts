@@ -209,8 +209,9 @@ const api: AgentpaneApi = {
 		return api.attach(REF);
 	},
 	async attach() {
-		// The snapshot an attach triggers arrives over SSE, not in the response.
-		queueMicrotask(() => snapshot(false));
+		// The snapshot an attach triggers arrives on the stream ahead of its
+		// reply, as the socket orders them (D31 point 3).
+		snapshot(false);
 		return summary();
 	},
 	async preview() {

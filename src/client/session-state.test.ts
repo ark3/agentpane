@@ -260,12 +260,14 @@ describe("client session state", () => {
 		expect(relisted.summaries).toEqual([detached]);
 	});
 
-	it("finds a ref's handle through the view carrying it, else the summary carrying it, and none for a preview", () => {
+	it("finds a ref's handle through the view carrying it alone, and none for a preview or a row (D31 point 3)", () => {
 		const live = stateAtSequence(ref, 1);
 		expect(handleOf(live, ref)).toBe(h(ref));
 
-		const attachedOnly: ClientState = { ...stateWithSelected(ref), summaries: [{ ...summary(ref), handle: h(ref) }] };
-		expect(handleOf(attachedOnly, ref)).toBe(h(ref));
+		// A listed row carries the handle of a session the server holds, which
+		// this tab holds no view of: nothing live here to address.
+		const listedOnly: ClientState = { ...stateWithSelected(ref), summaries: [{ ...summary(ref), handle: h(ref) }] };
+		expect(handleOf(listedOnly, ref)).toBeUndefined();
 
 		expect(handleOf(stateWithSelected(ref), ref)).toBeUndefined();
 		expect(handleOf(live, null)).toBeUndefined();

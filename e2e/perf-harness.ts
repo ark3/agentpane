@@ -159,23 +159,22 @@ const api: AgentpaneApi = {
 	async attach(ref: SessionRef) {
 		const id = ref.id.split("/").pop()!.replace(".jsonl", "");
 		const entry = sessionOf(id);
-		queueMicrotask(() => {
-			entry.seq += 1;
-			emit({
-				type: "snapshot",
-				session: entry.ref,
-				handle: entry.handle,
-				seq: entry.seq,
-				messages: [...entry.messages],
-				isStreaming: false,
-				compaction: null,
-				model: null,
-				effort: null,
-				unrestoredModel: null,
-				error: null,
-				errorId: null,
-				notices: [],
-			});
+		// Ahead of the reply, as the socket orders them (D31 point 3).
+		entry.seq += 1;
+		emit({
+			type: "snapshot",
+			session: entry.ref,
+			handle: entry.handle,
+			seq: entry.seq,
+			messages: [...entry.messages],
+			isStreaming: false,
+			compaction: null,
+			model: null,
+			effort: null,
+			unrestoredModel: null,
+			error: null,
+			errorId: null,
+			notices: [],
 		});
 		return summaries.find((s) => s.ref.id === ref.id) ?? summaryFor(id, 0);
 	},
@@ -344,7 +343,7 @@ const harness: PerfHarness = {
 			notices: [],
 		});
 		await controller!.select(refFor("a"));
-		// The attach snapshot arrives in a microtask; let it, and let layout settle.
+		// Let layout settle.
 		await new Promise((resolve) => setTimeout(resolve, 200));
 		flushSync();
 		observeTranscript();

@@ -77,15 +77,15 @@ function sameRef(left: SessionRef | null, right: SessionRef): boolean {
 }
 
 /**
- * The handle of the live session a ref names (D24): the view carrying that
- * ref, else the summary carrying it. The summary is the only holder in the
- * window after an attach reply lands and before its snapshot does; a preview
- * or a stored row has neither, and answers undefined.
+ * The handle of the live view a ref names (D24), or undefined for a preview
+ * or a stored row. Views alone answer: an attach's reply follows its
+ * snapshot on the socket (D31 point 3), so no window is left in which a
+ * reply knows a handle the stream has not brought.
  */
 export function handleOf(state: ClientState, ref: SessionRef | null): string | undefined {
 	if (ref === null) return undefined;
 	for (const [handle, view] of Object.entries(state.sessions)) if (sameRef(view.ref, ref)) return handle;
-	return state.summaries.find((summary) => summary.handle !== undefined && sameRef(summary.ref, ref))?.handle;
+	return undefined;
 }
 
 /** The live view a ref names, found through its handle; undefined for a preview. */
@@ -184,9 +184,11 @@ function updateSession(state: ClientState, handle: string, view: SessionView): C
  * (OW-vasubu, D26 point 5).
  *
  * With no view before the event -- a snapshot introducing one -- the old ref
- * is the one the summary carrying the handle holds, which an attach reply put
- * there before the snapshot landed. That is the only case that reads the
- * summaries, so a streaming token under an unchanged ref costs nothing here.
+ * is the one the summary carrying the handle holds, which a listing put
+ * there: a reconnect's opening snapshot of a session renamed during the
+ * outage (`onDisconnect` in `controller.ts`). That is the only case that
+ * reads the summaries, so a streaming token under an unchanged ref costs
+ * nothing here.
  */
 function followRef(state: ClientState, handle: string, previous: SessionView | undefined, to: SessionRef): ClientState {
 	const from = previous?.ref ?? state.summaries.find((summary) => summary.handle === handle)?.ref;

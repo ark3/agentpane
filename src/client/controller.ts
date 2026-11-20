@@ -153,14 +153,6 @@ export type PaneMode = "live" | "preview" | "loading";
  * a view kept the two paired by hand; three of them slipped, leaving a
  * composer over no view (OW-zivamo, OW-wazija, OW-tefigi) or a preview over a
  * live one (OW-tefigi).
- *
- * An attach reply can beat its own snapshot (D2), and that window is not
- * `live` either: nothing in the state tells it from a view a gap dropped, so
- * the Attach button stands until the snapshot lands -- over the preview the
- * user attached from, if one is stored, and otherwise over an empty pane,
- * whose preview `publish` may fetch meanwhile. Accepted at filing: the
- * server broadcasts an attach's snapshot before it replies, so the window is
- * the reordering D2 allows and usually nothing.
  */
 export function paneMode(view: Pick<ControllerView, "state" | "preview">): PaneMode | null {
 	const selected = view.state.selected;
@@ -496,10 +488,8 @@ export function createController(
 	 *
 	 * A failed read is never an answer (OW-bilogo): the pane stays loading and
 	 * the selection stands. A failure cannot be told from the outage that
-	 * caused it -- the read can fail as the server exits, before the tab hears
-	 * the stream drop -- and an attach whose reply beats its snapshot (D2) has
-	 * its selection to keep whatever the read found, since the snapshot makes
-	 * the pane live when it lands.
+	 * caused it: the read can fail as the server exits, before the tab hears
+	 * the socket close.
 	 *
 	 * The one exception is `gone` (`isGone`), which is the server answering,
 	 * not failing: the session is nowhere, so the selection clears onto the
@@ -649,50 +639,36 @@ export function createController(
 	}
 
 	/**
-	 * Put an attach reply's summary in the sidebar, in place of the row it
-	 * attached, keeping that row's `status` (OW-wazija). The listing owns
-	 * `status`, as it does for every other row: a reply that lands after the
-	 * stream dropped describes an agent the tab takes to be gone (D25 point 3),
-	 * and writing its `attached` lit the row until the reconnect's listing. A row
-	 * no listing has named yet -- a session created or forked here -- reads
-	 * `detached` until one does, which claims nothing; the attach broadcasts
-	 * `sessions-changed` before it replies, so that listing is already on its way.
+	 * Select the session an attach, a create or a fork-and-prompt answered
+	 * with, where `select` says the request still owns the selection, or the
+	 * selection already names the ref asked for. The reply writes nothing
+	 * else (D28): its snapshot was handled before it (D31 point 3), and the
+	 * row comes from the listing its `sessions-changed` asked.
 	 *
-	 * Only `status` is kept. The rest of the reply stands, `handle` above all:
-	 * `handleOf` falls back to it in the window before the snapshot, and
-	 * `followRef` pairs a snapshot that renamed the session through it.
+	 * The ref selected is the one the view under the reply's handle holds,
+	 * which an event handled after the reply may have renamed; a view a gap or
+	 * a close took meanwhile leaves the reply's own, and the pane reads
+	 * detached (`paneMode`).
 	 */
-	function replaceSummary(summary: SessionSummary, requested: SessionRef): ClientState {
-		const replaced = (item: SessionSummary) =>
-			sessionKey(item.ref) === sessionKey(summary.ref) || sessionKey(item.ref) === sessionKey(requested);
-		const listed = view.state.summaries.find((item) => sessionKey(item.ref) === sessionKey(summary.ref)) ??
-			view.state.summaries.find((item) => sessionKey(item.ref) === sessionKey(requested));
-		const summaries = view.state.summaries.filter((item) => !replaced(item));
-		return { ...view.state, summaries: [...summaries, { ...summary, status: listed?.status ?? "detached" }] };
-	}
-
-	function applyAttached(summary: SessionSummary, select: boolean, requested: SessionRef): void {
-		// By ref, not by handle: the ref asked for may have none yet -- a fork's
-		// has none until this reply puts the summary carrying it in place
-		// (OW-kimaya). The one `select: false` caller says why it keeps it.
+	function selectAttached(summary: LiveSessionSummary, select: boolean, requested: SessionRef): void {
+		// By ref, not by handle: the ref asked for may have been renamed by the
+		// time the reply lands, and the selection follows the ref (OW-kimaya).
+		// The one `select: false` caller says why it keeps it.
 		const takesSelection = select ||
 			(view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(requested));
-		const selected = takesSelection ? summary.ref : view.state.selected;
+		const current = view.state.sessions[summary.handle]?.ref ?? summary.ref;
+		const selected = takesSelection ? current : view.state.selected;
 		// The error slot is gated on `select`, because the caller that passes
 		// `false` has no standing over it: a `forkAndSubmit` the user has clicked
 		// away from, which under D17 still lands its prompt but owns neither the
 		// error slot nor the preview of the session they went to (OW-miyemo).
-		//
-		// The selection may land on a session this tab holds no view of -- the
-		// snapshot is still to come (D2), or a gap or a drop took it -- and the
-		// pane then reads detached, whatever preview stands (`paneMode`).
 		publish({
-			state: { ...replaceSummary(summary, requested), selected },
+			state: { ...view.state, selected },
 			...(select ? { error: null } : {}),
 		});
 		// Only where the transcript is about to be drawn with Edit controls on it
 		// (OW-roveze).
-		if (takesSelection) refreshForkPoints(summary.ref);
+		if (takesSelection) refreshForkPoints(current);
 	}
 
 	/**
@@ -1061,14 +1037,12 @@ export function createController(
 		try {
 			const attached = await request();
 			const requested = ref ?? attached.ref;
+			// An older attach no longer owns the selection after a newer user
+			// intent, and has nothing else to write.
 			if (!disposed && intent === selectionIntent) {
-				applyAttached(attached, true, requested);
+				selectAttached(attached, true, requested);
 				publish({ modelSetting: modelSettingForSession(view.state.selected), effortSetting: effortSettingForSession(view.state.selected) });
 				await loadModelsForSelected(intent);
-			} else if (!disposed) {
-				// An older attach is still useful list state, but it no longer owns
-				// selection after a newer user intent.
-				publish({ state: replaceSummary(attached, requested) });
 			}
 		} catch (error: unknown) {
 			if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
@@ -1455,13 +1429,12 @@ export function createController(
 				// the user has clicked away from must leave the counter alone:
 				// bumping past their own click strands it, leaving their
 				// `attachAndSelect` in its `else` branch with the selection never set
-				// (D17, OW-miyemo). The reply can still land before the fork's
-				// snapshot, as an attach's can (D2), and `applyAttached` is the join
-				// that covers it; one landing after a click onto the fork's own row
-				// moves the selection onto the live session there (OW-tatebi).
+				// (D17, OW-miyemo). The fork's snapshot was handled before the reply
+				// (D31 point 3); a reply landing after a click onto the fork's own
+				// row moves the selection onto the live session there (OW-tatebi).
 				const takesSelection = intent === selectionIntent;
 				if (takesSelection) ++selectionIntent;
-				applyAttached(forked.session, takesSelection, forked.session.ref);
+				selectAttached(forked.session, takesSelection, forked.session.ref);
 				// The prompt landed, so the composer must stop offering text that has
 				// already been sent -- but only if it is still that text. The
 				// textarea stays live through the request, so anything typed while
@@ -1488,8 +1461,7 @@ export function createController(
 				// rather than forking the parent again; the draft stays for that send.
 				// A fork whose own start failed has no handle, and the pane reads it
 				// detached, as `paneMode` reads any selection this tab holds no view
-				// of; one whose view has not come yet reads so until its snapshot,
-				// which refreshes its fork points as any snapshot of the selection does.
+				// of; one that started had its snapshot handled before the refusal.
 				const fork = error instanceof ApiClientError ? error.fork : undefined;
 				if (fork && intent === selectionIntent) {
 					++selectionIntent;
