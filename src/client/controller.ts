@@ -1387,9 +1387,7 @@ export function createController(
 					// clear at the reply had to guess from the error's text whether it
 					// was still the one held at the send, and a new turn failing at once
 					// with the same text -- its `error-cleared` and `error` both handled
-					// before the reply, which D2 allows -- lost the error the server
-					// still held. When the reply comes first instead, the error stays
-					// up until the event, which is the server's truth all along.
+					// before the reply -- lost the error the server still held.
 					if (view.draft === text) publish({ draft: "" });
 				}
 				return response?.disposition ?? "started";
@@ -1592,9 +1590,9 @@ export function createController(
 				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
 			}
 			// Nothing else is this path's. The server's `ended` drops the live view
-			// (D26), before or after the close answers, since the stream and the
-			// reply are unordered (D2), and the pane it leaves reads detached,
-			// whose preview `publish` fetches (OW-forinu). A session with nothing
+			// (D26), handled before the close answers (D31 point 3), and the pane
+			// it leaves reads detached, whose preview `publish` fetches
+			// (OW-forinu). A session with nothing
 			// on disk answers that read `gone`, and it lands on the startup view
 			// (D26 point 6); its row stands until the next listing drops it, as a
 			// stored session's stale stripe does (D21).

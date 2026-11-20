@@ -138,9 +138,8 @@ export function watchSessions(
 	let badged = watch.badged;
 	for (const [key, sawStreaming] of watch.waiting) {
 		const isStreaming = streaming.get(key);
-		// A session the client has no view of yet: the submit's own POST can
-		// resolve before the first SSE event for it arrives (D2). Keep waiting;
-		// a gap ended the watch on its handle (see above), except one on a
+		// A session the client holds no view of. Keep waiting; a gap ended
+		// the watch on its handle (see above), except one on a
 		// fork's handle before its fork-and-prompt replied, which a watch armed
 		// at that reply outlives; D25 point 5 accepts that fork window.
 		if (isStreaming === undefined) continue;

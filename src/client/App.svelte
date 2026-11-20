@@ -191,10 +191,10 @@
 		 * Whether `isStreaming` has read true at least once since `anchorIndex`
 		 * was armed. `isStreaming` commonly still reads false on the upsert(s)
 		 * that echo the submitted message and even the assistant's own
-		 * placeholder back -- it is a separate SSE event, and D2 is explicit
-		 * that cross-event ordering is not guaranteed -- so "not streaming" is
-		 * only trustworthy as "the turn ended" once we know the turn actually
-		 * started. Without this, the very first post-submit upsert(s) can
+		 * placeholder back -- it is a separate event, which the server can
+		 * write after them (OW-27) -- so "not streaming" is only trustworthy
+		 * as "the turn ended" once we know the turn actually started. Without
+		 * this, the very first post-submit upsert(s) can
 		 * disarm follow before the assistant's first token ever arrives.
 		 */
 		hasStreamed: boolean;
@@ -204,10 +204,16 @@
 	type FollowArm = Pick<SessionScroll, "anchorIndex" | "hasStreamed">;
 	/**
 	 * Session key -> `messages.length` right before a submit. Follow only
-	 * engages once a message at or beyond that index actually exists: SSE
-	 * ordering relative to the POST response is not guaranteed (D2), so this
+	 * engages once a message at or beyond that index actually exists, so this
 	 * is re-checked against the live array on every update rather than
-	 * assumed present the instant submit's promise resolves.
+	 * assumed present when the prompt's reply lands. The reply follows only
+	 * what the prompt caused while it ran (D31 point 3), and the backend
+	 * echoes the user's message after that on Pi, whose prompt answers before
+	 * its `agent_start` as of `pi 1.2.0`, and on a steer into a running Pi or
+	 * Codex turn; a fork's edited message reaches the fork's transcript the
+	 * same way. Claude Code's adapter writes the message itself at the
+	 * submit, so there it is in place before the reply. This waits on the
+	 * backend, not on the transport.
 	 */
 	const pendingFollow = new Map<string, number>();
 	/**
@@ -1040,11 +1046,11 @@
 
 		// `isStreaming` commonly still reads false on the upsert(s) that echo
 		// the submitted message, and even the assistant's own placeholder,
-		// back -- it is a separate SSE event and D2 is explicit that
-		// cross-event ordering is not guaranteed. So "not streaming" only means
-		// "the turn ended" once we know the turn actually *started* -- tracked
-		// per-anchor via `hasStreamed`, set the first time this session reads
-		// isStreaming:true while armed. Without that distinction, an early
+		// back -- it is a separate event, which the server can write after
+		// them. So "not streaming" only means "the turn ended" once we know
+		// the turn actually *started* -- tracked per-anchor via `hasStreamed`,
+		// set the first time this session reads isStreaming:true while armed.
+		// Without that distinction, an early
 		// false reading disarms follow before the assistant ever gets going.
 		// Caught live (OW-27): a synthetic submit, followed by upserts for both
 		// the echoed user message and the assistant's opening content, with the
