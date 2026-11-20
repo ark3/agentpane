@@ -320,7 +320,7 @@ All three backends' children run in one shell, `ChildProcessShell` in `src/serve
 - **The agent is a grandchild, not the child.**
   The spawned process is `direnv`, which execs `sbox`, which runs `bwrap`, which runs the agent.
   A signal to the child *does* reach it, **verified live on Pi and Codex**: `direnv` and the `sbox` wrapper exec into the chain rather than surviving beside it, so the server's own child is the `bwrap` chain.
-  Re-provable with `resources/probes/agentpane_{codex,pi}_smoke.py`.
+  Re-provable with `resources/probes/agentpane_{codex,pi}_smoke.ts`.
 - **The child's stdin needs an `error` listener.**
   A write landing after the agent stopped reading goes into a pipe with no reader, and the EPIPE arrives as an `error` event on stdin; unheard, it is an uncaught exception that takes the server down.
   Measured 2026-09-30 with a child that closed its own stdin and kept running: under Bun 1.4.0, writes of 1000 and 4000 bytes survived while 8000 and 65536 bytes exited 1 with `EPIPE: broken pipe, send`, and under Node 26.8.1 a six-byte write did the same.

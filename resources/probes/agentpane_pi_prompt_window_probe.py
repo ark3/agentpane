@@ -60,7 +60,7 @@ Two holds keep the steer undelivered, chosen by `--hold`. `tool`: Pi
 delivers a steer only once the current tool batch finishes (OW-nufitu), so the
 turn asks for one `bash` call of `sleep 20` and the hold is that call having a
 `tool_execution_start` and no end. `text`: the turn is the gardening essay
-`agentpane_pi_steer_probe.py` uses, and the hold is its reply having streamed
+`agentpane_pi_steer_probe.ts` uses, and the hold is its reply having streamed
 `TEXT_HOLD_DELTAS` text deltas and no `message_end`, since a text-only turn
 delivers a steer only after the reply. The first run of the tool hold showed
 why both are needed: an abort mid-tool and an abort mid-reply leave the queue
@@ -126,7 +126,7 @@ STEER_ABORT_TOOL_PROMPT = (
     "Use the bash tool exactly once, with exactly this command: `sleep 20; echo done`. "
     "After it returns, reply with the single word DONE."
 )
-# As `agentpane_pi_steer_probe.py`'s essay, which the model complies with at
+# As `agentpane_pi_steer_probe.ts`'s essay, which the model complies with at
 # length; the abort goes out once this many text deltas have streamed.
 STEER_ABORT_TEXT_PROMPT = (
     "Do not use tools. Write a detailed guide to growing vegetables in a home garden. "

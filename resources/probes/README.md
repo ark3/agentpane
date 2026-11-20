@@ -270,18 +270,6 @@ A probe run inside `sbox` sees the sandbox's tmpfs `~/.ssh`, so the server it st
 Every event is recorded, stamped, before a reply that follows it settles, so a command's continuation sees everything the server wrote before the reply (D31 point 3); `waitFor` polls a predicate over that log, and `request` answers a reply's `result` or its refusal `code`, `connection_lost` for a socket that closed first.
 `AgentpaneSocket.connect` opens without a `hello`, for a probe whose point is what a first frame that is not one gets.
 
-## `agentpane_live_support.py`
-
-Not a probe. The machinery both smoke checks share: the HTTP/SSE client, the
-process-tree walk, the temporary state dir, and the cleanup criteria. It exists
-because the two harnesses differ only in which backend they drive.
-
-Every Python probe that calls agentpane's API goes through its `Http` client, which sends `Authorization: Bearer <token>` on every request, reading the token from `~/.ssh/agentpane-token` -- the file the server reads or creates on startup -- at the moment each request is sent.
-Read then rather than when the client is built, because the probe's own server creates the file on its first start; until it exists requests go out without the header.
-The token reaches a probe only through that file, never through an environment variable, because every agent is a child of the server and inherits its environment.
-A probe run inside `sbox` sees the sandbox's tmpfs `~/.ssh`, so the server it starts there creates and reads a throwaway token in it, and a server running outside the sandbox refuses it.
-`SseReader` sends it too, read when the stream opens, though the event stream is the one `/api` route the server exempts.
-
 ## `capture_fixtures.py`
 
 The other two scripts *prove* the protocols work; this one **records** them.

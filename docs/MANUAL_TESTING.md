@@ -5230,6 +5230,19 @@ The fork's store file was there when the fork-and-prompt replied on Pi and Codex
 On Codex, closing either side of the fork pair and attaching it again while the other lived answered `ok` both times, under a new handle (OW-voyezi).
 The parent attached again under its own handle on Claude Code and Codex, and under a new one on Pi, whose fork had moved the live process onto the fork's file.
 
+**`agentpane_pi_prompt_window_probe.ts` and `agentpane_pi_fork_first_turn_probe.ts`, the two Python probes' agentpane parts, ran to the end.**
+On `pi 1.5.2` with `--model openrouter/deepseek/deepseek-v4.1-flash:high`, read back as `openrouter/deepseek/deepseek-v4.1-flash`, each in a throwaway state directory, through the shim that taps Pi's stdin and stdout; 27 s and 16 s.
+The Python files keep their Pi-direct parts, which were not re-run.
+
+In the prompt-window probe, two `sessions/prompt` frames written back to back on one socket both reached Pi carrying `"steer"`; Pi answered the first `started` and the second `queued`, both replies read `disposition: "started"`, 11 ms and 91 ms after they were sent, inside one `agent_start` to `agent_settled` span, and both user messages were in the transcript, as in the OW-wibude and ark3/agentpane#48 runs.
+A second prompt sent at the first's reply carried `"steer"` too and was queued into the first's run.
+The extension command `mcp` was answered `handled`, with one `notify` notice on the wire and no run, and an ordinary prompt after it started a turn.
+
+In the fork-first-turn probe, the create answered a Pi JSONL ref with no file on disk yet.
+Before any prompt, `sessions/forkPoints` answered no points, and a fork-and-prompt at index 9999 was refused `not_a_fork_point` with nothing sent to Pi but two `get_fork_messages`; in the OW-tigaye run the fork route had passed an unknown entry to Pi and answered 500.
+A fork-and-prompt at the first user message, sent at 335 assistant characters before any assistant `message_end`, answered `started` in 0.20 s with the fork under its own handle and streaming; Pi's stdin read `clear_queue`, `abort`, `fork`, then the fork's `get_state`, `get_messages`, `get_entries`, `get_available_models` and `prompt`, the stop-first order of ark3/agentpane#47.
+The parent's reply ended `aborted` at 335 characters, and the fork's file was on disk at the reply, which now comes once the fork's prompt is admitted rather than at Pi's `fork` response.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.

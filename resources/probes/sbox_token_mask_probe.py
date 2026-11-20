@@ -55,7 +55,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from agentpane_live_support import API_TOKEN_PATH
+# The file the server keeps its API token in (`apiTokenPath` in
+# `src/server/api-token.ts`).
+API_TOKEN_PATH = Path.home() / ".ssh" / "agentpane-token"
 
 EXIT_PASS = 0
 EXIT_FAIL = 1

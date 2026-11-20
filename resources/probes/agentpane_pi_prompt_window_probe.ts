@@ -22,7 +22,7 @@
  * It drives the real chain -- `direnv exec <workspace> sbox -- pi --mode rpc
  * --model <pinned>`, spawned by agentpane's built server -- by `sessions/prompt`
  * naming the create's handle, with a `pi` shim first on the server's PATH that
- * copies Pi's stdin and stdout to two tap files, as `agentpane_pi_steer_probe.py`
+ * copies Pi's stdin and stdout to two tap files, as `agentpane_pi_steer_probe.ts`
  * copies its stdout. The stdin tap is what shows whether a prompt carried
  * `streamingBehavior`. Cells:
  *
@@ -162,7 +162,7 @@ export function summarise(event: Record<string, any>): Record<string, unknown> {
  * A `pi` that is the real `pi` with its stdin and stdout copied to two taps,
  * all three in one fresh directory under /tmp.
  *
- * As `agentpane_pi_steer_probe.py`'s shim, plus a `tee` on stdin: /tmp is
+ * As `agentpane_pi_steer_probe.ts`'s shim, plus a `tee` on stdin: /tmp is
  * mounted read-write inside sbox on the home server, and the shim is found
  * because the server's PATH names its directory first. Pi's exit status does
  * not pass through, which this probe never reads.
