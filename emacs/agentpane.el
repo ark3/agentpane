@@ -3321,10 +3321,10 @@ watch is on the handle, which the survivor holds, and left standing on
 that claim it raised the indicator for the next turn from elsewhere to
 end there.  A prompt the survivor sent meanwhile, joining the watch,
 holds a claim of its own, which keeps the watch for its turn (OW-kakasu).
-One the helper answers with an error of its own, carrying no status --
-the socket's error when the server was killed with the prompt in flight,
-say -- keeps its claim, as a timed-out one does below, since nothing
-says the server had not admitted it (OW-hiliti).
+One the helper answers with an error carrying no code -- its own
+-32603, for a throw it did not expect -- keeps its claim, as a timed-out
+one does below, since nothing says the server had not admitted it
+(OW-hiliti).
 One still out when its helper dies keeps its claim for the teardown to
 settle, a death not saying the prompt reached no backend: a turn seen
 streaming then ends as an aborted one does (`agentpane--helper-gone').

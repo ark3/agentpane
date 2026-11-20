@@ -242,7 +242,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		write(encodeFrame({ jsonrpc: "2.0", ...notification }));
 	};
 
-	const statusOf = (view: SessionView, handle: string | undefined) => ({
+	const statusOf = (view: SessionView, handle: string) => ({
 		session: view.ref,
 		handle,
 		isStreaming: view.isStreaming,

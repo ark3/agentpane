@@ -208,9 +208,9 @@
  * never moved by a rename, and a different one for a fork (D24, OW-suyinu).
  * A rename is said by nothing else: the `session` of any notification under
  * a handle is the session's ref from then on.
- * Every per-session notification below carries it, absent only where the
- * server sent none, and every request on a live session sends its own to the
- * server, which refuses one that has ended (D31 point 9); `sessions/detach`
+ * Every per-session notification below carries it, as every event the
+ * server sends on a session does, and every request on a live session sends
+ * its own to the server, which refuses one that has ended (D31 point 9); `sessions/detach`
  * and `sessions/close` accept one and send it nowhere (OW-nowihu); `compaction` is `"requesting"`, `"running"` or `null`;
  * `model` is a string or `null`; so is `effort`, the reasoning effort the
  * session's next turn runs at, `null` when the backend reports none; and so
@@ -557,7 +557,7 @@ export interface HelperRequests {
 
 export interface SessionStatusParams {
 	session: SessionRef;
-	handle?: string;
+	handle: string;
 	isStreaming: boolean;
 	compaction: "requesting" | "running" | null;
 	model: string | null;
@@ -576,11 +576,11 @@ export type HelperNotification =
 				token?: number;
 			};
 	  }
-	| { method: "session/node"; params: { session: SessionRef; handle?: string; node: TranscriptNode } }
+	| { method: "session/node"; params: { session: SessionRef; handle: string; node: TranscriptNode } }
 	| { method: "session/status"; params: SessionStatusParams }
-	| { method: "session/error"; params: { session: SessionRef; handle?: string; message: string; errorId: string } }
-	| { method: "session/errorCleared"; params: { session: SessionRef; handle?: string } }
-	| { method: "session/notice"; params: { session: SessionRef; handle?: string; notice: AgentNotice } }
+	| { method: "session/error"; params: { session: SessionRef; handle: string; message: string; errorId: string } }
+	| { method: "session/errorCleared"; params: { session: SessionRef; handle: string } }
+	| { method: "session/notice"; params: { session: SessionRef; handle: string; notice: AgentNotice } }
 	| { method: "session/detached"; params: { session: SessionRef; handle: string; cause: "ended" | "gapped" } }
 	| { method: "sessions/changed"; params?: undefined };
 

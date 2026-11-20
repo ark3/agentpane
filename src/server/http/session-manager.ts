@@ -1653,7 +1653,7 @@ export class SessionManager {
 				// still moving cannot name one or fork out of one
 				// (`ManagedSession.subscriptions`).
 				for (const off of session.subscriptions.splice(0)) off();
-				// No `ended`, unlike `close()`: `app.close()` closes every stream
+				// No `ended`, unlike `close()`: `app.close()` closes every socket
 				// before this runs, and a client reads the drop as every session
 				// detached (D25 point 3, D26).
 				this.broadcaster.forget(session.handle);

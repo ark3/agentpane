@@ -7,9 +7,10 @@
  * sandbox, so it can read `~/.ssh`, which `sbox` hides from agents. It never
  * creates the file; only the server does.
  *
- * Read at the connect, which the helper makes once, at its start: a rotation
- * (deleting the file and restarting the server) closes the socket and ends
- * the helper (`runHelper`), and the next one reads the new token.
+ * Read at the connect, which the helper makes once, at the first request it
+ * reads (`helper.ts`, D31): a rotation (deleting the file and restarting the
+ * server) closes the socket and ends the helper (`runHelper`), and the next
+ * one reads the new token.
  *
  * A missing or unreadable file is not an error here: the `hello` carries no
  * token, which the server refuses. Only that refusal becomes the error naming
