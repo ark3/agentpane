@@ -890,6 +890,7 @@ it down (OW-jopifu)."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--forking nil nil
       (agentpane-test--with-session ref
+        (setq agentpane--handle "h1")
         (agentpane--on-notification
          nil 'session/error (list :session ref :handle "h1" :message "Turn failed upstream"))
         (goto-char (point-max))
@@ -1929,8 +1930,12 @@ the two edits displaced, which come back with them (OW-seleri, OW-hakeno)."
         (with-current-buffer previewing
           (agentpane--draw agentpane-test--image-nodes)
           (agentpane--start-edit (aref agentpane-test--image-nodes 0))
-          (setq aborted '(:queued ["steered here"]))
+          ;; Its stop went out under a handle of its own, which a gap then
+          ;; let go of; what the stop took out waits on its edit.
+          (setq agentpane--handle "h0"
+                aborted '(:queued ["steered here"]))
           (agentpane-abort)
+          (agentpane--let-go 'gapped)
           (agentpane--attach)
           (should-not (buffer-live-p holder))
           (should agentpane--editing)
@@ -3358,6 +3363,7 @@ the request answers the region holds the text being sent."
         (agentpane-test--with-session ref
           (agentpane--draw agentpane-test--image-nodes)
           (setq agentpane--attached 'connection
+                agentpane--handle "h1"
                 hold '(sessions/forkAndPrompt))
           (goto-char (point-max))
           (insert "a draft")
@@ -3411,7 +3417,8 @@ which BODY may set; `sent' starts empty once the edit is open."
            (list :backend ,backend :id "fork")
          (agentpane-test--with-session (list :backend ,backend :id "parent")
            (agentpane--draw agentpane-test--image-nodes)
-           (setq agentpane--attached 'connection)
+           (setq agentpane--attached 'connection
+                 agentpane--handle "h-parent")
            (agentpane-test--goto-index 0)
            (agentpane-edit)
            (should agentpane--editing)
@@ -3447,8 +3454,7 @@ comes.  Once the fork's snapshot has made the fork's buffer, holding
 that token as its own attach, the kill leaves the token to it."
   (dolist (snapshot-first '(nil t))
     (agentpane-test--editing "codex"
-      (setq agentpane--handle "h-parent"
-            agentpane--attach-sent 7
+      (setq agentpane--attach-sent 7
             hold '(sessions/forkAndPrompt))
       (agentpane-send)
       (let ((token agentpane--fork-sent)
@@ -3486,6 +3492,7 @@ moves that edit nowhere, and the send ends it."
           (agentpane-test--with-session ref
             (agentpane--draw agentpane-test--two-asks)
             (setq agentpane--attached agentpane--connection
+                  agentpane--handle "h1"
                   agentpane--attach-sent 7)
             (goto-char (point-max))
             (insert "hello")
@@ -3550,7 +3557,8 @@ edit's, so Cancel puts back exactly that draft, once (OW-hakeno)."
           '(:backend "codex" :id "t2")
         (agentpane-test--with-session '(:backend "codex" :id "t1")
           (agentpane--draw agentpane-test--image-nodes)
-          (setq agentpane--attached 'connection)
+          (setq agentpane--attached 'connection
+                agentpane--handle "h1")
           (goto-char (point-max))
           (insert "a draft")
           (agentpane-test--goto-index 0)
@@ -3614,15 +3622,43 @@ not.  A Pi parent detaches, as after a fork that lands."
                   (should-not (assq 'sessions/forkAndPrompt sent))
                   (should (equal (plist-get (cdr (assq 'sessions/prompt sent)) :session) forked)))))))))))
 
-(ert-deftest agentpane-test-edit-send-from-a-detached-parent-attaches-nothing ()
+(ert-deftest agentpane-test-edit-send-from-a-detached-parent-refuses ()
   "An edit's send from a buffer no longer attached, as a helper's death or
-a gap leaves one, sends its one request all the same and attaches
-nothing first: the server forks a session another client holds, and
-refuses one nobody does, leaving the edit open (D30)."
+a gap leaves one, holding no handle, is refused here in agentpane-mode's
+own words, sending nothing and attaching nothing, with the edit and its
+text left open: the request names the handle, and with none the server
+refused it as \"handle is required and must be a string\" (D31 point 9,
+ark3/agentpane#63)."
   (agentpane-test--editing "pi"
-    (setq agentpane--attached nil)
-    (agentpane-send)
-    (should (equal (mapcar #'car sent) '(sessions/forkAndPrompt)))))
+    (setq agentpane--attached nil
+          agentpane--handle nil)
+    (goto-char (point-max))
+    (insert " properly")
+    (should (equal (cadr (should-error (agentpane-send) :type 'user-error))
+                   "This session is not attached; attach it to send the edit"))
+    (should-not sent)
+    (should agentpane--editing)
+    (should-not agentpane--sending)
+    (should-not agentpane--fork-sent)
+    (should (equal (agentpane-test--draft) "Fix the bug properly"))))
+
+(ert-deftest agentpane-test-live-requests-from-a-detached-buffer-refuse ()
+  "A stop or an error's dismissal from a buffer holding no handle, as a
+helper's death, a gap or an `ended' leaves one, is refused here in
+agentpane-mode's own words and sends nothing; with a null handle the
+server refused each as \"handle is required and must be a string\" (D31
+point 9, ark3/agentpane#63).  The dismissal keeps the error drawn."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (agentpane--hold-error "Turn failed upstream" "e3")
+          (should (equal (cadr (should-error (agentpane-abort) :type 'user-error))
+                         "This session is not attached; attach it to stop its turn"))
+          (should (equal (cadr (should-error (agentpane-dismiss-error) :type 'user-error))
+                         "This session is not attached; attach it to dismiss its error"))
+          (should-not sent)
+          (should (equal (list agentpane--error agentpane--error-id) '("Turn failed upstream" "e3"))))))))
 
 (ert-deftest agentpane-test-composer-send-refused-while-editing ()
   "A composer send while its transcript holds an edit says so and sends
@@ -3686,6 +3722,7 @@ unanswered."
         (agentpane-test--with-session ref
           (agentpane--draw (seq-take agentpane-test--two-asks 2))
           (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1"
                 agentpane--attach-sent 7)
           (setq hold '(sessions/abort)
                 fork-stops (equal backend "pi"))
@@ -3880,6 +3917,7 @@ the region as it was (OW-seleri)."
       (agentpane-test--forking nil nil
         (agentpane-test--with-session '(:backend "pi" :id "/s/parent.jsonl")
           (setq agentpane--attached 'connection
+                agentpane--handle "h1"
                 aborted (nth 1 case))
           (goto-char (point-max))
           (insert (nth 0 case))
@@ -3906,6 +3944,7 @@ leaves here, ahead of the displaced draft as Cancel leaves them
           (agentpane-test--with-session ref
             (agentpane--draw (seq-take agentpane-test--two-asks 2))
             (setq agentpane--attached agentpane--connection
+                  agentpane--handle "h1"
                   agentpane--attach-sent 7
                   fork-stops t
                   aborted '(:queued ["steered"]))
@@ -3945,6 +3984,7 @@ would leave them (OW-kijuju, OW-hakeno)."
         (agentpane-test--with-session ref
           (agentpane--draw (seq-take agentpane-test--two-asks 2))
           (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1"
                 agentpane--attach-sent 7
                 hold '(sessions/abort sessions/forkPoints)
                 fork-stops t
@@ -3986,7 +4026,8 @@ while the edit is open land in the order they answered."
           '(:backend "pi" :id "/s/fork.jsonl")
         (agentpane-test--with-session '(:backend "pi" :id "/s/parent.jsonl")
           (agentpane--draw agentpane-test--image-nodes)
-          (setq agentpane--attached 'connection)
+          (setq agentpane--attached 'connection
+                agentpane--handle "h1")
           (goto-char (point-max))
           (insert "a draft")
           (agentpane-test--goto-index 0)
@@ -4033,6 +4074,7 @@ failed, the text stays and the held prompt lands ahead of it (OW-seleri)."
       (agentpane-test--forking nil nil
         (agentpane-test--with-session '(:backend "pi" :id "/s/parent.jsonl")
           (setq agentpane--attached 'connection
+                agentpane--handle "h1"
                 hold '(sessions/prompt)
                 aborted '(:queued ["steered"]))
           (goto-char (point-max))

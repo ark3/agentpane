@@ -3574,6 +3574,8 @@ composer's window sits below the transcript's, whose region ends the
 buffer."
   (interactive)
   (with-current-buffer (agentpane--transcript)
+    (unless agentpane--handle
+      (user-error "This session is not attached; attach it to stop its turn"))
     (agentpane--request 'sessions/abort
                         (list :session (agentpane--ref agentpane--session)
                               :handle agentpane--handle)
@@ -3734,6 +3736,8 @@ answered (OW-desufa)."
   (with-current-buffer (agentpane--transcript)
     (unless agentpane--error
       (user-error "No turn error to dismiss"))
+    (unless agentpane--handle
+      (user-error "This session is not attached; attach it to dismiss its error"))
     (agentpane--request 'sessions/dismissError
                         (list :session (agentpane--ref agentpane--session)
                               :handle agentpane--handle
@@ -4344,9 +4348,11 @@ meanwhile.  The fork is attached where the refusal names its handle, the
 helper having bound it as above, and not where its own start failed.  A
 refusal that names none, the message no longer a fork point among them,
 created nothing, and leaves the edit standing, the edited text still in
-the prompt region, as the browser's `send' leaves its edit mode.  Sent
-from a buffer not attached, the request goes all the same, and the
-server forks a session another client holds or refuses one nobody does.
+the prompt region, as the browser's `send' leaves its edit mode.  From
+a buffer holding no handle, one a helper's death or a gap detached, the
+send is refused here, sending nothing and leaving the edit standing:
+the request names the session by the handle (D31 point 9), and the
+server's refusal of a null one read as a malformed request.
 
 This buffer counts as sending, `agentpane--sending', until the request
 answers, as the browser's `forkAndSubmit' holds `sending' (OW-kelede),
@@ -4364,6 +4370,8 @@ cancelled while it was in flight."
   (when agentpane--forking
     (user-error "A fork of this session is already in flight"))
   (agentpane--refuse-closing)
+  (unless agentpane--handle
+    (user-error "This session is not attached; attach it to send the edit"))
   (let* ((edit agentpane--editing)
          (window (get-buffer-window))
          (token (agentpane--attach-token))
