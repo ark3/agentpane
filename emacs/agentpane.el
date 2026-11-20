@@ -941,12 +941,12 @@ handle the helper still sends under can have no holder -- the buffer
 told of it killed before handling that snapshot, an attach its buffer
 gave up answered under it, or a buffer since moved off it; see `forget'
 in src/emacs/helper.ts.  Then an untagged snapshot under it, the
-server's own or one the helper sends for another attach whose snapshot
-beat its reply, binds a buffer by the ref, which may hold no token
-answered under the handle and then hears nothing once those tokens are
-released; and every other notification under it reaches a buffer
-holding the ref and no handle, a preview that never attached among
-them, which shows it, streaming and all."
+server's own, which the helper sends ahead of the tagged one for another
+attach of the handle (`introduce' there), binds a buffer by the ref,
+which may hold no token answered under the handle and then hears
+nothing once those tokens are released; and every other notification
+under it reaches a buffer holding the ref and no handle, a preview that
+never attached among them, which shows it, streaming and all."
   (let ((handle (plist-get params :handle))
         (ref (plist-get params :session))
         (token (plist-get params :token)))
@@ -2287,12 +2287,13 @@ waiting on it, oldest first, each a cons (THEN . FAILED) of the arguments
 (defvar-local agentpane--closing nil
   "Non-nil while a `sessions/close' this buffer sent has not answered.
 The buffer holds its handle and counts as attached until the
-`session/detached' the server's `ended' brings, which usually lands
-while the close is out (D26); either way the server has already taken
-the session out of its table and is waiting on its subprocess (`SessionManager.close' in
+`session/detached' the server's `ended' brings, which the server writes
+ahead of the close's reply (D26, D31 point 3); by then it has taken the
+session out of its table and is waiting on its subprocess (`SessionManager.close' in
 src/server/http/session-manager.ts), so an attach would spawn it again:
-a respawn the helper's close never records (OW-dakeyi).  Every other
-request the server refuses, since only an attach starts a session (D25).
+a respawn the helper's close never records (OW-dakeyi).  So would a
+prompt naming no handle, which attaches as it prompts (D30); every
+other request names the handle, which the server refuses as ended.
 So nothing that would reach the session goes out while it is set, which
 spares the user a respawn or a refused request: every attach,
 synchronous or not, every request `agentpane--attached-then' or
@@ -2774,7 +2775,7 @@ a fork or a prompt that fails leaves the edit standing, to send again
 \(`agentpane--send-edit'), and with OTHER gone the kill ring is all that
 keeps it.  Nor is a close OTHER has in
 flight taken: its answer is dropped, and this buffer holds the handle
-until the `session/detached' the close usually brings (D26).
+until the `session/detached' the close brings ahead of it (D26).
 A window that showed OTHER shows this one, and OTHER's kill sends no
 `sessions/detach', which would silence the session this one now holds.
 This one takes OTHER's attach tokens instead (`agentpane--attach-earlier'),
@@ -3282,9 +3283,9 @@ src/client/controller.ts leaves it to `error-cleared'.  A clear at the
 answer could only guess from the message whether the error was still the
 one held at the send, and a new turn failing at once with the same text,
 its `session/errorCleared' and `session/error' both handled before the
-held-back answer, lost the error the server still held.  When the answer
-comes first instead, the line stays up until the notification, which is
-the server's truth all along.
+held-back answer, lost the error the server still held.  The server
+writes that `session/errorCleared' ahead of the answer (D31 point 3),
+and jsonrpc.el can hand an answer on later than it came, never earlier.
 
 The prompt names the error the buffer held when it was sent, by
 `agentpane--error-id', or none, and the server clears only that one at
@@ -3647,12 +3648,12 @@ never released.
 The close in flight is state the buffer owns, `agentpane--closing', set
 as the close goes out and cleared when it answers or fails.  Meanwhile
 the buffer holds its handle and counts as attached until the
-`session/detached' for it, which usually comes while the close is out
-\(D26), and either way nothing that would reach the session goes out: an
-attach would spawn again, on the server, the session being closed, a
-prompt, a fork or its points the server would refuse, since only an
-attach starts a session (D25), and another close would go out beside
-this one (OW-dakeyi).  Each is refused, `g'
+`session/detached' for it, which comes while the close is out, ahead
+of its reply (D26, D31 point 3), and nothing that would reach the
+session goes out: an attach, or a prompt naming no handle, would spawn
+again, on the server, the session being closed (D30), a prompt, a fork
+or its points naming the handle the server would refuse as ended, and
+another close would go out beside this one (OW-dakeyi).  Each is refused, `g'
 in the echo area and the rest by a user error, as they refuse with an
 attach or a fork in flight.  See `agentpane--closing' for where it is
 read.
