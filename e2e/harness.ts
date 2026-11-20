@@ -34,7 +34,7 @@ import type { AgentpaneApi, EventConnection, EventHandlers } from "../src/client
 import "../src/client/app.css";
 import { createController } from "../src/client/controller.ts";
 import { assistant, systemLeading, toolResult, user } from "../src/client/render/samples.ts";
-import type { ForkPoint, LiveSessionSummary, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
+import type { ForkPoint, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
 
 /**
  * Window focus, faked, for the turn-done badge (OW-diyuwu).
@@ -92,8 +92,13 @@ const HARNESS_EFFORTS = [
 	{ id: "high", description: "High" },
 ];
 let handlers: EventHandlers | undefined;
-/** Whether the server holds the session live: an attach makes it so and a close ends it. */
-let live = true;
+/**
+ * Whether the server holds the session live: an attach makes it so and a
+ * close ends it. The page opens on a server holding nothing live, so its
+ * `hello` sends no opening snapshot and the listing says the session is
+ * stored.
+ */
+let live = false;
 /** The live session's turn error, which the banners put there and a dismissal clears. */
 let errorId: string | null = null;
 /** Resolves when the in-flight turn emits its `status:false`. */
@@ -136,7 +141,8 @@ function status(isStreaming: boolean): void {
 	emit({ type: "status", session: REF, handle: HANDLE, seq, isStreaming, compaction: null, model, effort, unrestoredModel: null });
 }
 
-function summary(): LiveSessionSummary {
+/** The session's row: the listing names its handle only while the server holds it live. */
+function summary(): SessionSummary {
 	return {
 		ref: REF,
 		cwd: CWD,
@@ -147,7 +153,7 @@ function summary(): LiveSessionSummary {
 		isStreaming: false,
 		name: null,
 		onDisk: true,
-		handle: HANDLE,
+		...(live ? { handle: HANDLE } : {}),
 	};
 }
 
@@ -217,11 +223,14 @@ const api: AgentpaneApi = {
 		return api.attach(REF);
 	},
 	async attach() {
-		// The snapshot an attach triggers arrives on the stream ahead of its
-		// reply, as the socket orders them (D31 point 3).
-		live = true;
+		// What an attach causes arrives ahead of its reply, as the socket orders
+		// them (D31 point 3): a start's `sessions-changed`, then the snapshot.
+		if (!live) {
+			live = true;
+			emit({ type: "sessions-changed" });
+		}
 		snapshot(false);
-		return summary();
+		return { ...summary(), handle: HANDLE };
 	},
 	async preview() {
 		// A completed assistant turn, both turns stamped: the shape OW-75's footer
@@ -296,16 +305,16 @@ const api: AgentpaneApi = {
 		// What the server answers for a Pi session (D30): its fork stops a running turn.
 		return { points, forkStopsTurn: true };
 	},
+	/** No spec here sends an edit, so one that does fails until this answers. */
+	async forkAndPrompt(): Promise<never> {
+		throw new Error("this harness sends no edit");
+	},
 	/**
 	 * A self-fork: this harness drives one session, and what the browser is here
 	 * for is the composer's mode row and the edit control's place in the block
 	 * action row, not the backends' fork asymmetry -- which is the server's, and
 	 * is settled live in MANUAL_TESTING.md.
 	 */
-	/** No spec here sends an edit, so one that does fails until this answers. */
-	async forkAndPrompt(): Promise<never> {
-		throw new Error("this harness sends no edit");
-	},
 	async fork() {
 		return REF;
 	},

@@ -23,7 +23,7 @@ import type { AgentpaneApi, EventConnection, EventHandlers } from "../src/client
 import "../src/client/app.css";
 import { createController, type AgentpaneController } from "../src/client/controller.ts";
 import { assistant, toolResult, user } from "../src/client/render/samples.ts";
-import type { ForkPoint, LiveSessionSummary, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
+import type { ForkPoint, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
 
 const CWD = "/tmp/agentpane-perf";
 
@@ -60,7 +60,8 @@ function handleFor(id: string): string {
 	return `h-${id}`;
 }
 
-function summaryFor(id: string, index: number): LiveSessionSummary {
+/** Session `id`'s row: stored, until something makes it live (`attached`). */
+function summaryFor(id: string, index: number): SessionSummary {
 	return {
 		ref: refFor(id),
 		cwd: CWD,
@@ -68,12 +69,21 @@ function summaryFor(id: string, index: number): LiveSessionSummary {
 		createdAt: "2026-08-14T00:00:00.000Z",
 		// Distinct, so the recency sort has real work rather than a stable no-op.
 		updatedAt: new Date(1786419855000 + index * 1000).toISOString(),
-		status: "attached",
+		status: "detached",
 		isStreaming: false,
 		name: null,
 		onDisk: true,
-		handle: handleFor(id),
 	};
+}
+
+/** The row as the listing writes it: attached under its handle only while the server holds it live. */
+function listed(summary: SessionSummary): SessionSummary {
+	const id = idOf(summary.ref);
+	return attached.has(id) ? { ...summary, status: "attached", handle: handleFor(id) } : summary;
+}
+
+function idOf(ref: SessionRef): string {
+	return ref.id.split("/").pop()!.replace(".jsonl", "");
 }
 
 /**
@@ -131,12 +141,21 @@ interface Live {
 }
 
 const live = new Map<string, Live>();
-let summaries: LiveSessionSummary[] = [];
+/** The sessions the server holds live, by id: the page opens on none, so its `hello` sends no opening snapshot. */
+const attached = new Set<string>();
+let summaries: SessionSummary[] = [];
 let handlers: EventHandlers | undefined;
 let controller: AgentpaneController | undefined;
 
 function emit(event: ServerEvent): void {
 	handlers?.onEvent(event);
+}
+
+/** The server starting session `id`, which says so before anything under its handle. */
+function goLive(id: string): void {
+	if (attached.has(id)) return;
+	attached.add(id);
+	emit({ type: "sessions-changed" });
 }
 
 function sessionOf(id: string): Live {
@@ -150,16 +169,18 @@ function sessionOf(id: string): Live {
 
 const api: AgentpaneApi = {
 	async listSessions() {
-		return summaries;
+		return summaries.map(listed);
 	},
 	// A create starts the session and answers as an attach does (D30).
 	async createSession() {
 		return api.attach(refFor("a"));
 	},
 	async attach(ref: SessionRef) {
-		const id = ref.id.split("/").pop()!.replace(".jsonl", "");
+		const id = idOf(ref);
 		const entry = sessionOf(id);
-		// Ahead of the reply, as the socket orders them (D31 point 3).
+		// Ahead of the reply, as the socket orders them (D31 point 3): a start's
+		// `sessions-changed`, then the snapshot.
+		goLive(id);
 		entry.seq += 1;
 		emit({
 			type: "snapshot",
@@ -176,7 +197,7 @@ const api: AgentpaneApi = {
 			errorId: null,
 			notices: [],
 		});
-		return summaries.find((s) => s.ref.id === ref.id) ?? summaryFor(id, 0);
+		return { ...listed(summaries.find((s) => s.ref.id === ref.id) ?? summaryFor(id, 0)), handle: entry.handle };
 	},
 	async preview(ref: SessionRef) {
 		return { ref, turns: [previewTurn(user("stored transcript"))] };
@@ -313,6 +334,7 @@ export interface PerfHarness {
 const harness: PerfHarness = {
 	async setup({ sessions, seedTurns, otherTurns }) {
 		live.clear();
+		attached.clear();
 		summaries = [];
 		// `a` and `b` first, then filler rows to make the sidebar realistic.
 		summaries.push(summaryFor("a", 1_000_000), summaryFor("b", 999_999));
@@ -324,8 +346,9 @@ const harness: PerfHarness = {
 
 		await controller!.refreshSessions();
 		// `b` enters client state without ever being selected -- exactly the
-		// background session the symptom is about.
+		// background session the symptom is about: another client attaches it.
 		const b = sessionOf("b");
+		goLive("b");
 		b.seq += 1;
 		emit({
 			type: "snapshot",
