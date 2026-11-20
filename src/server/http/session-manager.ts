@@ -296,7 +296,7 @@ export class SessionManager {
 	 * backend names it (`#rename`), but the browser that created it is still
 	 * holding the old one and may already have a prompt in flight against it.
 	 * Honouring the old id costs one map entry and is the difference between "the
-	 * second message in a new conversation works" and a 404. A container leaves
+	 * second message in a new conversation works" and a `not_found`. A container leaves
 	 * this map with every one of its names, on a close and on a fork alike.
 	 */
 	readonly #names = new Map<string, string>();

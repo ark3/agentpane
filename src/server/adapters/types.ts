@@ -156,7 +156,7 @@ export interface BackendAdapter {
 	 * Submitted *during* a running turn, the promise is **steer** (D16): the
 	 * text joins the turn already in flight, delivered at the backend's next
 	 * safe point rather than after the turn ends. An adapter whose backend
-	 * cannot steer rejects instead, so the route can 500 and the client can
+	 * cannot steer rejects instead, so the prompt is refused and the client can
 	 * say so with the draft intact -- never silently downgrades to a follow-up,
 	 * which would land the prompt somewhere the user did not ask for.
 	 *
@@ -252,13 +252,14 @@ export interface BackendAdapter {
 	/**
 	 * Name the session, written through to the backend, and carried in
 	 * `getState().name` once the backend has accepted it (D27, OW-jamaha).
-	 * Not `rename`: a rename here is a ref change (`onRefChanged`). The route
-	 * refuses an empty name before it reaches this.
+	 * Not `rename`: a rename here is a ref change (`onRefChanged`). The server
+	 * refuses a blank name before it reaches this (`sessionName` in
+	 * `src/server/http/operations.ts`).
 	 */
 	setName(name: string): Promise<void>;
 	/**
 	 * Choose the reasoning effort from the next turn on, one of the current
-	 * model's `ModelInfo.efforts`. The effort route checks that against
+	 * model's `ModelInfo.efforts`. `SessionManager.setEffort` checks that against
 	 * `getState().model` and `listModels` before calling this, and refuses
 	 * any other, so an adapter takes what it is given (OW-tewofe). Like
 	 * `setModel`, nothing here refuses it after the first prompt;
@@ -280,9 +281,9 @@ export interface AdapterFactory {
 /**
  * The backend refused the value it was asked to take -- a model it does not
  * know, say -- or the adapter did, for a value the backend's protocol cannot
- * even carry. The server answers 400 with this message, because the
- * request is what was wrong; a backend that died or never answered is not
- * this, and stays a 500. Thrown by `setModel` (OW-pizaki), by Codex's
+ * even carry. The server refuses the command `backend_refused` with this
+ * message, because the request is what was wrong; a backend that died or never
+ * answered is not this, and stays an `internal_error`. Thrown by `setModel` (OW-pizaki), by Codex's
  * `setName` on a thread not yet prompted (OW-kametu), by Pi's `fork` on an
  * entry Pi refuses (OW-rasiwa), and by Claude Code's and Codex's `fork` on an
  * entry the session has no fork point for (OW-fesuwe).

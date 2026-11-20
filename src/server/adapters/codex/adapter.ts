@@ -553,7 +553,7 @@ export class CodexAdapter implements BackendAdapter {
 		// brackets the `contextCompaction` item), so `turnId` names a turn
 		// app-server will refuse. The client disables Send while compaction is
 		// showing, but a threshold compaction nobody asked for, a second client,
-		// and `POST prompt` all reach here; without this the well-defined "busy"
+		// and a prompt written straight to the socket all reach here; without this the well-defined "busy"
 		// becomes an opaque wire error, which is what `compact`'s own guard below
 		// exists to prevent.
 		// A turn this adapter has already interrupted is the other live turn that

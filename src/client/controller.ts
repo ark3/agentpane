@@ -913,7 +913,7 @@ export function createController(
 	 * clears the selection onto the startup view if the preview it re-read is
 	 * still on screen (D26 point 6): a session closed elsewhere, or previewed
 	 * across a server restart, otherwise stayed on a preview whose Attach could
-	 * only 404.
+	 * only be refused `not_found`.
 	 */
 	async function refetchPreview(): Promise<boolean> {
 		const showing = view.preview;

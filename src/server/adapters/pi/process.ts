@@ -407,7 +407,7 @@ export class PiAdapter implements BackendAdapter {
 			// Our `isStreaming` turns true at `agent_start`, which Pi writes after
 			// the response that resolves the previous `submit()`; in the same runs
 			// a second prompt queued behind the first in `SessionManager.submit`
-			// went out bare in that gap, was refused, and the route answered 500
+			// went out bare in that gap, was refused, and the prompt failed
 			// (OW-kokotu). The same runs answered a "steer" prompt sent to an idle
 			// Pi `started`, an ordinary turn; `AgentSession.prompt` in `pi 1.2.0`
 			// reads `streamingBehavior` only while it is streaming, so an idle
@@ -443,8 +443,8 @@ export class PiAdapter implements BackendAdapter {
 		// Awaited, so the rename is announced before `submit()` settles. But not
 		// allowed to fail the submit: Pi has already accepted the prompt above,
 		// and `submit()` rejecting means "the turn was not admitted" (the frozen
-		// contract) -- which the HTTP layer relays as a 500 and the browser
-		// answers by preserving the draft to send again. Resending would run
+		// contract) -- which the server answers as a refused prompt and the browser
+		// by preserving the draft to send again. Resending would run
 		// the prompt a second time: a second copy in the turn it started, or a
 		// second run of the command that handled it. Leaving the id
 		// unresolved instead costs one more probe on the next prompt, which is
@@ -551,9 +551,8 @@ export class PiAdapter implements BackendAdapter {
 	 * a user message nobody answered, and mid-reply, a steer that rides into the
 	 * next prompt's run and takes its reply (OW-yewiku). Neither is right, but
 	 * both leave the words in the session rather than nowhere. Clearing would
-	 * take the text out with nowhere to put it: the compact route answers 204
-	 * and `sessions/compact` `null`, so the words would be lost without a
-	 * trace. Handing them back would mean growing both wires and both clients
+	 * take the text out with nowhere to put it: `sessions/compact` answers
+	 * `null` on both wires, so the words would be lost without a trace. Handing them back would mean growing both wires and both clients
 	 * for a compaction asked for mid-turn with a steer still undelivered
 	 * (OW-wisifo).
 	 */
@@ -619,7 +618,7 @@ export class PiAdapter implements BackendAdapter {
 		await this.abort();
 		const parent = { model: this.model, level: this.thinkingLevel };
 		// Pi refusing the fork itself -- an entry id it does not know, say -- is
-		// the caller's 400, not ours (OW-rasiwa). Only this command: once it has
+		// the caller's refusal, not our failure (OW-rasiwa). Only this command: once it has
 		// succeeded Pi has forked, and what fails after that is not a refusal.
 		let forked: PiResponseFor<"fork">;
 		try {

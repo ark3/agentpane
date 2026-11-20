@@ -43,7 +43,7 @@ export type PiCommand =
 	| { id?: string; type: "get_state" }
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
 	// As of `pi 1.0.0` Pi trims `name` and refuses one empty after trimming
-	// (`rpc-mode.js`, read at the source); the route refuses it first.
+	// (`rpc-mode.js`, read at the source); the server refuses it first.
 	| { id?: string; type: "set_session_name"; name: string }
 	// `level` is one of `off|minimal|low|medium|high|xhigh|max`. As of 0.87.1 Pi
 	// answers success for a level the model lacks and clamps it -- to the next

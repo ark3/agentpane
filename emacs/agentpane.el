@@ -3579,23 +3579,19 @@ buffer."
 (defun agentpane-compact ()
   "Compact this buffer's session through `sessions/compact'.
 As the request goes out, the buffer's status reads the compaction
-`requesting', as the browser's `compact' (src/client/controller.ts) marks
-it from the click, so that `agentpane-close-session' refuses before the
+`requesting', so that `agentpane-close-session' refuses before the
 server's own status carrying it arrives.  The next status or snapshot
 overwrites the mark, the request answering being admission, not
 completion; a request that fails clears it, if it still reads
-`requesting'.
+`requesting'.  The browser writes no such mark, and reads its request
+still out (`compacting' in src/client/controller.ts).
 
 A status has always reached the buffer by then: the request goes out
 only once the buffer is attached, which only a snapshot does
 \(`agentpane--attach-by'), and a snapshot carries every status field.
-Until OW-rebawa an attach's reply attached it too, and a preview whose
-reply came before its snapshot (D2) had no status to mark, which is where
-the browser's `setSessionCompaction' (src/client/session-state.ts) still
-skips its mark (OW-kimaya).
 
-And Emacs shares the race the browser accepted there (OW-husivu,
-declined): a status or snapshot carrying no compaction that lands before
+The mark has the race the browser shed with its own (OW-husivu): a
+status or snapshot carrying no compaction that lands before
 the server's own `requesting' wipes the mark.  So on a buffer just
 attached, whose snapshot may come after the request has gone out, a
 close can still go out with the compact unanswered."
