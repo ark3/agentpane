@@ -1382,8 +1382,7 @@ describe("client controller", () => {
 	it("lights the row of a session attached while a listing was in flight (OW-sabova)", async () => {
 		const api = new FakeApi();
 		const detached = { ...summary(ref), status: "detached" as const };
-		// The startup listing's and the first open's (OW-dajove).
-		api.listSessions.mockResolvedValueOnce([detached]).mockResolvedValueOnce([detached]);
+		api.listSessions.mockResolvedValueOnce([detached]);
 		const controller = createController(api);
 		await controller.start();
 		api.open();
@@ -1774,35 +1773,11 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// The startup listing's live read can precede the stream's registration on
-	// the server, so a change between them -- another client attaching this
-	// session -- reaches the tab through neither the listing nor a broadcast.
-	// The first open lands after registration (`openEventStream`), so its own
-	// listing reads that change, and what it answers is what the sidebar shows
-	// (OW-dajove).
-	it("lists again on a first open that lands after the startup listing, and shows what that listing answers", async () => {
-		const api = new FakeApi();
-		api.listSessions.mockResolvedValueOnce([{ ...summary(ref), status: "detached" }]);
-		const controller = createController(api);
-		await controller.start();
-		// Load-bearing, not decoration: it drains `refreshInFlight`, so the open
-		// below lands after the startup listing rather than inside it, where it
-		// would be owed a listing (OW-sabova) and this would test that instead.
-		await settle();
-		expect(api.listSessions).toHaveBeenCalledOnce();
-		expect(controller.getView().state.summaries[0]?.status).toBe("detached");
-
-		api.open();
-		await settle();
-
-		expect(api.listSessions).toHaveBeenCalledTimes(2);
-		expect(controller.getView().state.summaries[0]?.status).toBe("attached");
-		controller.dispose();
-	});
-
-	// A first open inside the startup listing is owed one listing after it, like
-	// every call that arrives while a listing is out (OW-sabova).
-	it("lists once more after the startup listing when the first open lands inside it", async () => {
+	// The startup listing goes out behind the `hello`, so its live read follows
+	// the server's registration of this client, and a change after it reaches
+	// the tab as an event (D21, D31 point 1). The first open asks no listing
+	// of its own, wherever it lands against that one (OW-dajove).
+	it("asks no listing of its own at a first open the startup listing went out on", async () => {
 		const api = new FakeApi();
 		const listed = deferred<SessionSummary[]>();
 		api.listSessions.mockReturnValueOnce(listed.promise);
@@ -1810,33 +1785,32 @@ describe("client controller", () => {
 		const starting = controller.start();
 
 		api.open();
-		expect(api.listSessions).toHaveBeenCalledOnce();
-		listed.resolve([]);
+		listed.resolve([summary(ref)]);
 		await starting;
 		await settle();
 
-		expect(api.listSessions).toHaveBeenCalledTimes(2);
+		expect(api.listSessions).toHaveBeenCalledOnce();
 		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
 		controller.dispose();
 	});
 
-	// A startup listing that failed leaves the sidebar empty, and
-	// `refreshSessions` swallows the rejection, so nothing retries it: the page
-	// loaded while the server was away for both the listing and the connect,
-	// and the first `onopen` of all is the server coming back. That open's
-	// listing is what fills the sidebar (OW-vukoku), as every open's is
-	// (OW-dajove).
-	it("lists on the first open when the startup listing failed", async () => {
+	// A page loaded while the server was away: the startup listing failed
+	// with the first socket, and `refreshSessions` swallows the rejection, so
+	// nothing retries it. The open that follows, the server coming back, is
+	// the one that fills the sidebar (OW-vukoku, OW-dajove).
+	it("lists on the open that follows a first socket the startup listing failed with", async () => {
 		const api = new FakeApi();
-		api.listSessions.mockRejectedValueOnce(new Error("offline"));
+		api.listSessions.mockRejectedValueOnce(new ApiClientError("unreachable", "could not reach the agentpane server"));
 		const controller = createController(api);
 		await controller.start();
+		api.drop();
 		await settle();
 		expect(controller.getView().state.summaries).toEqual([]);
 
 		api.open();
 		await settle();
 
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
 		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
 		controller.dispose();
 	});

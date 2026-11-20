@@ -444,6 +444,12 @@ export function createController(
 	let refreshOwed: Promise<void> | undefined;
 	/** Whether the owed listing surfaces: a press joined it. */
 	let owedSurfacing = false;
+	/**
+	 * `start()`'s listing went out on the socket now opening, behind its
+	 * `hello`, so that open is owed no listing of its own (`onOpen`). A close
+	 * clears it, since that listing then failed with the socket.
+	 */
+	let startListedOnOpening = false;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	const forkPointsInFlight = new Set<string>();
@@ -1154,18 +1160,14 @@ export function createController(
 		 * attached until the user pressed Refresh, and that was one visible case
 		 * of a general loss.
 		 *
-		 * The first open lists too (OW-dajove), on the socket, so the listing is
-		 * ordered against the events around it (D21, D31 point 1): the server
-		 * registered this client at its `hello`, whose reply this is, so a change
-		 * after the listing's live read reaches the tab as an event.
-		 *
-		 * The cost is one more listing per page load, since `start()` keeps its
-		 * own to paint the sidebar, which goes out behind the `hello` and, against
-		 * a server that is away, reports it. A first open that lands while that
-		 * listing is still out costs the same one, asked after it rather than
-		 * beside it: it is owed the listing every call arriving mid-listing is
-		 * owed (OW-sabova). The same listing heals a page whose startup listing
-		 * failed, whose first open ever is the server coming back.
+		 * One listing per open, on the socket, so it is ordered against the
+		 * events around it (D21, D31 point 1): the server registered this client
+		 * at its `hello`, so a change after the listing's live read reaches the
+		 * tab as an event. The first open's is `start()`'s own, which went out
+		 * behind the `hello` to paint the sidebar and, against a server that is
+		 * away, report it; a first socket that failed to open took that listing
+		 * with it, and the open that follows lists here, which is how a page
+		 * loaded while the server was away fills its sidebar (OW-dajove).
 		 *
 		 * `false`: nobody asked for this listing, so it owns neither the status
 		 * line nor the error slot.
@@ -1176,7 +1178,8 @@ export function createController(
 			previewHeld = false;
 			abandonPreviewLoads();
 			publish({ connection: "connected" });
-			void refreshSessions(false);
+			if (startListedOnOpening) startListedOnOpening = false;
+			else void refreshSessions(false);
 		},
 		/**
 		 * The socket closed, or failed to open, and nothing reconnects it but
@@ -1211,6 +1214,7 @@ export function createController(
 		 * (`followRef`).
 		 */
 		onDisconnect() {
+			startListedOnOpening = false;
 			for (const listener of closeListeners) listener();
 			const summaries = view.state.summaries.map((summary): SessionSummary =>
 				summary.status === "detached" ? summary : { ...summary, status: "detached", isStreaming: false },
@@ -1254,6 +1258,7 @@ export function createController(
 			if (disposed || started) return;
 			started = true;
 			connection = api.connect(handlers);
+			startListedOnOpening = true;
 			await refreshSessions(true);
 		},
 		dispose() {
