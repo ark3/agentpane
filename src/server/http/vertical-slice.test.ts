@@ -1,20 +1,15 @@
 /**
- * One offline proof of the browser/server contract.  The HTTP app, manager,
- * broadcaster, SSE framing and client event reducer are all real; only the
- * agent process and session store are replaced with deterministic fakes.
+ * One offline proof of the client/server contract. The app's connection
+ * entry point, the manager, the broadcaster and the client's event reducer
+ * are all real; only the agent process and session store are replaced with
+ * deterministic fakes.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import {
-	type CreateSessionResponse,
-	type ForkResponse,
-	ROUTES,
-	type ServerEvent,
-	type SessionRef,
-	sessionKey,
-} from "../../shared/protocol.ts";
+import { type ServerEvent, type SessionRef, sessionKey } from "../../shared/protocol.ts";
 import { initialClientState, reduceServerEvent, viewOf, type ClientState } from "../../client/session-state.ts";
-import type { App } from "./app.ts";
+import { type App, createApp } from "./app.ts";
+import type { AppDeps } from "./deps.ts";
 import {
 	assistantMessage,
 	FakeAdapterFactory,
@@ -22,8 +17,8 @@ import {
 	storedSession,
 	userMessage,
 } from "./testing/fakes.ts";
-import { createTestApp } from "./testing/app.ts";
-import { SseTestClient } from "./testing/sse-client.ts";
+import { TEST_API_TOKEN } from "./testing/app.ts";
+import { TestSocket } from "./testing/socket-client.ts";
 
 const WORKSPACE = process.cwd();
 
@@ -34,34 +29,17 @@ afterEach(async () => {
 	app = undefined;
 });
 
-function createOfflineApp(codex: FakeAdapterFactory): App {
-	return createTestApp({
-		index: new FakeSessionIndex(),
-		adapters: { codex },
+function createOfflineApp(adapters: AppDeps["adapters"], index = new FakeSessionIndex()): App {
+	return createApp({
+		index,
+		adapters,
+		apiToken: TEST_API_TOKEN,
 		newId: () => "offline-virtual-id",
 		now: () => "2026-08-11T00:00:00.000Z",
 	});
 }
 
-function request(path: string, init?: RequestInit): Promise<Response> {
-	return app!.fetch(new Request(`http://127.0.0.1${path}`, init));
-}
-
-function post(path: string, body: unknown = {}): Promise<Response> {
-	return request(path, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body),
-	});
-}
-
-async function openEvents(): Promise<SseTestClient> {
-	const response = await request(ROUTES.events);
-	expect(response.headers.get("content-type")).toBe("text/event-stream");
-	return new SseTestClient(response);
-}
-
-/** Apply exactly the decoded SSE payloads the browser receives. */
+/** Apply exactly the events the client receives. */
 function reduceEvents(selected: SessionRef, events: readonly ServerEvent[]): ClientState {
 	let state: ClientState = { ...initialClientState(), selected };
 	for (const event of events) {
@@ -77,7 +55,7 @@ function transcript(state: ClientState, ref: SessionRef) {
 }
 
 describe("offline vertical slice", () => {
-	it("drives a virtual Codex session from create through abort with SSE reduced by the client", async () => {
+	it("drives a virtual Codex session from create through abort with its events reduced by the client", async () => {
 		const codex = new FakeAdapterFactory({
 			onSubmit(adapter, text) {
 				adapter.append(userMessage(text));
@@ -86,31 +64,24 @@ describe("offline vertical slice", () => {
 				adapter.streamToken("line");
 			},
 		});
-		app = createOfflineApp(codex);
-		const events = await openEvents();
+		app = createOfflineApp({ codex });
+		const events = await new TestSocket(app).hello();
 
-		const created = ((await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "codex" })).json()) as CreateSessionResponse).session;
+		const created = (await events.ok("sessions/create", { cwd: WORKSPACE, backend: "codex" })).session;
 		expect(created.ref).toEqual({ backend: "codex", id: "virtual:offline-virtual-id" });
-		await events.until(() => events.typed("snapshot").length === 1, "the create's snapshot");
+		expect(events.typed("snapshot")).toHaveLength(1);
 
-		expect((await post(ROUTES.prompt(created.ref), { text: "hello" })).status).toBe(202);
-		await events.until(
-			() => events.isStreaming(created.ref) && events.transcript(created.ref).length === 2,
-			"the streaming turn",
-		);
+		expect(await events.ok("sessions/prompt", { handle: created.handle, text: "hello" })).toEqual({ disposition: "started" });
+		expect([events.isStreaming(created.ref), events.transcript(created.ref).length]).toEqual([true, 2]);
 
-		expect((await post(ROUTES.abort(created.ref))).status).toBe(204);
-		await events.until(
-			() => events.typed("status").some((event) => !event.isStreaming),
-			"the aborted streaming state",
-		);
+		expect(await events.ok("sessions/abort", { handle: created.handle })).toEqual({ queued: [] });
+		expect(events.typed("status").some((event) => !event.isStreaming)).toBe(true);
 
 		const state = reduceEvents(created.ref, events.events);
 		expect(transcript(state, created.ref)).toEqual([userMessage("hello"), assistantMessage("offline")]);
 		expect(viewOf(state, created.ref)?.isStreaming).toBe(false);
 		expect(codex.created).toHaveLength(1);
 		expect(codex.created[0]?.aborts).toBe(1);
-		await events.close();
 	});
 
 	it("follows a materialised id by the snapshot under the handle, with no renamed on the wire", async () => {
@@ -122,18 +93,15 @@ describe("offline vertical slice", () => {
 				adapter.append(assistantMessage("saved"));
 			},
 		});
-		app = createOfflineApp(codex);
-		const events = await openEvents();
+		app = createOfflineApp({ codex });
+		const events = await new TestSocket(app).hello();
 
-		const created = ((await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "codex" })).json()) as CreateSessionResponse).session;
-		await events.until(() => events.typed("snapshot").length === 1, "the create's snapshot");
+		const created = (await events.ok("sessions/create", { cwd: WORKSPACE, backend: "codex" })).session;
 		const { handle } = events.typed("snapshot")[0]!;
+		expect(handle).toBe(created.handle);
 
-		expect((await post(ROUTES.prompt(created.ref), { text: "materialise" })).status).toBe(202);
-		await events.until(
-			() => events.typed("snapshot").some((event) => sessionKey(event.session) === sessionKey(materialised)),
-			"the materialised snapshot",
-		);
+		await events.ok("sessions/prompt", { handle, text: "materialise" });
+		expect(events.typed("snapshot").some((event) => sessionKey(event.session) === sessionKey(materialised))).toBe(true);
 
 		// The first event naming the new ref is a snapshot under the handle the
 		// session had all along, and nothing announces the rename beside it (D24).
@@ -150,7 +118,6 @@ describe("offline vertical slice", () => {
 			assistantMessage("saved"),
 		]);
 		expect(viewOf(state, materialised)?.isStreaming).toBe(false);
-		await events.close();
 	});
 
 	it("leaves a browser that did not fork on the parent it was reading (OW-suhoto)", async () => {
@@ -167,27 +134,21 @@ describe("offline vertical slice", () => {
 				adapter.append(assistantMessage("parent reply"));
 			},
 		});
-		app = createTestApp({
-			index: new FakeSessionIndex([storedSession(parent, WORKSPACE)]),
-			adapters: { pi },
-			newId: () => "offline-virtual-id",
-			now: () => "2026-08-11T00:00:00.000Z",
-		});
-		// The browser that does NOT fork: it is on this stream and its selection is
-		// the parent throughout.
-		const onlooker = await openEvents();
+		app = createOfflineApp({ pi }, new FakeSessionIndex([storedSession(parent, WORKSPACE)]));
+		// The browser that does NOT fork: it is on its own socket and its
+		// selection is the parent throughout.
+		const onlooker = await new TestSocket(app).hello();
+		const forker = await new TestSocket(app).hello();
 
-		await request(ROUTES.session(parent));
-		await onlooker.until(() => onlooker.typed("snapshot").length === 1, "the attach snapshot");
-		expect((await post(ROUTES.prompt(parent), { text: "hello" })).status).toBe(202);
-		await onlooker.until(() => onlooker.transcript(parent).length === 2, "the parent's turn");
+		const { session } = await forker.ok("sessions/attach", { ref: parent });
+		expect(onlooker.typed("snapshot")).toHaveLength(1);
+		await forker.ok("sessions/prompt", { handle: session.handle, text: "hello" });
+		expect(onlooker.transcript(parent)).toHaveLength(2);
 
-		const forked = (await (await post(ROUTES.fork(parent), { entryId: "e1" })).json()) as ForkResponse;
+		const forked = await forker.ok("sessions/fork", { handle: session.handle, entryId: "e1" });
 		expect(forked.ref).toEqual(fork);
-		await onlooker.until(
-			() => onlooker.typed("sessions-changed").length >= 1,
-			"the list invalidation the fork emits",
-		);
+		// The list invalidation the fork emits.
+		expect(onlooker.typed("sessions-changed").length).toBeGreaterThanOrEqual(1);
 
 		const state = reduceEvents(parent, onlooker.events);
 		expect(state.selected).toEqual(parent);
@@ -196,6 +157,5 @@ describe("offline vertical slice", () => {
 		// And the reason it holds: nothing was renamed, a second conversation was
 		// created under a handle of its own, so no event re-keys anyone.
 		expect(onlooker.events.map((event) => event.type)).not.toContain("renamed");
-		await onlooker.close();
 	});
 });
