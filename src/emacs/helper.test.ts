@@ -643,6 +643,59 @@ describe("notifications", () => {
 		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
 	});
 
+	// Each attaches for the buffer that sent its token, as an attach does (D30),
+	// so a detach carrying that token gives it up the same way (`forget`).
+	it.each([
+		{
+			method: "sessions/create",
+			params: { cwd: "/work", backend: "pi" },
+			script: (hold: Promise<void>): Script => ({
+				"sessions/create": async (_params, server) => {
+					await hold;
+					server.emit(snapshot(pi, "h9"));
+					return { session: summary(pi, "h9") };
+				},
+			}),
+		},
+		{
+			method: "sessions/prompt",
+			params: { session: pi, text: "hello", priorErrorId: null },
+			script: (hold: Promise<void>): Script => ({
+				"sessions/prompt": async (_params, server) => {
+					await hold;
+					server.emit(snapshot(pi, "h9"));
+					return { disposition: "started", session: summary(pi, "h9") };
+				},
+			}),
+		},
+		{
+			method: "sessions/forkAndPrompt",
+			params: { session: codex, handle: h(codex), index: 2, text: "again" },
+			script: (hold: Promise<void>): Script => ({
+				"sessions/forkAndPrompt": async (_params, server) => {
+					await hold;
+					server.emit(snapshot(pi, "h9"));
+					return { session: summary(pi, "h9"), disposition: "started" };
+				},
+			}),
+		},
+	])("binds nothing for a $method in flight across a sessions/detach carrying its token, nor feeds what it started", async ({ method, params, script }) => {
+		const request = held();
+		const { io, server } = start(script(request.hold));
+		io.send({ jsonrpc: "2.0", id: 1, method, params: { ...params, token: 1 } });
+		await vi.waitFor(() => expect(server.calls).toHaveLength(1));
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, tokens: [1] } });
+		await io.until(1);
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
+
+		request.release();
+		await io.until(2);
+		server.emit(status(pi, "h9", 2));
+		await tick();
+		expect(io.notifications()).toEqual([]);
+		expect(io.response(1)).toHaveProperty("result");
+	});
+
 	it("forwards the snapshot under the handle that names a rename, and nothing beside it", async () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, server } = start(attachScript(virtual));
