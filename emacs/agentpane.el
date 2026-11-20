@@ -510,14 +510,11 @@ The server's name for the session's container, which a rename never moves
 and a fork does not share (D24): the one the snapshot that attached the
 buffer carried, never the attach's reply (OW-rebawa), or one a later
 snapshot moved it onto; see `agentpane--notified-buffer'.
-Nil in a buffer that has not attached.  A buffer detached keeps the one
-it held, which the server never mints again: the parent of a Pi fork
-whose reply lands before the `session/detached' for its handle, and
-whose detach names it.  One the helper detached, by a
-`session/detached', lets go of it instead -- usually a Pi fork's parent
-too, since the server's `ended' for it goes out inside the fork, ahead
-of the reply (D26) -- as does one attached through a helper that has
-exited (D25); see `agentpane--let-go'.")
+Nil in a buffer that has not attached.  One the helper detached, by a
+`session/detached', lets go of it -- a Pi fork's parent among them,
+since the server's `ended' for it goes out inside the fork, ahead of the
+reply (D26) -- as does one attached through a helper that has exited
+\(D25); see `agentpane--let-go'.")
 
 (defconst agentpane--spawn-timeout 60
   "Seconds to wait for a request that may spawn the session's backend:
@@ -3927,10 +3924,11 @@ aborts it, so the turn is aborted first, the loss made deliberate; that
 abort is the client's under D15, and the Pi adapter's fork stops the
 session again, usually taking nothing out (ark3/agentpane#47).  An
 edit's send sends no abort of its own (`agentpane--send-edit', D30).  It goes after the points are
-matched, so a message that is not forkable costs the turn nothing.  The
-turn-done watch on the parent's handle ends as the abort goes out,
-raising nothing (`agentpane--watch-turn'), since the aborted turn's last
-status usually arrives before the fork's reply, and the parent's window
+matched, so a message that is not forkable costs the turn nothing.  On
+Pi the turn-done watch on the parent's handle ends there too, raising
+nothing (`agentpane--watch-turn'), whether or not the turn reads
+streaming, since the fork stops it either way: its last status and the
+parent's `ended' arrive before the fork's reply, and the parent's window
 may show something else by then.  An abort that fails leaves that turn
 running unwatched, the one the user asked to stop.  Codex
 and Claude Code keep a parent turn running through a fork, and are not
@@ -3939,8 +3937,8 @@ container of its own under a handle of its own, and takes the parent's
 container out of the server's table (D24, `SessionManager' in
 src/server/http/session-manager.ts), so the parent's handle hears nothing
 more but the `ended' that says so (D26).  The helper passes that on as a
-`session/detached', which usually lands before the fork's reply and lets
-go of the handle (`agentpane--let-go').  At the reply this buffer counts
+`session/detached', which lands before the fork's reply and lets go of
+the handle (`agentpane--let-go').  At the reply this buffer counts
 itself detached, so `g' previews it rather than attaching the parent's
 old branch again, as it would in any buffer not attached; detaches the
 parent from the helper, releasing the token of every attach it sent
@@ -4058,9 +4056,9 @@ should a merge kill it meanwhile, which takes the fork over with
     (agentpane--fork-point
      index
      (lambda (point _stops)
+       (when pi-backend (agentpane--watch-forget agentpane--handle))
        (if (and pi-backend agentpane--streaming)
            (progn
-             (agentpane--watch-forget agentpane--handle)
              ;; The prompts this stop takes out of Pi's queue, its result's
              ;; `:queued', are dropped here, as the server's own stop inside
              ;; the fork drops them (`PiAdapter.fork', D16, OW-wisifo), and
@@ -4321,7 +4319,7 @@ fork, which is Pi (D15), the server's fork stops it (`PiAdapter.fork').
 The turn-done watch on this buffer's handle ends as the request goes out,
 raising nothing, where the edit's hint says the send stops a running turn
 \(`agentpane--edit-stops-p'), since the stop's last status, and a Pi
-parent's `ended', usually arrive before the reply.  A Pi fork moves the
+parent's `ended', arrive before the reply.  A Pi fork moves the
 parent's live process onto the fork, so at the reply, or at a refusal
 naming a fork, this buffer detaches as `agentpane--fork-at' detaches a Pi
 fork's parent.
@@ -4730,16 +4728,13 @@ Nothing moves a watch to a fork: the browser arms its own on the fork
 its prompt goes to, and here a fork sends nothing and opens in a buffer
 of its own (`agentpane-fork'), so a turn running on the parent
 stays the parent's, and ends there, on Codex and Claude Code, which keep
-it running.  A Pi fork stops it, the loss deliberate, and the abort it
-sends first, for a parent reading streaming, ends the parent's watch
-raising nothing (`agentpane--fork-points'): kept, that turn's last
-status, which usually arrives before the fork's reply, raised the
-indicator for a turn the user had stopped on purpose whenever the
-parent's window had been switched away by then, and one the helper no
-longer forwarded, once the fork's reply had detached the parent, left
-the watch waiting on the parent's next turn.  The detach at the fork's
-reply ends any watch still on the parent, one whose turn was not yet
-seen streaming and so was not aborted."
+it running.  A Pi fork stops it, the loss deliberate, and ends the
+parent's watch raising nothing once the fork point is matched, whether
+or not the turn reads streaming (`agentpane--fork-points'): kept, that
+turn's last status, or the parent's `session/detached', both of which
+arrive before the fork's reply, raised the indicator for a turn the
+user had stopped on purpose whenever the parent's window had been
+switched away by then."
   (let ((entry (and agentpane--handle (assoc agentpane--handle agentpane--turn-watches))))
     (pcase (cadr entry)
       ('sent (when streaming (setcar (cdr entry) 'streamed)))

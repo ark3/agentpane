@@ -7658,17 +7658,20 @@ OW-hiliti)."
 
 (defun agentpane-test--pi-fork-during-a-turn (order)
   "Submit a turn on a Pi session shown in the selected window, see it
-stream, and fork the session there, which aborts that turn.  Its
-not-streaming status arrives before the fork's reply when ORDER is
-`before', as that abort answered first makes usual, the parent's window
-switched to another buffer by then; after it when `after'; and never when
-`never', the helper having stopped forwarding the parent's handle.  When
-ORDER is `unstreamed' the turn is not yet seen streaming at the fork,
-which then aborts nothing, and its statuses, streaming and then not,
-arrive after the fork's reply, sent before the helper heard the detach.
-Then the parent attaches again
-under a new handle, and a turn from elsewhere streams there and ends.
-Return whether the indicator is raised."
+stream, and fork the session there, which aborts that turn.  Before the
+fork's reply the parent's window is switched to another buffer, and the
+helper delivers what the server wrote ahead of that reply: the aborted
+turn's not-streaming status when ORDER is `before', none when `never',
+the server's next status for the parent going out under the fork's
+handle, and then the `session/detached' its `ended' brings, since a Pi
+fork moves the parent's process onto the fork before it answers
+\(`#forkOnto' in src/server/http/session-manager.ts).  When ORDER is
+`unstreamed' the turn is not yet seen streaming at the fork, which then
+aborts nothing, and the server's stop inside the fork brings its
+statuses, streaming and then not, ahead of the `session/detached'.
+Then the parent attaches again under a new handle, and a turn from
+elsewhere streams there and ends.  Return whether the indicator is
+raised."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl")))
     (agentpane-test--watching
@@ -7695,15 +7698,14 @@ Return whether the indicator is raised."
               (setq hold '(sessions/fork))
               (agentpane-test--goto-index 0)
               (agentpane-fork)
-              (when (eq order 'before)
-                (agentpane-test--show (get-buffer-create "*scratch*"))
-                (funcall status nil))
+              (agentpane-test--show (get-buffer-create "*scratch*"))
+              (pcase order
+                ('before (funcall status nil))
+                ('unstreamed (funcall status t) (funcall status nil)))
+              (agentpane--on-notification
+               nil 'session/detached (list :session ref :handle "h1" :cause "ended"))
               (funcall (cdr (pop held)) t)
               (should-not (eq (window-buffer (selected-window)) buffer))
-              (when (eq order 'after) (funcall status nil))
-              (when (eq order 'unstreamed)
-                (funcall status t)
-                (funcall status nil))
               (setq attached (list :ref ref :handle "h3"))
               (agentpane--attach)
               (should (equal agentpane--handle "h3"))
@@ -7714,12 +7716,11 @@ Return whether the indicator is raised."
 (ert-deftest agentpane-test-turn-done-not-raised-by-a-pi-fork ()
   "A Pi fork ends the parent's watch without raising the indicator: the
 turn it stops is one the user stopped on purpose, and the parent's window
-now shows the fork.  So neither that turn's not-streaming status, before
-the fork's reply, with the parent already out of view, or after it, nor a
-later turn from elsewhere on the parent, re-attached, raises it
-\(OW-dunahe)."
+now shows the fork.  So neither that turn's not-streaming status, which
+lands before the fork's reply, nor the parent's `session/detached' after
+it, nor a later turn from elsewhere on the parent, re-attached, raises
+it, whether or not the turn was seen streaming at the fork (OW-dunahe)."
   (should-not (agentpane-test--pi-fork-during-a-turn 'before))
-  (should-not (agentpane-test--pi-fork-during-a-turn 'after))
   (should-not (agentpane-test--pi-fork-during-a-turn 'never))
   (should-not (agentpane-test--pi-fork-during-a-turn 'unstreamed)))
 
