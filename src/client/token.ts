@@ -18,6 +18,8 @@ export interface TokenGate {
 	token(): string | null;
 	/** The server refused the token the socket's `hello` carried: ask for it, again if a stored one was rotated. */
 	unauthorized(): void;
+	/** The server accepted the token a `hello` carried, this tab's paste or one another tab stored: stop asking. */
+	authorized(): void;
 	/** Keep a pasted token and stop asking. */
 	store(token: string): void;
 	asking(): boolean;
@@ -37,6 +39,7 @@ export function createTokenGate(storage: Pick<Storage, "getItem" | "setItem">): 
 	return {
 		token: () => storage.getItem(TOKEN_STORAGE_KEY),
 		unauthorized: () => setAsking(true),
+		authorized: () => setAsking(false),
 		store(token) {
 			storage.setItem(TOKEN_STORAGE_KEY, token);
 			setAsking(false);

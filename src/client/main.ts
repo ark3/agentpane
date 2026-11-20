@@ -15,9 +15,13 @@ const target = document.getElementById("app");
 if (!target) throw new Error("missing #app");
 
 // The API token lives in this origin's `localStorage`, and a socket closed for
-// a refused one asks the owner to paste it; both are wired here for the same reason as the predicate below.
+// a refused one asks the owner to paste it until a `hello` is accepted; both are wired here for the same reason as the predicate below.
 const tokenGate = createTokenGate(window.localStorage);
-const api = createAgentpaneApi({ token: tokenGate.token, onUnauthorized: tokenGate.unauthorized });
+const api = createAgentpaneApi({
+	token: tokenGate.token,
+	onUnauthorized: tokenGate.unauthorized,
+	onAuthorized: tokenGate.authorized,
+});
 
 // The preview poll must never run against a hidden tab (OW-76). The predicate
 // is injected here because `controller.ts` stays free of `window`/`document`.

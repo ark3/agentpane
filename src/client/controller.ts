@@ -11,7 +11,7 @@ import type {
 	SessionSummary,
 } from "$shared/protocol.ts";
 import { sessionKey } from "$shared/protocol.ts";
-import { ApiClientError, type AgentpaneApi, type EventConnection, type EventHandlers } from "./api.ts";
+import { ApiClientError, REFUSED_TOKEN, type AgentpaneApi, type EventConnection, type EventHandlers } from "./api.ts";
 import { nextPreviewDelay, PREVIEW_POLL_FAST_MS, PREVIEW_POLL_IDLE_MS } from "./preview-poll.ts";
 import { unprompted } from "./render/system.ts";
 import {
@@ -1157,12 +1157,15 @@ export function createController(
 		 * loaded while the server was away fills its sidebar (OW-dajove).
 		 *
 		 * `false`: nobody asked for this listing, so it owns neither the status
-		 * line nor the error slot.
+		 * line nor the error slot. The open answers one error there itself: a
+		 * refused token's, which `start()`'s listing or a gesture met at the
+		 * close before, is untrue once a `hello` is accepted, whether on a
+		 * paste here or on a token another tab stored.
 		 */
 		onOpen() {
 			// The transition a held preview read waits for (`loadPreview`).
 			previewHeld = false;
-			publish({ connection: "connected" });
+			publish({ connection: "connected", ...(view.error === REFUSED_TOKEN ? { error: null } : {}) });
 			if (startListedOnOpening) startListedOnOpening = false;
 			else void refreshSessions(false);
 		},

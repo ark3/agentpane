@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SOCKET_CLOSE } from "$shared/protocol.ts";
 import { createAgentpaneApi } from "./api.ts";
 import { createController } from "./controller.ts";
@@ -31,6 +31,7 @@ function mountWired(accepted: { token: string }) {
 		},
 		token: gate.token,
 		onUnauthorized: gate.unauthorized,
+		onAuthorized: gate.authorized,
 	});
 	const controller = createController(api);
 	render(TokenPrompt, { gate, onStored: () => controller.reconnect() });
@@ -72,6 +73,29 @@ describe("TokenPrompt", () => {
 		expect(screen.getByLabelText("API token")).toHaveValue("");
 		expect(document.body).not.toHaveTextContent("pasted-token");
 		controller.dispose();
+	});
+
+	// The token another tab on the origin stored is in this one's storage, and
+	// its next attempt carries it; `asking` was lowered only by a paste here.
+	it("takes the dialog and the refusal's error down at a hello accepted on a token another tab stored", async () => {
+		vi.useFakeTimers();
+		try {
+			const { sockets, controller } = mountWired({ token: "stored-elsewhere" });
+			await controller.start();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(screen.getByRole("dialog")).toBeInTheDocument();
+			expect(controller.getView().error).toBe("the server refused the API token");
+
+			localStorage.setItem(TOKEN_STORAGE_KEY, "stored-elsewhere");
+			await vi.advanceTimersByTimeAsync(5_000);
+			expect(hellos(sockets)).toEqual(["", "stored-elsewhere"]);
+			expect(controller.getView().connection).toBe("connected");
+			expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+			expect(controller.getView().error).toBeNull();
+			controller.dispose();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("stores nothing for a blank paste", async () => {

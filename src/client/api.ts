@@ -95,6 +95,8 @@ export interface ApiOptions {
 	token?: () => string | null;
 	/** Told of a socket closed for a refused token, before its requests reject. */
 	onUnauthorized?: () => void;
+	/** Told of a `hello` the server accepted, before `onOpen`. */
+	onAuthorized?: () => void;
 }
 
 /** The server refused a request, or this module refused to send it; either way it ran nothing. */
@@ -228,11 +230,14 @@ interface Connection {
 }
 
 const UNREACHABLE = "could not reach the agentpane server";
+/** What every request held at a close for a refused token rejects with. */
+export const REFUSED_TOKEN = "the server refused the API token";
 
 export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 	const openSocket = options.openSocket ?? defaultOpenSocket;
 	const token = options.token ?? (() => null);
 	const onUnauthorized = options.onUnauthorized ?? (() => {});
+	const onAuthorized = options.onAuthorized ?? (() => {});
 	let current: Connection | null = null;
 	let lastId = 0;
 
@@ -280,7 +285,7 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 			for (const [id, pending] of connection.pending) {
 				pending.reject(
 					unauthorized
-						? new ApiClientError("unauthorized", "the server refused the API token")
+						? new ApiClientError("unauthorized", REFUSED_TOKEN)
 						: unsent.has(id)
 							? new ApiClientError("unreachable", UNREACHABLE)
 							: new ConnectionLostError(),
@@ -308,6 +313,7 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 				return;
 			}
 			if (frame.id === helloId) {
+				onAuthorized();
 				handlers.onOpen();
 				return;
 			}
