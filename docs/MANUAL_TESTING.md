@@ -5184,6 +5184,18 @@ The token prompt opened at the refused `hello`; with the token pasted, the page 
 The frames it sent were `hello`, `sessions/list` and `sessions/preview`, and no HTTP command went out.
 SIGTERM to the server showed "Reconnecting…" 1.4s later; the server restarted on the same port 6s after that, and the page reconnected 3.8s after the restart, with the stored token and no prompt.
 
+## The probes over the socket (ark3/agentpane#54)
+
+Run on the home server on 2026-11-19, on its system `bun 1.4.0`, against this checkout as each probe was ported from Python, HTTP and the event stream to Bun and the socket (D31), each probe's run once on what it committed.
+Each probe that talks to agentpane does it through `resources/probes/agentpane_live_support.ts`, which says `hello` with the token the probe's own server created in this session's tmpfs `~/.ssh`.
+
+**`agentpane_pi_smoke.ts --tool-check` passed every check.**
+On `pi 1.5.2` with `--model openrouter/deepseek/deepseek-v4.1-flash:high`, read back as `openrouter/deepseek/deepseek-v4.1-flash` at `effort: "high"`, in a throwaway state directory (`makeStateHome`); 45 s from start to finish.
+The create answered a Pi JSONL path with a handle (`still_virtual_after_create: false`, `renamed_during: "create"`), through `bun`, `bwrap`, `bwrap`, `pi`, and an attach by the ref the create answered reached the same ref under the same handle.
+The first turn's text grew across two upserts, a tool turn put a `toolCall` block on the wire, and no dialog was cancelled in either turn.
+The long turn was aborted at 20023 assistant characters (`abort_wait: "filled"`), went idle 10 ms after the abort's request with `queued: []`, and still held 20023 1.5 s later.
+SIGTERM to the server left no Pi worker, and the state directory and the server's log were removed.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.

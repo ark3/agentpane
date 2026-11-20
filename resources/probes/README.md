@@ -73,14 +73,14 @@ Verified with the change: `codex-cli` 0.157.1 on the home server, 2026-09-30; se
 Verified with: `codex-cli` 0.157.1 on the home server, 2026-09-30, with the explicit `--model`; see `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
 Verified after the create began to start the session (ark3/agentpane#48): `codex-cli` 0.170.0 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
 
-## `agentpane_pi_smoke.py`
+## `agentpane_pi_smoke.ts`
 
 The same assembled application path with a real Pi process, plus the three things only Pi can establish: that the production `direnv exec <workspace> sbox -- pi --mode rpc` chain actually starts an agent (`capture_fixtures.py` deliberately bypasses sbox, so nothing had run this chain until this harness first did), that the session id changes under the client and the superseded id keeps working, and that killing the server reaches an agent two `exec`s down inside `bwrap`.
 
 ```bash
-python3 agentpane_pi_smoke.py --workspace /home/asa0717/src/agentpane
-python3 agentpane_pi_smoke.py --workspace ... --tool-check   # also assert a toolCall block
-python3 agentpane_pi_smoke.py --model <ref>                   # default is the model AGENTS.md pins
+bun agentpane_pi_smoke.ts --workspace /home/asa0717/src/agentpane
+bun agentpane_pi_smoke.ts --workspace ... --tool-check   # also assert a toolCall block
+bun agentpane_pi_smoke.ts --model <ref>                   # default is the model AGENTS.md pins
 ```
 
 Same guarantees as the Codex harness: temporary writable state dir
@@ -103,6 +103,9 @@ Its first runs on that machine were on `pi` 0.85.1, 2026-09-13; see "The Pi smok
 Verified in a session whose own sandbox mounts `~/.pi/agent` read-only, the case `PI_CODING_AGENT_DIR` exists for: `pi` 1.2.0 on the home server, 2026-10-14, with `--tool-check` and the explicit `--model`, in a session launched by `card run`, the first run that records its launch; the OW-niwusi runs had `~/.pi/agent/sessions` read-only too.
 See `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes in a `card run` session whose `~/.pi/agent` is read-only (OW-fitopi)".
 Verified after the create began to start the session (ark3/agentpane#48): `pi` 1.5.2 on the home server, 2026-11-19, with and without `--tool-check`; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
+It was `agentpane_pi_smoke.py`, over HTTP and the event stream, until ark3/agentpane#54 ported it to Bun and the socket (D31), every run above being of the Python one.
+Since the port it prompts, aborts and attaches by the handle the create answered, and the superseded-ref check is an attach of the ref the create answered, which must reach the same handle; replies are recorded by their result or refusal code where HTTP statuses were.
+Verified with the port: `pi` 1.5.2 on the home server, 2026-11-19, with `--tool-check`; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
 ## `agentpane_pi_steer_probe.py`
 
@@ -224,6 +227,16 @@ It ensures the token file exists, creating it as `loadApiToken` in `src/server/a
 It then runs `sbox --profile none --workspace <fresh temp dir> -- sh -c ...`, which prints a per-run sentinel and `cat`s the path expanded outside the sandbox.
 It passes (exit 0) when the sentinel arrives and the token does not follow it, fails (exit 1) when it does, naming `sbox --ssh` and `sbox --rw ~/.ssh` as what exposes the file, and is inconclusive (exit 2) when no sentinel arrives, since `sbox` then never ran the command -- it exits 1 before starting a sandbox on a missing profile or workspace, which would otherwise read as a refused read.
 It never prints the token.
+
+## `agentpane_live_support.ts`
+
+Not a probe. The machinery every probe that drives agentpane's API shares: the socket client, the process-tree walk, the temporary state dir, and the cleanup criteria; ported from `agentpane_live_support.py` (ark3/agentpane#54).
+
+`AgentpaneSocket.open` connects to `/api/socket` and sends the `hello` (D31 point 5) with the token read from `~/.ssh/agentpane-token` -- the file the server reads or creates on startup -- at that moment, since the probe's own server creates the file on its first start.
+The token reaches a probe only through that file, never through an environment variable, because every agent is a child of the server and inherits its environment.
+A probe run inside `sbox` sees the sandbox's tmpfs `~/.ssh`, so the server it starts there creates and reads a throwaway token in it, and a server running outside the sandbox refuses it.
+Every event is recorded, stamped, before a reply that follows it settles, so a command's continuation sees everything the server wrote before the reply (D31 point 3); `waitFor` polls a predicate over that log, and `request` answers a reply's `result` or its refusal `code`, `connection_lost` for a socket that closed first.
+`AgentpaneSocket.connect` opens without a `hello`, for a probe whose point is what a first frame that is not one gets.
 
 ## `agentpane_live_support.py`
 
