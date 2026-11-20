@@ -1713,23 +1713,24 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A page loaded while the server was away: the startup listing failed
-	// with the first socket, and `refreshSessions` swallows the rejection, so
-	// nothing retries it. The open that follows, the server coming back, is
-	// the one that fills the sidebar (OW-vukoku, OW-dajove).
+	// A page loaded while the server was away: the first socket failed to
+	// open, the api refused the startup listing it held as `unreachable`, and
+	// `refreshSessions` swallows the rejection, so nothing retries it. The
+	// open that follows, the server coming back, is the one that fills the
+	// sidebar (OW-vukoku, OW-dajove).
 	it("lists on the open that follows a first socket the startup listing failed with", async () => {
 		const server = fakeServer();
-		server.on["sessions/list"].mockRejectedValueOnce(new ApiClientError("unreachable", "could not reach the agentpane server"));
+		server.failing = 1;
 		const controller = createController(server.api());
 		await controller.start();
-		server.drop();
 		await settle();
+		expect(server.on["sessions/list"]).not.toHaveBeenCalled();
 		expect(controller.getView().state.summaries).toEqual([]);
 
 		await reopen(controller);
 		await settle();
 
-		expect(server.on["sessions/list"]).toHaveBeenCalledTimes(2);
+		expect(server.on["sessions/list"]).toHaveBeenCalledOnce();
 		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
 		controller.dispose();
 	});
