@@ -153,20 +153,22 @@ It was `agentpane_pi_steer_probe.py`, over HTTP and the event stream, until ark3
 Since the port both its prompts go by the handle the create answered, and the replies are recorded by their result or refusal code where HTTP statuses were.
 Verified with the port: `pi` 1.5.2 on the home server, 2026-11-19, the text turn; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
-## `agentpane_pi_prompt_window_probe.py`
+## `agentpane_pi_prompt_window_probe.py` and `agentpane_pi_prompt_window_probe.ts`
 
-Proves: **what Pi, and agentpane's prompt route, answer a second prompt sent before the first's `agent_start`, and a prompt an extension command handles** (OW-kokotu).
+Proves: **what Pi, and agentpane's `sessions/prompt`, answer a second prompt sent before the first's `agent_start`, and a prompt an extension command handles** (OW-kokotu).
 
 ```bash
-python3 agentpane_pi_prompt_window_probe.py                   # both parts
-python3 agentpane_pi_prompt_window_probe.py --part rpc        # Pi alone, no server
-python3 agentpane_pi_prompt_window_probe.py --part agentpane --skip-build
+python3 agentpane_pi_prompt_window_probe.py                   # part rpc: Pi alone, no server
+bun agentpane_pi_prompt_window_probe.ts --skip-build          # part agentpane, through the built server
+bun agentpane_pi_prompt_window_probe.ts --command refs --command mcp   # extension commands to send
 ```
 
 Part `rpc` speaks to `pi --mode rpc --no-session --model <ref>` directly, not through `sbox`, stamping every stdout `read()` chunk on arrival.
 It times write, `prompt` response and `agent_start` over five one-word prompts; sends a second prompt bare and with `streamingBehavior: "steer"` in the same `write()` as the first; sends one with `"steer"` while Pi is idle; sends a bare second prompt from the reader thread the instant it parses the first's response; and sends each extension command `get_commands` lists as a prompt of its own name.
-Part `agentpane` drives the built server on the production spawn chain through the REST prompt route: two POSTs released together from two threads, a second POST the moment the first's 202 returns, and each extension command as a POST followed by an ordinary prompt.
+Part `agentpane` drives the built server on the production spawn chain over the socket (D31), by the create's handle: two prompt frames written back to back and neither awaited, a second prompt the moment the first's reply arrives, and each extension command named by `--command` (default `mcp`) as a prompt followed by an ordinary one.
 Its `pi` shim tees Pi's stdin as well as its stdout, because whether agentpane's prompt carried `streamingBehavior` is only visible on stdin.
+Part `agentpane` was the Python file's `--part agentpane`, over HTTP and the event stream, until ark3/agentpane#54 ported it to Bun and the socket; the Python file keeps the Pi-direct parts, `rpc` and `steer_abort`.
+Since the port it records each reply's result or refusal code where HTTP statuses were, and it no longer reads the extension commands from part `rpc`'s `get_commands`, which agentpane does not relay.
 
 The Pi state dir is a temporary copy of `~/.pi/agent`'s credential and settings files by name plus its `extensions/` directory dereferenced, so this machine's user extensions and Pi's built-in ones load as they would for agentpane; the workspace is an empty directory under `/var/tmp` holding only the `.sandbox-workspace` marker `sbox` needs.
 It records rather than asserts: the output is the evidence, and it exits non-zero only when a part could not run or cleanup failed.
@@ -174,21 +176,23 @@ Costs tokens: about ten one-word model calls for part `rpc` and six for part `ag
 
 Verified with: `pi` 1.2.0 on the home server, 2026-10-14, five runs, in `docs/MANUAL_TESTING.md`, "A second Pi prompt sent before the first's `agent_start` is refused, and an extension command's is answered with nothing (OW-kokotu)".
 Run after the create began to start the session (ark3/agentpane#48), `--part agentpane` only: `pi` 1.5.2 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
+Verified with the port, part `agentpane` only: `pi` 1.5.2 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
-## `agentpane_pi_fork_first_turn_probe.py`
+## `agentpane_pi_fork_first_turn_probe.py` and `agentpane_pi_fork_first_turn_probe.ts`
 
-Proves: **when a new Pi session's file and a fork's file first reach disk, and what Pi, and agentpane's fork route, answer a fork sent before the first assistant reply** (OW-tigaye).
+Proves: **when a new Pi session's file and a fork's file first reach disk, and what Pi, and agentpane's fork-and-prompt, answer a fork sent before the first assistant reply** (OW-tigaye).
 
 ```bash
-python3 agentpane_pi_fork_first_turn_probe.py                   # both parts
-python3 agentpane_pi_fork_first_turn_probe.py --part rpc        # Pi alone, no server
-python3 agentpane_pi_fork_first_turn_probe.py --part agentpane --skip-build
+python3 agentpane_pi_fork_first_turn_probe.py                   # part rpc: Pi alone, no server
+bun agentpane_pi_fork_first_turn_probe.ts --skip-build          # part agentpane, through the built server
 ```
 
 Part `rpc` speaks to `pi --mode rpc --session-dir <scratch> --model <ref>` directly, not through `sbox`, through `PiRpc` from `agentpane_pi_prompt_window_probe.py`, and stats the session file from the reader thread as each stdout line is parsed.
 Before any prompt it sends `fork` at an id no entry has and at each setup entry `get_entries` names, and `clone`; then it forks the first turn at its first user message from the reader thread at the thirtieth `text_delta`, listing the session directory at the `fork` response; then it runs two short turns on that fork and forks at the second user message and, on the branch that leaves, at the first.
-Part `agentpane` drives the built server on the production spawn chain, with the prompt-window probe's teeing `pi` shim: a `fork` at an id no entry has before any prompt, then a `fork` at the first user message once the first turn has streamed 300 characters, the returned ref's file stat'ed as the response is read, then an attach of the fork and a short turn on it.
-The Emacs helper's `sessions/fork` passes the route's status through (`toRpcError` in `src/emacs/helper.ts`), so it is not driven.
+Part `agentpane` drives the built server on the production spawn chain over the socket (D31), by the create's handle, with the prompt-window probe's teeing `pi` shim: a `sessions/forkAndPrompt` at an index no fork point has before any prompt, then one at the first user message once the first turn has streamed 300 characters, with a one-word prompt, the fork's file stat'ed as the reply is read, then the fork's turn.
+Part `agentpane` was the Python file's `--part agentpane`, over HTTP and the event stream, until ark3/agentpane#54 ported it to Bun and the socket; the Python file keeps the Pi-direct part, `rpc`.
+That part drove the fork route alone, and since the port each fork is a fork-and-prompt (D30): the fork at an entry no session has became one at an index no fork point has, which the server refuses `not_a_fork_point` before anything reaches Pi, and the fork during the first turn takes as its text the prompt the Python part then sent to the fork, so its reply comes once that prompt is admitted, not at Pi's `fork` response.
+Replies are recorded by their result or refusal code where HTTP statuses were.
 
 The configuration is the prompt-window probe's, so the server's session index, which walks `~/.pi/agent/sessions` whatever `PI_CODING_AGENT_DIR` says, cannot see the run's files, and nothing here asks it.
 It records rather than asserts, and exits non-zero only when a part could not run or cleanup failed.
@@ -196,6 +200,7 @@ Costs tokens: two long turns cut a few hundred characters in, and three one-word
 
 Verified with: `pi` 1.2.0 on the home server, 2026-10-14, two runs, in `docs/MANUAL_TESTING.md`, "A Pi session's file appears at its first user message, and a fork at that message has none when `fork` returns (OW-tigaye)".
 Run after the create began to start the session (ark3/agentpane#48), `--part agentpane` only: `pi` 1.5.2 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
+Verified with the port, part `agentpane` only: `pi` 1.5.2 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
 ## `fork_attach_probe.ts`
 

@@ -37,19 +37,11 @@ response" is answerable. Cells:
 * `handled`: every `get_commands` entry whose source is `extension`, sent as a
   prompt with nothing after the name.
 
-## Part `agentpane`: through the built server
+## Part `agentpane`: moved
 
-Drives the real chain -- `direnv exec <workspace> sbox -- pi --mode rpc
---model <pinned>`, spawned by agentpane's built server, through the REST
-prompt route -- with a `pi` shim first on the server's PATH that copies Pi's
-stdin and stdout to two tap files, as `agentpane_pi_steer_probe.py` copies its
-stdout. The stdin tap is what shows whether a prompt carried
-`streamingBehavior`. Cells:
-
-* `concurrent_posts`: two POSTs released together from two threads.
-* `post_after_202`: the second POST sent the moment the first's 202 returns.
-* `handled_<name>`: each extension command as a POST, then `HANDLED_WAIT`
-  seconds of the SSE wire, then an ordinary prompt to show what follows.
+The `agentpane` part, through the built server, is
+`agentpane_pi_prompt_window_probe.ts`, over the socket, since
+ark3/agentpane#54 retired the HTTP command routes and the event stream.
 
 ## Part `steer_abort`: a steer still queued when Stop arrives (OW-yewiku)
 
@@ -109,6 +101,7 @@ recorded as its own.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import shutil
@@ -121,25 +114,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from agentpane_live_support import (
-    Http,
-    SseReader,
-    build_client,
-    compact_tree,
-    descendants,
-    finalize,
-    last_streaming,
-    make_state_home,
-    now,
-    ref_path,
-    start_server,
-    transcript,
-    wait_for_built_client,
-)
-
 REPO = Path(__file__).resolve().parents[2]
-HOST = "127.0.0.1"
-PORT = 44177
 PI_STATE_FILES = ("auth.json", "models.json", "models-store.json", "settings.json", "trust.json")
 PINNED_MODEL = "openrouter/deepseek/deepseek-v4.1-flash:high"
 TIMING_RUNS = 5
@@ -161,6 +136,26 @@ STEER_ABORT_TEXT_PROMPT = (
     "order and do not summarise at the end."
 )
 TEXT_HOLD_DELTAS = 20
+
+
+def now() -> str:
+    return dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="milliseconds")
+
+
+def make_state_home(real_dir: Path, names: tuple[str, ...], prefix: str) -> tuple[Path, list[str]]:
+    """A throwaway Pi state dir with real credentials copied in by name.
+
+    Contents are never read here, only copied, and the names copied are
+    returned so a run can record what it used without naming what was in it.
+    """
+    home = Path(tempfile.mkdtemp(prefix=prefix, dir="/var/tmp"))
+    copied: list[str] = []
+    for name in names:
+        source = real_dir / name
+        if source.exists():
+            shutil.copy2(source, home / name)
+            copied.append(name)
+    return home, copied
 
 
 def word(w: str) -> str:
@@ -601,266 +596,22 @@ def run_steer_abort(args: argparse.Namespace, pi: str, home: Path, workspace: Pa
     return out
 
 
-# ---------------------------------------------------------------------------
-# part agentpane
-# ---------------------------------------------------------------------------
-
-
-def make_shim(real_pi: Path, tap_in: Path, tap_out: Path) -> Path:
-    """A `pi` that is the real `pi` with its stdin and stdout copied to taps.
-
-    As `agentpane_pi_steer_probe.py`'s shim, plus a `tee` on stdin; Pi's exit
-    status does not pass through, which this probe never reads.
-    """
-    shim_dir = Path(tempfile.mkdtemp(prefix="agentpane-window-shim-", dir="/tmp"))
-    script = shim_dir / "pi"
-    script.write_text(f'#!/bin/sh\ntee -a "{tap_in}" | "{real_pi}" "$@" | tee -a "{tap_out}"\n')
-    script.chmod(0o755)
-    return shim_dir
-
-
-def pi_workers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """This run's agent-side processes: Pi, the two `tee`s, and the wrappers."""
-    return [
-        row
-        for row in rows
-        if row["comm"] in ("pi", "tee")
-        or (row["comm"] in ("node", "sh") and "--mode rpc" in row["cmd"])
-    ]
-
-
-def read_tap(tap: Path) -> list[dict[str, Any]]:
-    if not tap.exists():
-        return []
-    rows = []
-    for line in tap.read_text(errors="replace").splitlines():
-        if line.strip():
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                rows.append({"type": "<unparsed>", "raw": line[:200]})
-    return rows
-
-
-def sse_rows(events: list[tuple[str, dict[str, Any]]], start: int, handle: str) -> list[dict[str, Any]]:
-    rows = []
-    for stamp, event in events[start:]:
-        if event.get("handle") != handle:
-            continue
-        kind = event.get("type")
-        row: dict[str, Any] = {"at": stamp, "type": kind}
-        if kind in ("snapshot", "status"):
-            row["isStreaming"] = event.get("isStreaming")
-        elif kind == "upsert":
-            message = event.get("message") or {}
-            row["index"] = event.get("index")
-            row["role"] = message.get("role")
-            if message.get("role") == "user":
-                content = message.get("content")
-                row["text"] = content if isinstance(content, str) else "".join(
-                    b.get("text", "") for b in content or [] if isinstance(b, dict)
-                )
-            if rows and rows[-1].get("type") == "upsert" and rows[-1].get("index") == row["index"]:
-                rows[-1]["count"] = rows[-1].get("count", 1) + 1
-                continue
-        elif kind == "error":
-            row["message"] = event.get("message")
-        elif kind == "notice":
-            notice = event.get("notice") or {}
-            row["kind"] = notice.get("kind")
-            row["message"] = notice.get("message")
-        rows.append(row)
-    return rows
-
-
-def run_agentpane(
-    args: argparse.Namespace, pi: str, home: Path, workspace: Path, repo: Path, commands: list[str]
-) -> dict[str, Any]:
-    http = Http(HOST, args.port)
-    tap_in = Path(tempfile.mkstemp(prefix="agentpane-window-in-", suffix=".jsonl", dir="/tmp")[1])
-    tap_out = Path(tempfile.mkstemp(prefix="agentpane-window-out-", suffix=".jsonl", dir="/tmp")[1])
-    shim_dir = make_shim(Path(pi).resolve(), tap_in, tap_out)
-    server_log = Path(tempfile.mkstemp(prefix="agentpane-window-server-", suffix=".log")[1])
-    server = None
-    streams: list[SseReader] = []
-    launched: set[int] = set()
-    out: dict[str, Any] = {}
-    # `finalize` removes the state home it is given; the rpc part shares it,
-    # so it gets a scratch directory of its own to remove.
-    scratch = Path(tempfile.mkdtemp(prefix="agentpane-window-scratch-", dir="/var/tmp"))
-    exit_code = 1
-    try:
-        if not args.skip_build:
-            out["build"] = build_client(repo)
-        server = start_server(
-            repo,
-            dict(
-                os.environ,
-                PATH=f"{shim_dir}{os.pathsep}{os.environ['PATH']}",
-                PI_CODING_AGENT_DIR=str(home),
-                PORT=str(args.port),
-            ),
-            server_log,
-        )
-        out["server_pid"] = server.pid
-        wait_for_built_client(http, server, 30)
-        stream = SseReader(HOST, args.port)
-        stream.start()
-        streams.append(stream)
-
-        status, created = http.json("POST", "/api/sessions", {"cwd": str(workspace), "backend": "pi", "model": args.model})
-        if status != 201:
-            raise RuntimeError(f"create failed: HTTP {status} {created}")
-        # The create starts the session and answers as an attach does (D30).
-        attached = created
-        ref = attached["session"]["ref"]
-        handle = attached["session"]["handle"]
-        tree = descendants(server.pid)
-        launched.update(row["pid"] for row in pi_workers(tree))
-        out["process_chain"] = [row["comm"] for row in compact_tree(tree)]
-        # The model the session reports on the wire, which is what `--model`
-        # put in force; the flag itself rides the create route's `model`.
-        out["model_on_wire"] = next(
-            (
-                e.get("model")
-                for _, e in reversed(stream.snapshot())
-                if e.get("handle") == handle and e.get("type") in ("snapshot", "status") and e.get("model")
-            ),
-            None,
-        )
-
-        def idle_after(start: int, timeout: float = 120) -> None:
-            def seen(events: list[tuple[str, dict[str, Any]]]) -> Any:
-                saw_true = False
-                for _, event in events[start:]:
-                    if event.get("handle") == handle and event.get("type") in ("snapshot", "status"):
-                        if event.get("isStreaming"):
-                            saw_true = True
-                        elif saw_true:
-                            return True
-                return None
-
-            stream.wait_for(seen, timeout, "the session to stream and go idle")
-            time.sleep(QUIET)
-
-        def post(text: str) -> dict[str, Any]:
-            sent = time.monotonic()
-            status, body = http.json("POST", ref_path(ref, "/prompt"), {"text": text})
-            return {"status": status, "body": body, "sent": sent, "replied": time.monotonic()}
-
-        def cell(name: str, fire: Callable[[], list[dict[str, Any]]], wait: Callable[[int], None]) -> None:
-            sse_start = len(stream.snapshot())
-            in_start = len(read_tap(tap_in))
-            out_start = len(read_tap(tap_out))
-            t0 = time.monotonic()
-            replies = fire()
-            wait(sse_start)
-            sent_in = read_tap(tap_in)[in_start:]
-            sent_out = read_tap(tap_out)[out_start:]
-            out[name] = {
-                "posts": [
-                    {
-                        "status": r["status"],
-                        "body": r["body"],
-                        "sent_s": round(r["sent"] - t0, 4),
-                        "replied_s": round(r["replied"] - t0, 4),
-                    }
-                    for r in replies
-                ],
-                "pi_stdin_prompts": [
-                    {k: c.get(k) for k in ("id", "type", "message", "streamingBehavior")}
-                    for c in sent_in
-                    if c.get("type") == "prompt"
-                ],
-                "pi_stdout": [summarise(e) for e in sent_out if e.get("type") != "message_update"],
-                "sse": sse_rows(stream.snapshot(), sse_start, handle),
-                "last_streaming": last_streaming(stream.snapshot(), handle),
-                "user_messages_in_transcript": [
-                    m.get("content") if isinstance(m.get("content"), str) else "".join(
-                        b.get("text", "") for b in m.get("content") or [] if isinstance(b, dict)
-                    )
-                    for m in transcript(stream.snapshot(), handle)
-                    if m.get("role") == "user"
-                ],
-            }
-
-        # Settle the attach's own events first.
-        time.sleep(QUIET)
-
-        def concurrent() -> list[dict[str, Any]]:
-            barrier = threading.Barrier(2)
-            results: list[dict[str, Any] | None] = [None, None]
-
-            def go(i: int, text: str) -> None:
-                barrier.wait()
-                results[i] = post(text)
-
-            threads = [threading.Thread(target=go, args=(0, word("ALPHA"))),
-                       threading.Thread(target=go, args=(1, word("BRAVO")))]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join(timeout=120)
-            return [r for r in results if r is not None]
-
-        cell("concurrent_posts", concurrent, idle_after)
-
-        def back_to_back() -> list[dict[str, Any]]:
-            first = post(word("CHARLIE"))
-            return [first, post(word("DELTA"))]
-
-        cell("post_after_202", back_to_back, idle_after)
-
-        for name in commands:
-            cell(
-                f"handled_{name}",
-                lambda n=name: [post(f"/{n}")],
-                lambda _start: time.sleep(HANDLED_WAIT),
-            )
-            cell(f"after_handled_{name}", lambda: [post(word("ECHO"))], idle_after)
-
-        exit_code = 0
-    except Exception as error:
-        out["error"] = f"{type(error).__name__}: {error}"
-        if server_log.exists():
-            out["server_log_tail"] = server_log.read_text(errors="replace")[-4000:]
-    finally:
-        cleanup: dict[str, Any] = {}
-        finalize(
-            cleanup,
-            exit_code,
-            server=server,
-            streams=streams,
-            state_home=scratch,
-            server_log=server_log,
-            launched_workers=launched,
-            worker_filter=pi_workers,
-        )
-        out["cleanup"] = cleanup.get("cleanup")
-        shutil.rmtree(shim_dir, ignore_errors=True)
-        tap_in.unlink(missing_ok=True)
-        tap_out.unlink(missing_ok=True)
-    return out
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--app-root", type=Path, default=REPO)
-    parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--model", default=PINNED_MODEL, help="model ref for Pi's --model (default: AGENTS.md's pin)")
     parser.add_argument("--credential-source", type=Path, default=Path.home() / ".pi" / "agent")
     parser.add_argument(
         "--part",
-        choices=("rpc", "agentpane", "both", "steer_abort"),
-        default="both",
-        help="`both` is rpc and agentpane; steer_abort runs only when named",
+        choices=("rpc", "steer_abort"),
+        default="rpc",
+        help="steer_abort runs only when named; the agentpane part is agentpane_pi_prompt_window_probe.ts",
     )
     parser.add_argument("--runs", type=int, default=2, help="runs of each steer_abort cell")
     parser.add_argument(
         "--hold", nargs="+", choices=("tool", "text"), default=["tool", "text"],
         help="what keeps the steer undelivered in steer_abort",
     )
-    parser.add_argument("--skip-build", action="store_true", help="reuse an existing dist/client bundle")
     return parser.parse_args()
 
 
@@ -887,21 +638,13 @@ def main() -> int:
     try:
         if "auth.json" not in copied:
             raise SystemExit(f"missing Pi credentials under {args.credential_source}")
-        commands: list[str] = []
         if args.part == "steer_abort":
             evidence["steer_abort"] = run_steer_abort(args, pi, home, workspace)
             runs = [run for key, cell in evidence["steer_abort"].items() if key != "command" for run in cell]
             if any("error" in run for run in runs):
                 code = 1
-        if args.part in ("rpc", "both"):
+        if args.part == "rpc":
             evidence["rpc"] = run_rpc(args, pi, home, workspace)
-            commands = [c["name"] for c in evidence["rpc"]["get_commands"] if c["source"] == "extension"]
-        if args.part in ("agentpane", "both"):
-            if not commands:
-                commands = ["mcp"]
-            evidence["agentpane"] = run_agentpane(args, pi, home, workspace, repo, commands)
-            if "error" in evidence["agentpane"] or (evidence["agentpane"].get("cleanup") or {}).get("result") != "pass":
-                code = 1
     except Exception as error:
         evidence["error"] = f"{type(error).__name__}: {error}"
         code = 1

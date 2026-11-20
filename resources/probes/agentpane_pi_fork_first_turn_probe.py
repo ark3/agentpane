@@ -8,10 +8,7 @@ a session's file was first written once an assistant message existed
 whose current file is not on disk ("This session has not been saved yet"),
 and `createBranchedSession` defers writing a branch that keeps no
 conversation. `pi 0.99.0`'s CHANGELOG says the file is now created when the
-first user message is sent. The server's fork route aborted nothing before it
-forked when this ran, so a raw request during a first turn reached whatever Pi
-answers; since ark3/agentpane#47 `PiAdapter.fork` sends `clear_queue` and
-`abort` first, so a re-run's `fork_first_turn` forks a stopped turn.
+first user message is sent.
 
 ## Part `rpc`: Pi alone
 
@@ -33,33 +30,12 @@ sample is taken the moment the line is parsed, not after a round trip.
   that leaves, a `fork` at the first, each with the directory listed at the
   response.
 
-## Part `agentpane`: through the built server
+## Part `agentpane`: moved
 
-The real chain, `direnv exec <workspace> sbox -- pi --mode rpc --model
-<pinned>` spawned by the built server, with a `pi` shim first on its PATH
-that tees Pi's stdin and stdout to two tap files (as the prompt-window
-probe's). Sessions are created and attached over REST and followed on SSE.
-
-* `fork_before_prompt`: `fork-points`, then `POST .../fork` with an id no
-  entry has, then the session's summary and a re-attach.
-* `fork_first_turn`: a long prompt; once the turn's assistant text passes
-  `FORK_AT_CHARS` with the session still streaming, `fork-points` and
-  `POST .../fork` at the first user message. The returned ref's file is
-  stat'ed the moment the response is read. Then an attach of the fork and a
-  short turn on it, with the fork's file read before and after.
-
-Nothing after a fork asks the session index or re-attaches the parent:
-the relocated `PI_CODING_AGENT_DIR` moves Pi's store and not the server's,
-which walks `~/.pi/agent/sessions` whatever the variable says
-(`src/server/sessions/index.ts`), so the index cannot see a file this run
-writes, and a re-attach of the parent answered 404 on a first pass with its
-file on disk -- the harness defect `docs/MANUAL_TESTING.md` records in
-"Forking the most recent turn and attaching the fork, on all three backends
-(OW-lajehi)". The listing rows read before any prompt and as the fork
-attaches are the manager's own, for sessions still attached.
-
-The Emacs helper's `sessions/fork` is a pass-through to the same route
-(`src/emacs/helper.ts`, `toRpcError`), so it is not driven here.
+The `agentpane` part, through the built server, is
+`agentpane_pi_fork_first_turn_probe.ts`, over the socket and with
+fork-and-prompt (D30), since ark3/agentpane#54 retired the HTTP command routes
+and the event stream.
 
 ## The configuration
 
@@ -75,49 +51,49 @@ pids it recorded as its own.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
-import os
 import shutil
 import subprocess
 import tempfile
-import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from agentpane_live_support import (
-    LONG_PROMPT,
-    Http,
-    SseReader,
-    assistant_text,
-    build_client,
-    descendants,
-    finalize,
-    last_streaming,
-    now,
-    ref_path,
-    start_server,
-    transcript,
-    wait_for_built_client,
-)
 from agentpane_pi_prompt_window_probe import (
     PINNED_MODEL,
     PiRpc,
     make_pi_home,
-    make_shim,
     make_workspace,
-    pi_workers,
-    read_tap,
-    sse_rows,
     summarise,
     word,
 )
 
 REPO = Path(__file__).resolve().parents[2]
-HOST = "127.0.0.1"
-PORT = 44178
 FORK_AT_DELTAS = 30
-FORK_AT_CHARS = 300
 NO_SUCH_ENTRY = "no-such-entry"
+# The smoke probes' handbook prompt, which the pinned model writes at length.
+LONG_PROMPT = (
+    "Do not use tools. Write a long, detailed handbook on growing vegetables in a home garden. "
+    "Write twenty chapters, each under its own title and each at least 400 words long, covering in order: "
+    "planning the plot, soil testing, soil preparation, raised beds, choosing varieties, starting seeds indoors, "
+    "transplanting, direct sowing, watering, mulching, sunlight and siting, fertilising, composting, "
+    "companion planting, pest control, disease control, weeding, crop rotation, harvesting, and storing the harvest. "
+    "Write every chapter in full and do not summarise or abbreviate any of them."
+)
+
+
+def now() -> str:
+    return dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="milliseconds")
+
+
+def assistant_text(message: dict[str, Any]) -> str:
+    if message.get("role") != "assistant":
+        return ""
+    return "".join(
+        block.get("text", "")
+        for block in message.get("content", [])
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
 
 
 def entries_of(path: Path | None) -> dict[str, Any]:
@@ -324,183 +300,15 @@ def run_rpc(args: argparse.Namespace, pi: str, home: Path, workspace: Path) -> d
     return out
 
 
-# ---------------------------------------------------------------------------
-# part agentpane
-# ---------------------------------------------------------------------------
-
-
-def run_agentpane(args: argparse.Namespace, pi: str, home: Path, workspace: Path, repo: Path) -> dict[str, Any]:
-    http = Http(HOST, args.port)
-    tap_in = Path(tempfile.mkstemp(prefix="agentpane-tigaye-in-", suffix=".jsonl", dir="/tmp")[1])
-    tap_out = Path(tempfile.mkstemp(prefix="agentpane-tigaye-out-", suffix=".jsonl", dir="/tmp")[1])
-    shim_dir = make_shim(Path(pi).resolve(), tap_in, tap_out)
-    server_log = Path(tempfile.mkstemp(prefix="agentpane-tigaye-server-", suffix=".log")[1])
-    scratch = Path(tempfile.mkdtemp(prefix="agentpane-tigaye-scratch-", dir="/var/tmp"))
-    server = None
-    streams: list[SseReader] = []
-    launched: set[int] = set()
-    out: dict[str, Any] = {}
-    exit_code = 1
-
-    def pi_lines(start: int, kinds: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
-        return [summarise(e) for e in read_tap(tap_out)[start:]
-                if e.get("type") != "message_update" and (kinds is None or e.get("type") in kinds)]
-
-    try:
-        if not args.skip_build:
-            out["build"] = build_client(repo)
-        server = start_server(
-            repo,
-            dict(os.environ, PATH=f"{shim_dir}{os.pathsep}{os.environ['PATH']}",
-                 PI_CODING_AGENT_DIR=str(home), PORT=str(args.port)),
-            server_log,
-        )
-        wait_for_built_client(http, server, 30)
-        stream = SseReader(HOST, args.port)
-        stream.start()
-        streams.append(stream)
-
-        def track() -> None:
-            launched.update(row["pid"] for row in pi_workers(descendants(server.pid)))
-
-        def summary(ref: dict[str, str]) -> dict[str, Any] | None:
-            status, body = http.json("GET", f"/api/sessions?cwd={workspace}")
-            for row in (body or {}).get("sessions", []):
-                if row["ref"] == ref:
-                    return {k: row.get(k) for k in ("status", "isStreaming", "onDisk", "preview")}
-            return None
-
-        def attach(ref: dict[str, str]) -> dict[str, Any]:
-            return attached(*http.json("GET", ref_path(ref)))
-
-        def attached(status: int, body: Any) -> dict[str, Any]:
-            track()
-            session = (body or {}).get("session") or {}
-            return {"status": status, "ref": session.get("ref"), "handle": session.get("handle"),
-                    "isStreaming": session.get("isStreaming"), "onDisk": session.get("onDisk"),
-                    **({} if status in (200, 201) else {"body": body})}
-
-        def idle(handle: str, start: int, timeout: float = 120) -> None:
-            def seen(events: list[tuple[str, dict[str, Any]]]) -> Any:
-                saw = False
-                for _, e in events[start:]:
-                    if e.get("handle") == handle and e.get("type") in ("snapshot", "status"):
-                        if e.get("isStreaming"):
-                            saw = True
-                        elif saw:
-                            return True
-                return None
-            stream.wait_for(seen, timeout, "the session to stream and go idle")
-            time.sleep(2)
-
-        # -- a session, forked before its first prompt --------------------------------
-        status, created = http.json("POST", "/api/sessions", {"cwd": str(workspace), "backend": "pi", "model": args.model})
-        if status != 201:
-            raise RuntimeError(f"create failed: HTTP {status} {created}")
-        # The create starts the session and answers as an attach does (D30).
-        first = attached(status, created)
-        ref, handle = first["ref"], first["handle"]
-        out["attach"] = {**first, "file_exists": Path(ref["id"]).exists()}
-        out["model_on_wire"] = next((e.get("model") for _, e in reversed(stream.snapshot())
-                                     if e.get("handle") == handle and e.get("model")), None)
-        time.sleep(2)
-
-        cell: dict[str, Any] = {}
-        sse0, tap0 = len(stream.snapshot()), len(read_tap(tap_out))
-        cell["fork_points"] = http.json("GET", ref_path(ref, "/fork-points"))
-        cell["fork"] = dict(zip(("status", "body"), http.json("POST", ref_path(ref, "/fork"), {"entryId": NO_SUCH_ENTRY})))
-        time.sleep(2)
-        cell["pi_stdout"] = pi_lines(tap0)
-        cell["sse"] = sse_rows(stream.snapshot(), sse0, handle)
-        cell["summary_after"] = summary(ref)
-        cell["reattach"] = attach(ref)
-        cell["file_exists_after"] = Path(ref["id"]).exists()
-        out["fork_before_prompt"] = cell
-
-        # -- the same session, forked during its first turn ----------------------------
-        cell = {}
-        sse0, tap0 = len(stream.snapshot()), len(read_tap(tap_out))
-        status, body = http.json("POST", ref_path(ref, "/prompt"), {"text": LONG_PROMPT})
-        cell["prompt"] = {"status": status, "body": body}
-
-        def far_enough(events: list[tuple[str, dict[str, Any]]]) -> Any:
-            if last_streaming(events, handle) is not True:
-                return None
-            chars = sum(len(assistant_text(m)) for m in transcript(events, handle))
-            return chars if chars >= FORK_AT_CHARS else None
-
-        cell["assistant_chars_before_fork_points"] = stream.wait_for(far_enough, 180, "the first turn's text")
-        status, points = http.json("GET", ref_path(ref, "/fork-points"))
-        cell["fork_points"] = {"status": status, "body": points}
-        cell["assistant_message_end_on_wire_before_fork"] = any(
-            e.get("type") == "message_end" and (e.get("message") or {}).get("role") == "assistant"
-            for e in read_tap(tap_out)[tap0:]
-        )
-        cell["parent_exists_before_fork"] = Path(ref["id"]).exists()
-        sent = time.monotonic()
-        status, forked = http.json("POST", ref_path(ref, "/fork"), {"entryId": points["points"][0]["id"]})
-        fork_ref = (forked or {}).get("ref")
-        cell["fork"] = {
-            "status": status,
-            "body": forked,
-            "seconds": round(time.monotonic() - sent, 3),
-            "fork_file_exists_at_response": bool(fork_ref) and Path(fork_ref["id"]).exists(),
-            "parent_file_at_response": entries_of(Path(ref["id"])),
-        }
-        time.sleep(3)
-        cell["pi_stdout_from_prompt"] = pi_lines(tap0, ("response", "agent_start", "agent_end", "agent_settled",
-                                                         "message_start", "message_end"))
-        cell["sse_parent_handle"] = sse_rows(stream.snapshot(), sse0, handle)
-        out["fork_first_turn"] = cell
-        if status != 201 or not fork_ref:
-            raise RuntimeError(f"fork failed: HTTP {status} {forked}")
-
-        after: dict[str, Any] = {
-            "fork_file_after_3s": entries_of(Path(fork_ref["id"])),
-            "fork_summary": summary(fork_ref),
-        }
-        attached = attach(fork_ref)
-        fork_handle = attached["handle"]
-        after["attach_fork"] = attached
-        after["fork_transcript_roles"] = [m.get("role") for m in transcript(stream.snapshot(), fork_handle)]
-        sse0 = len(stream.snapshot())
-        status, body = http.json("POST", ref_path(fork_ref, "/prompt"), {"text": word("ALPHA")})
-        after["fork_prompt"] = {"status": status, "body": body}
-        idle(fork_handle, sse0)
-        after["fork_file_after_turn"] = entries_of(Path(fork_ref["id"]))
-        fork_sse = sse_rows(stream.snapshot(), sse0, fork_handle)
-        after["fork_sse_errors"] = [r for r in fork_sse if r["type"] == "error"]
-        after["fork_sse_notices"] = [r for r in fork_sse if r["type"] == "notice"]
-        after["parent_file_final"] = entries_of(Path(ref["id"]))
-        out["after_fork"] = after
-        exit_code = 0
-    except Exception as error:
-        out["error"] = f"{type(error).__name__}: {error}"
-        if server_log.exists():
-            out["server_log_tail"] = server_log.read_text(errors="replace")[-4000:]
-    finally:
-        if server_log.exists():
-            out["server_log_fork_lines"] = [
-                line for line in server_log.read_text(errors="replace").splitlines() if "fork" in line.lower()
-            ][-20:]
-        cleanup: dict[str, Any] = {}
-        finalize(cleanup, exit_code, server=server, streams=streams, state_home=scratch, server_log=server_log,
-                 launched_workers=launched, worker_filter=pi_workers)
-        out["cleanup"] = cleanup.get("cleanup")
-        shutil.rmtree(shim_dir, ignore_errors=True)
-        tap_in.unlink(missing_ok=True)
-        tap_out.unlink(missing_ok=True)
-    return out
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--app-root", type=Path, default=REPO)
-    parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--model", default=PINNED_MODEL, help="model ref for Pi's --model (default: AGENTS.md's pin)")
     parser.add_argument("--credential-source", type=Path, default=Path.home() / ".pi" / "agent")
-    parser.add_argument("--part", choices=("rpc", "agentpane", "both"), default="both")
-    parser.add_argument("--skip-build", action="store_true", help="reuse an existing dist/client bundle")
+    parser.add_argument(
+        "--part", choices=("rpc",), default="rpc",
+        help="the only part left; the agentpane part is agentpane_pi_fork_first_turn_probe.ts",
+    )
     return parser.parse_args()
 
 
@@ -526,12 +334,7 @@ def main() -> int:
     try:
         if "auth.json" not in copied:
             raise SystemExit(f"missing Pi credentials under {args.credential_source}")
-        if args.part in ("rpc", "both"):
-            evidence["rpc"] = run_rpc(args, pi, home, workspace)
-        if args.part in ("agentpane", "both"):
-            evidence["agentpane"] = run_agentpane(args, pi, home, workspace, repo)
-            if "error" in evidence["agentpane"] or (evidence["agentpane"].get("cleanup") or {}).get("result") != "pass":
-                code = 1
+        evidence["rpc"] = run_rpc(args, pi, home, workspace)
     except Exception as error:
         evidence["error"] = f"{type(error).__name__}: {error}"
         code = 1
