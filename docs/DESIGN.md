@@ -147,7 +147,7 @@ Each was open in the first draft and is now settled.
 The reasoning matters more than the conclusion: if a premise turns out to be wrong, revisit.
 
 - [D1](decisions/D1.md). Runtime: Bun
-- [D2](decisions/D2.md). Transport: SSE + REST, not WebSocket
+- [D2](decisions/D2.md). Transport: SSE + REST, not WebSocket, until D31 put everything on one WebSocket
 - [D2a](decisions/D2a.md). Server-initiated requests
 - [D3](decisions/D3.md). State protocol: server-authoritative snapshot + tail upsert
 - [D4](decisions/D4.md). Client framework: Svelte 5
@@ -156,7 +156,7 @@ The reasoning matters more than the conclusion: if a premise turns out to be wro
 - [D7](decisions/D7.md). Sandbox spawn: the server does it, no wrapper scripts
 - [D7a](decisions/D7a.md). Codex approval policy: `never`, set by the adapter
 - [D8](decisions/D8.md). Loopback only
-- [D9](decisions/D9.md). Sessions: enumerate from the filesystem, spawn only on attach
+- [D9](decisions/D9.md). Sessions: enumerate from the filesystem, and a listing spawns nothing
 - [D10](decisions/D10.md). Pi types: dev-dependency, type-only imports
 - [D11](decisions/D11.md). The wire contract is a shared module
 - [D12](decisions/D12.md). Bounded subprocess lifetime: idle timeout + LRU cap
@@ -168,15 +168,15 @@ The reasoning matters more than the conclusion: if a premise turns out to be wro
 - [D18](decisions/D18.md). Backend facts carry the version they were measured on, and only the ones that license absent code are defended against time
 - [D19](decisions/D19.md). A Codex subagent shows in the parent as one collapsed tool card per collab operation, and its rollout stays in the session picker
 - [D20](decisions/D20.md). A fork point names its transcript index, and a message no point names is not editable
-- [D21](decisions/D21.md). A re-established event stream asks for a session listing, and so does the first open
+- [D21](decisions/D21.md). Each open of the socket is followed by one session listing
 - [D22](decisions/D22.md). The Emacs client is a native `agentpane-mode` over a JSON-RPC helper agentpane owns, not `agent-shell` over an ACP shim
 - [D23](decisions/D23.md). A conversation's model and effort are read back from its store's last turn, never kept by agentpane
 - [D24](decisions/D24.md). A live session is keyed by a handle agentpane mints, its mutations run one at a time, a hydrate merges history with the live stream, and a guard that misses a case means the state has the wrong owner
-- [D25](decisions/D25.md). Only an attach starts an agent, and a client that loses its connection holds nothing live
+- [D25](decisions/D25.md). Only a request that makes a session live starts an agent, and a client that loses its socket holds nothing live
 - [D26](decisions/D26.md). The server says a handle has ended, and the preview says a ref is gone
 - [D27](decisions/D27.md). A session's row carries a name, a mark and its fork parent, and both clients label it by one rule
-- [D28](decisions/D28.md). The event stream owns session state, and a reply only ends its request
-- [D29](decisions/D29.md). Every `/api` route but the event stream needs a bearer token, and every request must name a loopback host
+- [D28](decisions/D28.md). The socket's events own session state, and a reply only ends its request
+- [D29](decisions/D29.md). The socket's first frame carries a bearer token, and every request must name a loopback host
 - [D30](decisions/D30.md). A chain of requests that must all complete is one server operation
 - [D31](decisions/D31.md). One WebSocket carries commands, replies and events
 
