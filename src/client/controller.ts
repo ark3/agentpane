@@ -389,8 +389,6 @@ interface PreviewRead {
 	intent: number;
 	/** Whether that intent is a click's. */
 	clicked: boolean;
-	/** Let go of at a `connected` or a disposal, which then lands nothing. */
-	abandoned: boolean;
 	/** Settles once the answer has landed, or has been found to belong to nobody. */
 	landed: Promise<void>;
 }
@@ -553,16 +551,12 @@ export function createController(
 	 * and counts as failed: one that hung would keep its key in `previewLoads`
 	 * for good, and nothing would ever ask for that session's preview again.
 	 *
-	 * At a `connected` every read of the detached-loading pane's session is
-	 * abandoned (`abandonPreviewLoads`) rather than waited on, a click's
-	 * included: it was asked before the outage, so its key would turn away the
-	 * fresh read that transition owes, and its failure -- a hung read's
-	 * timeout, say, landing with the stream up -- would hold the pane on a
-	 * healthy server. The fresh read answers the click too. So is every other
-	 * read no click owns. A click's read of another row is kept: nothing else
-	 * would ask it again -- App's auto-select asks one before the first open,
-	 * and never again for that row. An abandoned read neither opens a preview
-	 * nor holds nor writes a line.
+	 * No read is out across an outage: the socket's close settles every
+	 * request on it as the connection lost before the tab hears the close
+	 * (D31 point 6), so a read's key is gone, and its failure, landing with
+	 * the stream down, holds nothing. A read asked while the socket opens --
+	 * App's auto-select asks one before the first open -- waits behind the
+	 * `hello` and is that socket's to answer.
 	 */
 	function loadPreview(): void {
 		const selected = view.state.selected;
@@ -582,7 +576,7 @@ export function createController(
 			() => abort.abort(new Error(`No answer within ${PREVIEW_READ_TIMEOUT_MS / 1000}s.`)),
 			PREVIEW_READ_TIMEOUT_MS,
 		);
-		const read: PreviewRead = { abort, timeout, intent: selectionIntent, clicked: false, abandoned: false, landed: Promise.resolve() };
+		const read: PreviewRead = { abort, timeout, intent: selectionIntent, clicked: false, landed: Promise.resolve() };
 		read.landed = api.preview(ref, abort.signal).then(
 			(response) => landPreview(ref, read, response, undefined),
 			(error: unknown) => landPreview(ref, read, undefined, error),
@@ -598,7 +592,7 @@ export function createController(
 			clearTimeout(read.timeout);
 			previewLoads.delete(key);
 		}
-		if (read.abandoned || disposed) return;
+		if (disposed) return;
 		const owned = read.intent === selectionIntent;
 		const clicked = read.clicked && owned;
 		const selected = view.state.selected;
@@ -609,12 +603,12 @@ export function createController(
 				if (onPane) openPreview({ ref, turns: response.turns });
 				return;
 			}
-			// A snapshot can introduce the session while the fetch is out --
-			// the reconnect's opening snapshots trail its `connected`, which is
-			// when App's auto-select asks. The pane would read live over the
-			// preview anyway (`paneMode`); what reselecting it still buys is the
-			// live selection's model list and pending flags, which
-			// `openPreview` does not set.
+			// A snapshot can introduce the session while the read is out -- an
+			// opening snapshot, handled before the answer to a read asked
+			// while the socket opened, or another client's attach. The pane
+			// would read live over the preview anyway (`paneMode`); what
+			// reselecting it still buys is the live selection's model list and
+			// pending flags, which `openPreview` does not set.
 			const live = viewOf(view.state, response.ref);
 			if (live) await reselectLive(live.ref, read.intent);
 			else openPreview(response, { error: null });
@@ -636,20 +630,13 @@ export function createController(
 		} else if (clicked) publish({ error: errorMessage(error) });
 	}
 
-	/**
-	 * Let go of every preview read still out but a click's of a row other than
-	 * the detached-loading pane's, or at a disposal of every one -- see
-	 * `loadPreview`.
-	 */
-	function abandonPreviewLoads(all = false): void {
-		const waiting = paneMode(view) === "loading" ? sessionKey(view.state.selected!) : null;
-		for (const [key, read] of previewLoads) {
-			if (!all && read.clicked && key !== waiting) continue;
+	/** Let go of every preview read still out, at a disposal, after which none lands. */
+	function abandonPreviewLoads(): void {
+		for (const read of previewLoads.values()) {
 			clearTimeout(read.timeout);
-			read.abandoned = true;
 			read.abort.abort();
-			previewLoads.delete(key);
 		}
+		previewLoads.clear();
 	}
 
 	function errorMessage(error: unknown): string {
@@ -1173,10 +1160,8 @@ export function createController(
 		 * line nor the error slot.
 		 */
 		onOpen() {
-			// The transition a held preview read waits for, and which asks a
-			// fresh one in place of any still out (`loadPreview`).
+			// The transition a held preview read waits for (`loadPreview`).
 			previewHeld = false;
-			abandonPreviewLoads();
 			publish({ connection: "connected" });
 			if (startListedOnOpening) startListedOnOpening = false;
 			else void refreshSessions(false);
@@ -1265,7 +1250,7 @@ export function createController(
 			if (disposed) return;
 			disposed = true;
 			stopPoll();
-			abandonPreviewLoads(true);
+			abandonPreviewLoads();
 			clearTimeout(reconnectTimer);
 			connection?.close();
 			listeners.clear();
