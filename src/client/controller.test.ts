@@ -59,8 +59,8 @@ function viewAt(controller: AgentpaneController, session: SessionRef) {
 
 /**
  * The snapshot that introduces a live view of `session` in this tab, which is
- * the only thing that makes its pane live (OW-forinu): an attach reply alone
- * leaves it detached.
+ * the only thing that makes its pane live (OW-forinu): an attach's reply
+ * moves the selection and writes no view (`selectAttached`).
  */
 function snapshotOf(session: SessionRef, handle = h(session)): SnapshotEvent {
 	return { type: "snapshot", session, handle, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] };
@@ -71,7 +71,7 @@ function gone(): ApiClientError {
 	return new ApiClientError("gone", "no such session");
 }
 
-/** Open the socket again at once, as a press of Reconnect does, and let its `hello` be answered. */
+/** Open the socket again at once, as a pasted token does, and let its `hello` be answered. */
 async function reopen(controller: AgentpaneController): Promise<void> {
 	controller.reconnect();
 	for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -1020,8 +1020,10 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// The badge's watch ends on this and on nothing else that drops a view: a
-	// stream drop and an `ended` stay silent (OW-jadoda).
+	// A gap ends the badge's watch on its session, raising nothing (OW-jadoda),
+	// so only a gap tells the gap listeners: an `ended` tells no one, and the
+	// socket's close tells the close listeners, whose `watchClose` ends every
+	// watch (D31 point 6).
 	it("tells the gap listeners the handle a gap detached, and only a gap", async () => {
 		const other: SessionRef = { backend: "codex", id: "codex-2" };
 		const server = fakeServer();
@@ -2564,8 +2566,8 @@ describe("client controller", () => {
 	/**
 	 * The click that lands on the fork's *own* row, rather than away from it
 	 * (OW-tatebi). The fork still declines the selection -- the user's click owns
-	 * `selectionIntent` -- but `applyAttached`'s residual moves the selection
-	 * anyway, because the selection it finds is already the fork. The live
+	 * `selectionIntent` -- but `selectAttached` moves the selection anyway,
+	 * because the selection it finds is already the fork. The live
 	 * transcript then has to take over from the read-only preview that click
 	 * opened, or the user reads a frozen copy of a session that is streaming;
 	 * it does once the fork's snapshot, written before the reply, gives this

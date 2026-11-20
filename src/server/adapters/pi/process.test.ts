@@ -281,8 +281,8 @@ describe("PiAdapter session identity (D9: Pi's id is its JSONL path)", () => {
 
 	it("still admits the turn when the follow-up id probe fails, because the prompt was accepted", async () => {
 		// `submit()` resolving means "the backend admitted the turn" (the frozen
-		// adapter contract), and the HTTP layer turns a rejection into a 500 that
-		// tells the browser to preserve its draft for retry. The id probe runs
+		// adapter contract), and the socket answers a rejection with a refusal
+		// that tells the browser to preserve its draft for retry. The id probe runs
 		// *after* Pi has accepted the prompt, so failing the submit on it would
 		// invite the user to resend a prompt that is already running -- and the
 		// resend would arrive mid-turn, where Pi steers it in as a second message.

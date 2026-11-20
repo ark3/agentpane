@@ -1,7 +1,7 @@
 /**
- * Process-table edges that are awkward to provoke through HTTP: concurrent
- * attaches, a spawn that fails, and the bookkeeping that must not outlive a
- * session.
+ * Process-table edges that are awkward to provoke through the socket:
+ * concurrent attaches, a spawn that fails, and the bookkeeping that must not
+ * outlive a session.
  */
 
 import { tmpdir } from "node:os";

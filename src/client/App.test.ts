@@ -3427,8 +3427,8 @@ describe("App", () => {
 	 * arming goes on the *fork*, not on whatever `state.selected` happens to be
 	 * while the fork is out. A click mid-fork moves the selection and the
 	 * controller now honours it, so the handle `forkAndSubmit` hands over from
-	 * the fork's attach is the only thing that names the right one (OW-mifuki,
-	 * OW-koledi).
+	 * the fork-and-prompt's reply is the only thing that names the right one
+	 * (OW-mifuki, OW-koledi).
 	 */
 	it("badges the fork it landed on, not a session clicked mid-fork (OW-mifuki)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "thread-fork" };
@@ -3868,9 +3868,9 @@ describe("App", () => {
 		}));
 		// Pi's fork moves the live process onto a new file, which is a new session
 		// under a new handle and names nothing under the parent's (D24, OW-suhoto). The real
-		// `forkAndSubmit` attaches the fork's ref and publishes the selection
-		// *before* it resolves, so the fake does too; the shell arms follow on the
-		// handle the fork's attach replied with (OW-vitefo).
+		// `forkAndSubmit` publishes the fork's selection *before* it resolves, so
+		// the fake does too; the shell arms follow on the handle the
+		// fork-and-prompt replied with (OW-vitefo).
 		controller.forkResult = { ...summary(forkRef), handle: "h-fork" };
 		controller.onForkAndSubmit = () => {
 			controller.publish(view({ state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])], forkRef, false, "h-fork") }));
