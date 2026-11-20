@@ -1383,6 +1383,47 @@ describe("fork and prompt, one operation (D30)", () => {
 		expect((error as ForkNotPromptedError).fork).toEqual({ ref: { backend: "claude", id: "parent#fork-e1" }, handle: null });
 	});
 
+	// `PiAdapter.fork` announces the move, then re-sends the level and hydrates
+	// the fork, and either can reject: the parent's handle has ended by then,
+	// and the fork is live under its own.
+	it("refuses a Pi fork that fails after it moved with an error naming the fork live", async () => {
+		const { ref } = managing("pi", { forkPoints: POINTS });
+		await sessions.attach(ref);
+		const parentHandle = sessions.summaryOf(ref)?.handle;
+		const adapter = sessions.adapterFor(ref) as FakeAdapter;
+		const fork = adapter.fork.bind(adapter);
+		adapter.fork = async (entryId) => {
+			await fork(entryId);
+			throw new Error("set_thinking_level failed");
+		};
+
+		const error = await sessions.forkAndPrompt(ref, 2, "again").catch((e: unknown) => e);
+
+		const forkRef: SessionRef = { backend: "pi", id: `${REF.id}#fork-e3` };
+		expect(error).toBeInstanceOf(ForkNotPromptedError);
+		expect((error as ForkNotPromptedError).message).toBe("set_thinking_level failed");
+		expect((error as ForkNotPromptedError).fork).toEqual({ ref: forkRef, handle: sessions.summaryOf(forkRef)?.handle });
+		expect((error as ForkNotPromptedError).fork.handle).not.toBe(parentHandle);
+		expect(sessions.isAttached(forkRef)).toBe(true);
+		expect(adapter.prompts).toEqual([]);
+	});
+
+	it("refuses a Pi fork that fails before it moved with that failure alone: nothing was forked", async () => {
+		const { ref } = managing("pi", {
+			forkPoints: POINTS,
+			onFork: () => {
+				throw new Error("fork failed");
+			},
+		});
+		await sessions.attach(ref);
+
+		const error = await sessions.forkAndPrompt(ref, 2, "again").catch((e: unknown) => e);
+
+		expect(error).not.toBeInstanceOf(ForkNotPromptedError);
+		expect((error as Error).message).toBe("fork failed");
+		expect(sessions.liveRefs()).toEqual([ref]);
+	});
+
 	it("clears no error the fork's start raised: nobody has seen one on the fork (OW-jokoto)", async () => {
 		const options: FakeAdapterOptions = { forkPoints: POINTS, forkMode: "claude" };
 		const { ref } = managing("claude", options);

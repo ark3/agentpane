@@ -885,6 +885,36 @@ describe("commands that name a handle (D31 point 9)", () => {
 
 			expect([reply.code, reply.detail, reply.fork]).toEqual(["internal_error", "fork would not start", { ref: FORK, handle: null }]);
 		});
+
+		it("answers a Pi fork that failed after it moved with that failure, naming the fork live", async () => {
+			build({ forkPoints: POINTS });
+			const { socket, handle } = await attached();
+			const adapter = pi.forRef(PI_SESSION)!;
+			const fork = adapter.fork.bind(adapter);
+			// As `PiAdapter.fork` can at `set_thinking_level` or `hydrateMessages`,
+			// after it has announced the move.
+			adapter.fork = async (entryId) => {
+				await fork(entryId);
+				throw new Error("set_thinking_level failed");
+			};
+
+			const reply = await socket.refused("sessions/forkAndPrompt", { handle, index: 0, text: "again" });
+
+			const piFork: SessionRef = { backend: "pi", id: `${PI_SESSION.id}#fork-e1` };
+			expect([reply.code, reply.detail, reply.fork]).toEqual(["internal_error", "set_thinking_level failed", { ref: piFork, handle: expect.any(String) }]);
+			expect(reply.fork?.handle).not.toBe(handle);
+			// The parent's handle ends, and the refusal follows a view of the fork,
+			// so a client moving to the fork finds it live (D30).
+			expect(socket.frames.map((frame) => (frame.type === "reply" ? ["reply", frame.id] : [frame.event.type, "handle" in frame.event ? frame.event.handle : null]))).toEqual([
+				["ended", handle],
+				["sessions-changed", null],
+				["snapshot", reply.fork?.handle],
+				["reply", reply.id],
+			]);
+			const { session } = await socket.ok("sessions/attach", { ref: piFork });
+			expect(session.handle).toBe(reply.fork?.handle);
+			expect(adapter.prompts).toEqual([]);
+		});
 	});
 
 	it("refuses every one of them for a handle never live, and starts no agent (D25, OW-sirofi)", async () => {

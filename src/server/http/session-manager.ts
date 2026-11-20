@@ -67,7 +67,8 @@ export class NotAForkPointError extends Error {
 
 /**
  * `forkAndPrompt` created the fork and then failed: its attach or its prompt
- * was refused. `cause` is that refusal, which the caller answers as it would
+ * was refused, or a Pi fork failed after it had moved the adapter onto the
+ * fork. `cause` is that refusal, which the caller answers as it would
  * on its own, naming `fork` beside it; the fork stays (D17, D30).
  */
 export class ForkNotPromptedError extends Error {
@@ -970,10 +971,22 @@ export class SessionManager {
 		images?: ImageInput[],
 		handle?: string,
 	): Promise<{ session: LiveSessionSummary; disposition: PromptDisposition }> {
-		const forked = await this.#serially(ref, async (_session, adapter) => {
+		const forked = await this.#serially(ref, async (session, adapter) => {
 			const point = (await adapter.listForkPoints()).find((candidate) => candidate.index === index);
 			if (!point) throw new NotAForkPointError(index);
-			return this.#forkOn(adapter, point.id);
+			try {
+				return await this.#forkOn(adapter, point.id);
+			} catch (cause) {
+				// A Pi fork that announced the move and then failed, re-sending the
+				// level or hydrating: the adapter drives the fork from a container
+				// of its own (`#forkOnto`), live under the fork's handle. Snapshotted
+				// as the attach below would, so the refusal naming that handle
+				// follows a view of it, as every refusal naming a live fork does.
+				const fork = [...this.#sessions.values()].find((held) => held !== session && held.adapter === adapter);
+				if (!fork) throw cause;
+				this.broadcaster.broadcastSnapshot(fork.handle);
+				throw new ForkNotPromptedError(cause, { ref: fork.ref, handle: fork.handle });
+			}
 		}, handle);
 		try {
 			await this.attach(forked);
