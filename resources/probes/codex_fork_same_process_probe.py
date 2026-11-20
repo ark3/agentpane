@@ -32,7 +32,7 @@ has a fix that leaves D15 alone.  If both say no, the cheap option in that card
 Usage:  python3 codex_fork_same_process_probe.py [--json <path>]
 Needs:  `codex` on PATH and readable auth under `~/.codex`.
         CODEX_HOME is a temp copy, which is safe here in a way it is NOT for
-        `fork_attach_probe.py`: nothing in this probe consults agentpane's
+        `fork_attach_probe.ts`: nothing in this probe consults agentpane's
         session index, so moving the store moves nothing out from under it.
 """
 

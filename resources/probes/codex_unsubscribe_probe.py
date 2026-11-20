@@ -40,7 +40,7 @@ So, two app-servers, one parent thread and one fork of it -- the same vehicle as
 Usage:  python3 codex_unsubscribe_probe.py [--json <path>]
 Needs:  `codex` on PATH and readable auth under `~/.codex`.
         CODEX_HOME is a temp copy, safe here as it is in
-        `codex_fork_same_process_probe.py` and is NOT in `fork_attach_probe.py`:
+        `codex_fork_same_process_probe.py` and is NOT in `fork_attach_probe.ts`:
         nothing here consults agentpane's session index.
 """
 

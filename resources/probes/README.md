@@ -197,6 +197,27 @@ Costs tokens: two long turns cut a few hundred characters in, and three one-word
 Verified with: `pi` 1.2.0 on the home server, 2026-10-14, two runs, in `docs/MANUAL_TESTING.md`, "A Pi session's file appears at its first user message, and a fork at that message has none when `fork` returns (OW-tigaye)".
 Run after the create began to start the session (ark3/agentpane#48), `--part agentpane` only: `pi` 1.5.2 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
 
+## `fork_attach_probe.ts`
+
+Proves: **an edit of the last message forks, attaches and answers on every backend, through the production server** (OW-lajehi).
+It is the middle between `fork_probe.py`, which drives the CLIs directly, and the browser suite in `e2e/`, which has no server.
+
+```bash
+bun fork_attach_probe.ts                                 # all three backends
+bun fork_attach_probe.ts --backend codex --skip-build    # repeatable
+```
+
+Per backend, after two real turns: fork points, then a fork-and-prompt at the last of them, the fork's turn read back, a re-attach of the fork, a fork of the fork, a second fork of the parent at the same point, and on Codex alone closing each side of the fork pair and attaching it again while the other lives (OW-voyezi).
+It records rather than asserts, each step's reply by its result or refusal code, and runs each backend's server on the one port in turn.
+It runs every backend against its real state directory, because the server's session index reads the real stores whatever the CLI's state variable says, and so leaves four small sessions per backend there.
+Costs tokens: five one-word turns per backend.
+
+Verified with: `pi` 0.85.1, `codex-cli` 0.154.0 and `claude` 2.1.270 on the home server, 2026-09-15; see `docs/MANUAL_TESTING.md`, "Forking the most recent turn and attaching the fork, on all three backends (OW-lajehi)", and for the Codex-only step "Closing one side of a Codex fork pair and re-attaching it (OW-voyezi)".
+Run after the create began to start the session (ark3/agentpane#48): `pi` 1.5.2, `codex-cli` 0.170.0 and `claude` 2.1.328 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
+It was `fork_attach_probe.py`, over HTTP and the event stream, until ark3/agentpane#54 ported it to Bun and the socket (D31), every run above being of the Python one.
+Since the port it forks with one fork-and-prompt (D30) where it sent a fork and then an attach, so each fork it makes, the fork of the fork and the second fork of the parent included, answers a turn of its own.
+Verified with the port: `pi` 1.5.2, `codex-cli` 0.170.0 and `claude` 2.1.328 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
+
 ## `loopback_token_repro_probe.ts`
 
 Proves: **a separate process holding no token gets no command run over the socket** (D29, D31 point 5).
@@ -441,7 +462,7 @@ python3 codex_unsubscribe_probe.py [--json <path>]
 ```
 
 It answers, in one run: that the lock exists at all (a second process refused with `-32600`); that unsubscribe answers `{"status": "unsubscribed"}` and the second process is refused exactly as before, on a resumed thread and on a minted one alike; and that the holder can resume a thread it already holds and drive a turn on it, which is the fix that was left.
-Shaped after `codex_fork_same_process_probe.py`, whose vehicle it is, down to the temporary `CODEX_HOME` -- safe here, unlike in `fork_attach_probe.py`, because nothing in it consults agentpane's session index.
+Shaped after `codex_fork_same_process_probe.py`, whose vehicle it is, down to the temporary `CODEX_HOME` -- safe here, unlike in `fork_attach_probe.ts`, because nothing in it consults agentpane's session index.
 Costs tokens: three real model turns.
 
 Verified with: `codex-cli` 0.154.0 on the home server, 2026-09-15.
