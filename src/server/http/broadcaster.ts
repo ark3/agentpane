@@ -79,7 +79,10 @@ export class Broadcaster {
 
 	/**
 	 * Each event is handed to `send` as the object, synchronously as it is
-	 * fanned out. No heartbeat: the runtime's own pings keep a socket open
+	 * fanned out. A `send` must not throw, since a throw would reach the
+	 * adapter that produced the event: the socket's catches the write that
+	 * fails as its socket goes, and closes this client (`openConnection` in
+	 * `socket.ts`). No heartbeat: the runtime's own pings keep a socket open
 	 * (D31 point 8).
 	 */
 	addClient(send: (event: ServerEvent) => void, onClose?: () => void): EventClient {
@@ -220,17 +223,7 @@ class InternalClient implements EventClient {
 	}
 
 	send(event: ServerEvent): void {
-		if (this.#closed) return;
-		try {
-			this.deliver(event);
-		} catch {
-			// The socket went away between our last write and this one. A dead
-			// client is a normal event -- it must never propagate into the
-			// adapter that produced the message (a browser refresh is not a
-			// lifecycle event; see DESIGN "Why the subprocess outlives the
-			// connection").
-			this.close();
-		}
+		if (!this.#closed) this.deliver(event);
 	}
 
 	close(): void {

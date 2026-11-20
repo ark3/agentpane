@@ -80,8 +80,11 @@ export function openConnection(
 		try {
 			send(JSON.stringify(frame));
 		} catch {
-			// The socket went between the last write and this one, as the
-			// broadcaster's client takes it; its close is on the way.
+			// The socket went between the last write and this one; its close is
+			// on the way. Caught here, so neither the command whose reply this
+			// was nor the adapter whose event it was hears of it: a client
+			// going is not a lifecycle event (DESIGN, "Why the subprocess
+			// outlives the connection").
 			finish();
 		}
 	}
@@ -102,8 +105,8 @@ export function openConnection(
 		}
 		client = broadcaster.addClient(
 			(event) => write({ type: "event", event }),
-			// The broadcaster lets go of its clients only at shutdown, or when a
-			// write throws, which `write` above has already taken as closed.
+			// The broadcaster closes its clients only at shutdown; a write that
+			// throws closes this one through `finish`, already closed by then.
 			() => finish(SOCKET_CLOSE.goingAway, "the server is shutting down"),
 		);
 		// Attach and reconnect are the same thing (D3): the client's first

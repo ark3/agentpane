@@ -1169,17 +1169,24 @@ describe("events", () => {
 		expect([first.seq(PI_SESSION), second.seq(PI_SESSION)]).toEqual([1, 1]);
 	});
 
-	it("goes on to the others when a client goes away mid-fanout", async () => {
+	it("goes on to the others when a socket goes away mid-fanout", async () => {
 		const { socket: survivor } = await attached();
 		const adapter = pi.forRef(PI_SESSION);
 
 		// A send that starts throwing is what a socket closing under us looks
 		// like from in here.
 		let thrown = 0;
-		app.broadcaster.addClient(() => {
-			thrown++;
-			throw new Error("EPIPE");
-		});
+		let gone = false;
+		const leaving = app.connect(
+			() => {
+				if (!gone) return;
+				thrown++;
+				throw new Error("EPIPE");
+			},
+			() => {},
+		);
+		leaving.receive(JSON.stringify({ id: "h", cmd: "hello", token: TEST_API_TOKEN }));
+		gone = true;
 		expect(app.broadcaster.clientCount).toBe(2);
 
 		adapter?.append(userMessage("hi"));
