@@ -64,12 +64,15 @@ const server = Bun.serve<{ connection?: Connection }>({
 	// socket, which is why a client refuses a prompt over it before sending;
 	// and a socket buffered past `backpressureLimit` is closed rather than left
 	// to drop frames, a reply among them, so its client detaches and
-	// reconnects (D31 point 6). The limit is set above the largest frame the
-	// server may send, `MAX_SOCKET_FRAME_BYTES` echoed in an upsert with
-	// room, so that one large snapshot alone does not close it.
+	// reconnects (D31 point 6). The limit is set far above what live sessions
+	// total: a `hello` writes every live session's snapshot and then its reply
+	// in one run, and a client refused there cannot close the session that
+	// caused it. So it bounds only what is held for a client that has stopped
+	// reading; the largest single frame a client takes is a ceiling of its
+	// own (D31 point 8).
 	websocket: {
 		maxPayloadLength: MAX_SOCKET_FRAME_BYTES,
-		backpressureLimit: 64 * 1024 * 1024,
+		backpressureLimit: 1024 * 1024 * 1024,
 		closeOnBackpressureLimit: true,
 		open(ws) {
 			ws.data.connection = app.connect(
