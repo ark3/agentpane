@@ -109,32 +109,32 @@ It was `agentpane_pi_smoke.py`, over HTTP and the event stream, until ark3/agent
 Since the port it prompts, aborts and attaches by the handle the create answered, and the superseded-ref check is an attach of the ref the create answered, which must reach the same handle; replies are recorded by their result or refusal code where HTTP statuses were.
 Verified with the port: `pi` 1.5.2 on the home server, 2026-11-19, with `--tool-check`; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
-## `agentpane_pi_steer_probe.py`
+## `agentpane_pi_steer_probe.ts`
 
-Proves: **which of D16's three outcomes Pi's mid-turn 202 actually is** (OW-yuyofu).
-Copied from `agentpane_pi_smoke.py` rather than added to it — the card asked for a separate vehicle — and shaped after `codex_turn_probe.py`'s steer phase: start a turn that keeps streaming, confirm it is streaming at the instant of the request, post a second prompt carrying a unique marker through the ordinary REST submit route, then read off Pi's own events whether the marker was answered inside the running turn, in a following turn, or never.
+Proves: **which of D16's three outcomes a prompt Pi admitted mid-turn actually is** (OW-yuyofu).
+Copied from `agentpane_pi_smoke.py` rather than added to it — the card asked for a separate vehicle — and shaped after `codex_turn_probe.py`'s steer phase: start a turn that keeps streaming, confirm it is streaming at the instant of the request, send a second prompt carrying a unique marker through the socket's ordinary `sessions/prompt`, addressed by the session's handle, then read off Pi's own events whether the marker was answered inside the running turn, in a following turn, or never.
 
 ```bash
-python3 agentpane_pi_steer_probe.py
-python3 agentpane_pi_steer_probe.py --skip-build      # reuse dist/client
-python3 agentpane_pi_steer_probe.py --model <ref>     # default is the model AGENTS.md pins
-python3 agentpane_pi_steer_probe.py --turn tool       # steer into an executing tool batch (OW-nufitu)
+bun agentpane_pi_steer_probe.ts
+bun agentpane_pi_steer_probe.ts --skip-build      # reuse dist/client
+bun agentpane_pi_steer_probe.ts --model <ref>     # default is the model AGENTS.md pins
+bun agentpane_pi_steer_probe.ts --turn tool       # steer into an executing tool batch (OW-nufitu)
 ```
 
 `--turn tool` (OW-nufitu) measures where the steered text lands inside a tool batch, which the default text turn never calls.
-Its first prompt asks for three `bash` calls in one response, sleeping 4, 15 and 25 seconds, and the probe watches the tap rather than the SSE stream, because only Pi's own `tool_execution_start`/`tool_execution_end` show a call executing.
-It posts the marker once one call of the batch has ended and another is still executing, taking the cut from that same read of the tap, and `checks.tool_placement` reports, by tap index, where the steered `user` message landed against each call's start, end and `toolResult` and the round's `turn_end`.
+Its first prompt asks for three `bash` calls in one response, sleeping 4, 15 and 25 seconds, and the probe watches the tap rather than the socket, because only Pi's own `tool_execution_start`/`tool_execution_end` show a call executing.
+It sends the marker once one call of the batch has ended and another is still executing, taking the cut from that same read of the tap, and `checks.tool_placement` reports, by tap index, where the steered `user` message landed against each call's start, end and `toolResult` and the round's `turn_end`.
 That placement is recorded, not asserted; what the mode does assert is that the `queue_update` naming the marker came before some call's `tool_execution_end`, Pi's own evidence that a call was still executing when the steer was accepted, and that the batch finished.
 A run that cannot show both has not measured the case and fails.
 
 Two things it does that the other live harnesses do not.
 
-It **taps Pi's stdout**, because none of the discriminating evidence reaches agentpane's SSE wire: `src/server/adapters/pi/reducer.ts` drops `turn_start`, `turn_end`, `agent_end` and `queue_update` as session bookkeeping, and `agent_settled` alone cannot tell a steer from a drained follow-up queue.
+It **taps Pi's stdout**, because none of the discriminating evidence reaches agentpane's wire: `src/server/adapters/pi/reducer.ts` drops `turn_start`, `turn_end`, `agent_end` and `queue_update` as session bookkeeping, and `agent_settled` alone cannot tell a steer from a drained follow-up queue.
 The tap is a `pi` shim first on the server's PATH that pipes the real binary through `tee`; stdin, stdout and stderr pass through untouched, and it adds an `sh` and a `tee` to the sandbox tree, which the probe's worker filter reaps along with the agent.
 Pi's exit status does not pass through — `sh` reports the pipeline's last stage — which costs this probe nothing because it never reads the agent's exit code, but has to be taken out of the pipeline by anyone copying the shim to assert on how Pi exited.
-The tap preserves order, not time — `tee` stamps nothing — so every duration in the record is measured from a stamp taken immediately before the request that caused the event, and positions in the tap are pinned by reading its line count at the instant the mid-turn POST goes out.
+The tap preserves order, not time — `tee` stamps nothing — so every duration in the record is measured from a stamp taken immediately before the request that caused the event, and positions in the tap are pinned by reading its line count at the instant the mid-turn prompt goes out.
 
-It **passes `--model` explicitly**, as `agentpane_pi_smoke.py` has since OW-yehisa, through the create-session route's `model` field.
+It **passes `--model` explicitly**, as the Pi smoke has since OW-yehisa, through `sessions/create`'s `model` field.
 The first turn's length is a criterion here, so a run that silently answered on whatever `~/.pi/agent/settings.json` happened to name would not be measuring what it reports; the model that answered is still read back off the wire and recorded.
 
 Writes no fixtures.
@@ -149,6 +149,9 @@ What it showed is `docs/MANUAL_TESTING.md`, "A prompt posted mid-turn is steered
 It could not pass again after OW-mofuho retired the `renamed` event it waited for (2026-09-25), until OW-niwusi keyed its waits by the handle the attach reply carried; verified again with `pi` 0.87.1 on the home server, 2026-09-30, one run, in "The live Pi probes follow a session by its handle (OW-niwusi)".
 `--turn tool` verified with `pi` 0.87.1 on the home server, 2026-09-30, four runs, with the text turn re-run once beside them, in "Pi's steer waits for the whole tool batch (OW-nufitu)".
 Verified after the create began to start the session (ark3/agentpane#48): `pi` 1.5.2 on the home server, 2026-11-19, one run; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
+It was `agentpane_pi_steer_probe.py`, over HTTP and the event stream, until ark3/agentpane#54 ported it to Bun and the socket (D31), every run above being of the Python one.
+Since the port both its prompts go by the handle the create answered, and the replies are recorded by their result or refusal code where HTTP statuses were.
+Verified with the port: `pi` 1.5.2 on the home server, 2026-11-19, the text turn; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
 ## `agentpane_pi_prompt_window_probe.py`
 
