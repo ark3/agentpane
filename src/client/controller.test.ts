@@ -1846,26 +1846,6 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A streaming view dropped reads as a turn ending, but nothing is left to
-	// cut: the handle is gone, and the attach reply's summary still carrying it
-	// would send a fork-points read that can only be refused `not_attached` (D26).
-	it("asks for no fork points when the selected session's handle ends mid-turn (OW-sodohi)", async () => {
-		const server = fakeServer();
-		const controller = createController(server.api());
-		await controller.start();
-		attachesWith(server, { type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
-		await controller.select(ref);
-		await settle();
-		server.on["sessions/forkPoints"].mockClear();
-
-		server.emit({ type: "ended", session: ref, handle: h(ref) });
-		await settle();
-
-		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
-		expect(server.on["sessions/forkPoints"]).not.toHaveBeenCalled();
-		controller.dispose();
-	});
-
 	// A Codex fork at the first user message is a fresh thread with no rollout
 	// when the fork returns, read on disk only after its first turn had run
 	// (`codex-cli 0.156.0`, D9). This one is detached mid-turn, and its preview

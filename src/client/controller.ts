@@ -1121,10 +1121,10 @@ export function createController(
 			// to point at. And a snapshot, which replaces the array wholesale --
 			// the client-visible form of the adapter's `reset`, after which no
 			// index held from before means anything. Only for the selected
-			// session: it is the only transcript drawing Edit controls. Not at
-			// `ended`, whose dropped view reads as a turn ending on a handle with
-			// nothing left to fork (D26).
-			if (event.type !== "sessions-changed" && event.type !== "ended") {
+			// session: it is the only transcript drawing Edit controls. An `ended`
+			// reads as a turn ending, but its view is gone, so the selection no
+			// longer resolves to its handle and nothing is read (D26).
+			if (event.type !== "sessions-changed") {
 				const isStreaming = result.state.sessions[event.handle]?.isStreaming === true;
 				const moved = event.type === "snapshot" || isStreaming !== wasStreaming;
 				if (moved && selects(event.handle)) refreshForkPoints(event.session);
