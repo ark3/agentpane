@@ -42,7 +42,7 @@ Live backend evidence, the probes and the Emacs client's tests are produced here
   The workaround those runs used, which `capture_fixtures.py` still implements, is a throwaway state dir per backend with credentials copied in: `CODEX_HOME` for Codex, **`PI_CODING_AGENT_DIR`** for Pi (Pi's exact equivalent — see `ENV_AGENT_DIR` in `pi-coding-agent/dist`).
   Keep it for anything that must not touch the real session corpus or credentials — `fork_probe.py` uses it for that reason, not for this one.
   A failure of this kind is quiet and looks like success: the turn "completes" in under a second with `stopReason: "error"` and empty content, which is what to suspect first if a backend regresses here.
-  It is how `resources/probes/agentpane_codex_smoke.py` drove a real Codex through the built server, and how finding 34 was settled.
+  It is how `resources/probes/agentpane_codex_smoke.ts` drives a real Codex through the built server, as its Python predecessor did when finding 34 was settled.
 - **Pi's default model.**
   Pi reads its own default from `~/.pi/agent/settings.json`, which the owner may edit at any time — measured there on 2026-09-13, after the sandbox was widened to mount that directory read-write, `get_state` reported `deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"` both directly and through `sbox` (`docs/MANUAL_TESTING.md`, "Pi arrives on the home server").
   Earlier that same day the directory was read-only, and Pi — unable to take the lock it needs merely to *read* that file — resolved no model at all, answering `get_state` with `"id": "unknown"`.

@@ -182,6 +182,8 @@ curl -s -o /tmp/sessions.json \
 jq '.sessions | length' /tmp/sessions.json
 ```
 
+That route went with ark3/agentpane#55; the listing is `sessions/list` over the socket, which `resources/probes/agentpane_live_support.ts` speaks.
+
 | Path | Observed |
 |---|---|
 | `GET /api/sessions` (1001 sessions) | 0.16–0.24s warm, 429 KB. Matches OW-23's whole-corpus parse (the ~0.28s/973-files figure cited there); real and roughly corpus-linear, but not the cause of any freeze. |
