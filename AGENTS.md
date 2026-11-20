@@ -72,7 +72,7 @@ Refuting something nobody would have tried costs twice: it argues with no one, a
 - **Do not assume how your session was launched.**
   On the home server, driving a backend CLI against its own state directory is the first thing to try.
   But sessions run under different sandboxes, and whether that directory is writable differs between them; `docs/ENVIRONMENT.md`, "Each backend needs a writable state directory", lists the quiet ways each CLI fails when it is not.
-  If it is not, give the run a throwaway state directory, as the probes do (`make_state_home` in `resources/probes/capture_fixtures.py`); a run through agentpane's own spawn chain needs the variable in the server's environment, as `resources/probes/agentpane_pi_smoke.py` passes it.
+  If it is not, give the run a throwaway state directory, as the probes do (`make_state_home` in `resources/probes/capture_fixtures.py`); a run through agentpane's own spawn chain needs the variable in the server's environment, as `resources/probes/agentpane_pi_smoke.ts` passes it.
   Say which of the two a run used beside the evidence it produced.
 - A test that has never failed has not been shown to test anything.
   For a fix, break it again and watch it go red first.

@@ -192,25 +192,26 @@ Costs tokens: two long turns cut a few hundred characters in, and three one-word
 Verified with: `pi` 1.2.0 on the home server, 2026-10-14, two runs, in `docs/MANUAL_TESTING.md`, "A Pi session's file appears at its first user message, and a fork at that message has none when `fork` returns (OW-tigaye)".
 Run after the create began to start the session (ark3/agentpane#48), `--part agentpane` only: `pi` 1.5.2 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
 
-## `loopback_token_repro_probe.py`
+## `loopback_token_repro_probe.ts`
 
-Proves: **a separate process holding no token can create a Pi session in a directory nobody gave it, which since D30 spawns the agent there, and attach to it**.
-It sends neither `Authorization` nor `Origin` nor `Sec-Fetch-Site`, as any local non-browser process can; its `Http` client is built with `send_token=False`, so it never picks up the token the other probes send.
-Its passing condition is refusal: it passes (exit 0) only when both the create and the attach are answered 401 or 403, fails (exit 1) when either is answered 2xx, and is inconclusive (exit 2) on anything else; exit 3 means it could not close what it attached or clean up.
+Proves: **a separate process holding no token gets no command run over the socket** (D29, D31 point 5).
+It opens two sockets with no token and no `Origin`, as any local non-browser process can: on one the first frame is a `sessions/create` of a Pi session in a directory nobody gave it, which since D30 spawns the agent there; on the other a `hello` with a token of its own making, followed at once by that create and a `sessions/attach`.
+Its passing condition is refusal: it passes (exit 0) only when the server closes both sockets 4401 having sent no event and no reply, and, with its own server, the workspace holds no session and no Pi runs under the server, which it asks with the token.
+It fails (exit 1) when any frame is answered `ok`, or a session or a Pi turns up, and is inconclusive (exit 2) on anything else; exit 3 means it could not close what a command started or clean up.
 
 ```bash
-python3 loopback_token_repro_probe.py                                   # starts its own server on a free port
-python3 loopback_token_repro_probe.py --skip-build                      # reuse dist/client
-python3 loopback_token_repro_probe.py --base-url http://127.0.0.1:PORT  # target a running server, e.g. from inside sbox
+bun loopback_token_repro_probe.ts                                   # starts its own server on a free port
+bun loopback_token_repro_probe.ts --skip-build                      # reuse dist/client
+bun loopback_token_repro_probe.ts --base-url http://127.0.0.1:PORT  # target a running server, e.g. from inside sbox
 ```
 
-By default it builds and starts the production server, as `agentpane_pi_smoke.py` does, with Pi on a throwaway `PI_CODING_AGENT_DIR`; with `--base-url` it starts nothing.
+By default it builds and starts the production server, as `agentpane_pi_smoke.ts` does, with Pi on a throwaway `PI_CODING_AGENT_DIR`; with `--base-url` it starts nothing and asks no listing, since a token read inside `sbox` is the sandbox's own.
 The session's `cwd` is a fresh `/var/tmp` directory holding only `.sandbox-workspace`, so `sbox` accepts it and a server outside the probe's sandbox sees it too.
 The create carries the pinned `--model`; nothing is prompted, so no model is charged.
-A session the create or the attach started is closed through the ref the attach answered, else the create, and in its own-server mode the probe also records the Pi pids running then and that none outlived the close.
 
-Verified with: `pi` 1.5.2 on the home server, 2026-11-13, against the server at `ada7204d`, where it reproduced the exposure; the run is recorded in the message of the commit that added this probe.
-Run after the create began to start the session (ark3/agentpane#48), against its own server: `pi` 1.5.2 on the home server, 2026-11-19, where both requests were refused 401; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
+It was `loopback_token_repro_probe.py`, which asked the same of the HTTP create and attach routes and passed on 401 or 403, until ark3/agentpane#54 ported it to Bun and the socket.
+Verified with: `pi` 1.5.2 on the home server, 2026-11-13, against the server at `ada7204d`, where the Python one reproduced the exposure; the run is recorded in the message of the commit that added it.
+Verified with the port: `pi` 1.5.2 on the home server, 2026-11-19, passing, and failing with exit 1 when a throwaway copy sent the real token in its second case; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
 ## `sbox_token_mask_probe.py`
 

@@ -5196,6 +5196,12 @@ The first turn's text grew across two upserts, a tool turn put a `toolCall` bloc
 The long turn was aborted at 20023 assistant characters (`abort_wait: "filled"`), went idle 10 ms after the abort's request with `queued: []`, and still held 20023 1.5 s later.
 SIGTERM to the server left no Pi worker, and the state directory and the server's log were removed.
 
+**`loopback_token_repro_probe.ts` passed, and failed when it held the token.**
+On `pi 1.5.2`, against its own server on a free port with a throwaway Pi state directory; 7 s.
+A socket whose first frame was a `sessions/create` was closed 4401, "the first frame must be a hello carrying the token", with no event and no reply; so was one sending a `hello` with a random token and, without waiting, the create and a `sessions/attach`.
+Asked with the token afterwards, the workspace held no session, and no Pi ran under the server.
+A throwaway copy that sent the server's real token in the second case exited 1: its `hello` and create were answered `ok`, the attach of a placeholder ref `not_found`, and the listing held the Pi session, `attached`, whose Pi the probe then closed.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
