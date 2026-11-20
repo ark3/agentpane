@@ -611,7 +611,7 @@ handled; see `agentpane--record'."
     (agentpane-test--with-session ref
       (agentpane--on-notification
        nil 'session/node
-       (list :session ref :node (agentpane-test--assistant 1 "<p>Done now.</p>")))
+       (list :session ref :handle "h1" :node (agentpane-test--assistant 1 "<p>Done now.</p>")))
       (agentpane-test--redraw buffer)
       (should (equal drawn '(1)))
       (should (equal (agentpane-test--indices) '(0 1)))
@@ -628,7 +628,7 @@ the last, above the prompt region."
     (agentpane-test--with-session ref
       (agentpane--on-notification
        nil 'session/node
-       (list :session ref :node (agentpane-test--assistant 3 "<p>Appended.</p>")))
+       (list :session ref :handle "h1" :node (agentpane-test--assistant 3 "<p>Appended.</p>")))
       (agentpane-test--redraw buffer)
       (should (equal drawn '(3)))
       (should (equal (agentpane-test--indices) '(0 1 3)))
@@ -644,7 +644,7 @@ a backlog's are, draw that node once, with the last one's content
     (agentpane-test--with-session ref
       (dolist (html '("<p>Draft one.</p>" "<p>Draft two.</p>" "<p>Done now.</p>"))
         (agentpane--on-notification
-         nil 'session/node (list :session ref :node (agentpane-test--assistant 1 html))))
+         nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--assistant 1 html))))
       (agentpane-test--redraw buffer)
       (should (equal drawn '(1)))
       (should (string-search "Done now." (buffer-string)))
@@ -658,7 +658,7 @@ first arrived, each drawn once however often it came."
       (dolist (node (list (agentpane-test--assistant 4 "<p>Four.</p>")
                           (agentpane-test--assistant 3 "<p>Three.</p>")
                           (agentpane-test--assistant 4 "<p>Four again.</p>")))
-        (agentpane--on-notification nil 'session/node (list :session ref :node node)))
+        (agentpane--on-notification nil 'session/node (list :session ref :handle "h1" :node node)))
       (agentpane-test--redraw buffer)
       (should (equal drawn '(3 4)))
       (should (equal (agentpane-test--indices) '(0 1 4 3)))
@@ -672,14 +672,14 @@ on is kept, and the redraw scheduled for it then draws nothing more."
         (seen nil))
     (agentpane-test--with-session ref
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (agentpane-test--assistant 1 "<p>Done now.</p>")))
+       nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--assistant 1 "<p>Done now.</p>")))
       (let ((set-status (symbol-function 'agentpane--set-status)))
         (cl-letf (((symbol-function 'agentpane--set-status)
                    (lambda (params)
                      (setq seen (string-search "Done now." (buffer-string)))
                      (funcall set-status params))))
           (agentpane--on-notification
-           nil 'session/status (list :session ref :isStreaming :json-false))))
+           nil 'session/status (list :session ref :handle "h1" :isStreaming :json-false))))
       (should seen)
       (agentpane-test--redraw buffer)
       (should (equal drawn '(1))))))
@@ -691,10 +691,10 @@ appended after it, in the order the two arrived."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-session ref
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (agentpane-test--assistant 3 "<p>Three.</p>")))
+       nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--assistant 3 "<p>Three.</p>")))
       (agentpane--on-notification
        nil 'session/notice
-       (list :session ref
+       (list :session ref :handle "h1"
              :notice '(:kind "warning" :message "Fallback metadata" :details nil :path nil)))
       (agentpane-test--redraw buffer)
       (should (equal (agentpane-test--indices) '(0 1 3 nil)))
@@ -708,7 +708,7 @@ does, draws each of them on a line of its own, the blank one included."
     (agentpane-test--with-session ref
       (agentpane--on-notification
        nil 'session/notice
-       (list :session ref
+       (list :session ref :handle "h1"
              :notice '(:kind "notify" :message "Discovered @references:\n\n✓ @a.md\n✓ @b.md"
                        :details nil :path nil)))
       (agentpane-test--redraw buffer)
@@ -726,10 +726,10 @@ the snapshot's nodes are drawn and the recorded one never is."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-session ref
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (agentpane-test--assistant 3 "<p>Stale.</p>")))
+       nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--assistant 3 "<p>Stale.</p>")))
       (agentpane--on-notification
        nil 'session/snapshot
-       (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes))
+       (list :session ref :handle "h1" :isStreaming :json-false :nodes agentpane-test--nodes))
       (agentpane-test--redraw buffer)
       (should (equal drawn '(1 0)))
       (should-not (string-search "Stale." (buffer-string))))))
@@ -740,7 +740,7 @@ never drawn, and the redraw raises nothing."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-session ref
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (agentpane-test--assistant 1 "<p>Done now.</p>")))
+       nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--assistant 1 "<p>Done now.</p>")))
       (kill-buffer buffer)
       (agentpane-test--redraw buffer)
       (should-not drawn))))
@@ -752,7 +752,7 @@ with its details and path and in its own face, and not as an `(:error ...)'."
     (agentpane-test--with-session ref
       (agentpane--on-notification
        nil 'session/notice
-       (list :session ref
+       (list :session ref :handle "h1"
              :notice '(:kind "configWarning" :message "Unknown key"
                        :details "Remove it" :path "/c.toml:3:5")))
       (let ((data (ewoc-data (ewoc-nth agentpane--ewoc -1))))
@@ -773,10 +773,10 @@ turn's end sends does, redraws them as notice nodes after its nodes."
   (let ((ref '(:backend "codex" :id "t1"))
         (notice '(:kind "warning" :message "Fallback metadata" :details nil :path nil)))
     (agentpane-test--with-session ref
-      (agentpane--on-notification nil 'session/notice (list :session ref :notice notice))
+      (agentpane--on-notification nil 'session/notice (list :session ref :handle "h1" :notice notice))
       (agentpane--on-notification
        nil 'session/snapshot
-       (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+       (list :session ref :handle "h1" :isStreaming :json-false :nodes agentpane-test--nodes
              :notices (vector notice)))
       (should (equal (agentpane-test--indices) '(0 1 nil)))
       (should (equal (ewoc-data (ewoc-nth agentpane--ewoc -1)) (list :notice notice)))
@@ -793,7 +793,7 @@ nodes, the error as a warning line (OW-bipume)."
     (agentpane-test--with-session ref
       (agentpane--on-notification
        nil 'session/snapshot
-       (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+       (list :session ref :handle "h1" :isStreaming :json-false :nodes agentpane-test--nodes
              :error "Turn failed upstream" :notices (vector notice)))
       (should (equal (agentpane-test--indices) '(0 1 nil nil)))
       (let ((error-at (agentpane-test--position "⚠ Turn failed upstream")))
@@ -806,7 +806,7 @@ nodes, the error as a warning line (OW-bipume)."
       ;; draws neither.
       (agentpane--on-notification
        nil 'session/snapshot
-       (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+       (list :session ref :handle "h1" :isStreaming :json-false :nodes agentpane-test--nodes
              :error nil :notices []))
       (should (equal (agentpane-test--indices) '(0 1)))
       (should-not (string-search "⚠" (buffer-string))))))
@@ -827,9 +827,9 @@ one per session (OW-sedosu)."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-session ref
       (agentpane--on-notification
-       nil 'session/error (list :session ref :message "Turn failed upstream"))
+       nil 'session/error (list :session ref :handle "h1" :message "Turn failed upstream"))
       (agentpane--on-notification
-       nil 'session/error (list :session ref :message "Turn failed again"))
+       nil 'session/error (list :session ref :handle "h1" :message "Turn failed again"))
       (should (equal (agentpane-test--warnings) '("Turn failed again"))))))
 
 (ert-deftest agentpane-test-dismiss-error-names-it-to-the-server ()
@@ -841,13 +841,14 @@ pressed, as the browser's banner goes (OW-desufa)."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--forking nil nil
       (agentpane-test--with-session ref
+        (setq agentpane--handle "h1")
         (agentpane--on-notification
-         nil 'session/error (list :session ref :message "Turn failed upstream" :errorId "e3"))
+         nil 'session/error (list :session ref :handle "h1" :message "Turn failed upstream" :errorId "e3"))
         (agentpane--on-notification
-         nil 'session/error (list :session ref :message "Turn failed upstream" :errorId "e4"))
+         nil 'session/error (list :session ref :handle "h1" :message "Turn failed upstream" :errorId "e4"))
         (goto-char (point-max))
         (call-interactively (key-binding (kbd "C-c C-d")))
-        (should (equal sent `((sessions/dismissError :session ,ref :handle nil :errorId "e4"))))
+        (should (equal sent `((sessions/dismissError :session ,ref :handle "h1" :errorId "e4"))))
         (should (equal (agentpane-test--indices) '(0 1)))
         (should-not (agentpane-test--warnings))))))
 
@@ -859,11 +860,11 @@ carried beside it (OW-jokoto)."
       (agentpane-test--with-session ref
         (agentpane--on-notification
          nil 'session/snapshot
-         (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+         (list :session ref :handle "h1" :isStreaming :json-false :nodes agentpane-test--nodes
                :error "Turn failed upstream" :errorId "e6" :notices []))
         (goto-char (point-max))
         (call-interactively (key-binding (kbd "C-c C-d")))
-        (should (equal sent `((sessions/dismissError :session ,ref :handle nil :errorId "e6"))))))))
+        (should (equal sent `((sessions/dismissError :session ,ref :handle "h1" :errorId "e6"))))))))
 
 (ert-deftest agentpane-test-error-cleared-drops-its-line ()
   "A `session/errorCleared' drops the turn error's line, as the server says
@@ -872,10 +873,10 @@ it no longer holds it, leaving the draft in the prompt region alone
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-session ref
       (agentpane--on-notification
-       nil 'session/error (list :session ref :message "Turn failed upstream"))
+       nil 'session/error (list :session ref :handle "h1" :message "Turn failed upstream"))
       (goto-char (point-max))
       (insert "draft")
-      (agentpane--on-notification nil 'session/errorCleared (list :session ref))
+      (agentpane--on-notification nil 'session/errorCleared (list :session ref :handle "h1"))
       (should-not (agentpane-test--warnings))
       (should-not agentpane--error)
       (should (equal (agentpane-test--indices) '(0 1)))
@@ -890,16 +891,16 @@ it down (OW-jopifu)."
     (agentpane-test--forking nil nil
       (agentpane-test--with-session ref
         (agentpane--on-notification
-         nil 'session/error (list :session ref :message "Turn failed upstream"))
+         nil 'session/error (list :session ref :handle "h1" :message "Turn failed upstream"))
         (goto-char (point-max))
         (call-interactively (key-binding (kbd "C-c C-d")))
         (should-not (agentpane-test--warnings))
         (agentpane--on-notification
          nil 'session/snapshot
-         (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+         (list :session ref :handle "h1" :isStreaming :json-false :nodes agentpane-test--nodes
                :error "Turn failed upstream" :notices []))
         (should (equal (agentpane-test--warnings) '("Turn failed upstream")))
-        (agentpane--on-notification nil 'session/errorCleared (list :session ref))
+        (agentpane--on-notification nil 'session/errorCleared (list :session ref :handle "h1"))
         (should-not (string-search "⚠" (buffer-string)))))))
 
 (ert-deftest agentpane-test-meta-waits-for-the-streaming-turn-to-end ()
@@ -910,13 +911,13 @@ streaming ended, though no node is re-sent."
     (agentpane-test--with-session ref
       (agentpane--on-notification
        nil 'session/snapshot
-       (list :session ref :isStreaming t
+       (list :session ref :handle "h1" :isStreaming t
              :nodes (vector (agentpane-test--assistant 1 "<p>One.</p>")
                             (agentpane-test--assistant 2 "<p>Two.</p>"))))
       (should (= 1 (count-matches "^— luna" (point-min) (point-max))))
       (should (< (agentpane-test--position "— luna") (agentpane-test--position "Two.")))
       (agentpane--on-notification
-       nil 'session/status (list :session ref :isStreaming :json-false))
+       nil 'session/status (list :session ref :handle "h1" :isStreaming :json-false))
       (should (= 2 (count-matches "^— luna" (point-min) (point-max)))))))
 
 (ert-deftest agentpane-test-appended-node-releases-the-previous-tail ()
@@ -924,14 +925,14 @@ streaming ended, though no node is re-sent."
 and the node it follows, no longer the last, is redrawn with its own."
   (let ((ref '(:backend "pi" :id "s1")))
     (agentpane-test--with-session ref
-      (agentpane--on-notification nil 'session/status (list :session ref :isStreaming t))
+      (agentpane--on-notification nil 'session/status (list :session ref :handle "h1" :isStreaming t))
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (agentpane-test--assistant 3 "<p>Three.</p>")))
+       nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--assistant 3 "<p>Three.</p>")))
       (agentpane-test--redraw buffer)
       (should (string-search "· haiku" (buffer-string)))
       (should-not (string-search "— luna" (buffer-string)))
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (agentpane-test--assistant 5 "<p>Five.</p>")))
+       nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--assistant 5 "<p>Five.</p>")))
       (agentpane-test--redraw buffer)
       (should (= 1 (count-matches "^— luna" (point-min) (point-max))))
       (should (< (agentpane-test--position "Three.")
@@ -953,11 +954,11 @@ status says the streaming ended it is drawn `ok', though no node is re-sent."
     (agentpane-test--with-session ref
       (agentpane--on-notification
        nil 'session/snapshot
-       (list :session ref :isStreaming t
+       (list :session ref :handle "h1" :isStreaming t
              :nodes (vector (agentpane-test--running-tool 1 "sleep 60"))))
       (should (string-search "◔ Bash" (agentpane-test--line-at "sleep 60")))
       (agentpane--on-notification
-       nil 'session/status (list :session ref :isStreaming :json-false))
+       nil 'session/status (list :session ref :handle "h1" :isStreaming :json-false))
       (should-not (string-search "◔" (agentpane-test--line-at "sleep 60")))
       (should (string-search "✓ Bash" (agentpane-test--line-at "sleep 60"))))))
 
@@ -966,13 +967,13 @@ status says the streaming ended it is drawn `ok', though no node is re-sent."
 result on the node it follows as `ok', since that is no longer the last."
   (let ((ref '(:backend "pi" :id "s1")))
     (agentpane-test--with-session ref
-      (agentpane--on-notification nil 'session/status (list :session ref :isStreaming t))
+      (agentpane--on-notification nil 'session/status (list :session ref :handle "h1" :isStreaming t))
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (agentpane-test--running-tool 3 "sleep 60")))
+       nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--running-tool 3 "sleep 60")))
       (agentpane-test--redraw buffer)
       (should (string-search "◔ Bash" (agentpane-test--line-at "sleep 60")))
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (agentpane-test--assistant 5 "<p>Five.</p>")))
+       nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--assistant 5 "<p>Five.</p>")))
       (agentpane-test--redraw buffer)
       (should (string-search "✓ Bash" (agentpane-test--line-at "sleep 60"))))))
 
@@ -2023,7 +2024,7 @@ same distance from the end, and that of any other window where it was."
         (let ((window (selected-window))
               (snapshot (lambda (nodes)
                           (agentpane--on-notification
-                           nil 'session/snapshot (list :session ref :nodes nodes)))))
+                           nil 'session/snapshot (list :session ref :handle "h1" :nodes nodes)))))
           (set-window-buffer window (current-buffer))
           (set-window-point window (point-max))
           (set-window-start window (agentpane-test--position "Edit app.ts") t)
@@ -2299,7 +2300,7 @@ arrived while it was being typed."
       (undo-boundary)
       (agentpane--on-notification
        nil 'session/node
-       (list :session ref :node (agentpane-test--assistant 1 "<p>Streaming more.</p>")))
+       (list :session ref :handle "h1" :node (agentpane-test--assistant 1 "<p>Streaming more.</p>")))
       (agentpane-test--redraw buffer)
       (undo-boundary)
       (let ((last-command nil)) (undo))
@@ -2321,7 +2322,7 @@ a node redraw that changed the buffer's size between the presses."
         (grow (lambda (text)
                 (agentpane--on-notification
                  nil 'session/node
-                 (list :session '(:backend "codex" :id "t1")
+                 (list :session '(:backend "codex" :id "t1") :handle "h1"
                        :node (agentpane-test--assistant 1 text)))
                 (agentpane-test--redraw (current-buffer)))))
     (agentpane-test--with-session ref
@@ -2363,7 +2364,7 @@ Undo inhibits read-only, so a stale position edits a node's text."
         (agentpane-test--command 'undo)
         (agentpane--on-notification
          nil 'session/node
-         (list :session ref
+         (list :session ref :handle "h1"
                :node (agentpane-test--assistant
                       1 (concat "<p>" (string-join (make-list 40 "streaming") " ") "</p>"))))
         (agentpane-test--redraw buffer)
@@ -2396,7 +2397,7 @@ another buffer, since `pending-undo-list' is global."
               (agentpane-test--command 'undo))
             (agentpane--on-notification
              nil 'session/node
-             (list :session ref :node (agentpane-test--assistant 1 "<p>Redrawn.</p>")))
+             (list :session ref :handle "h1" :node (agentpane-test--assistant 1 "<p>Redrawn.</p>")))
             (agentpane-test--redraw buffer)
             (with-current-buffer notes
               (agentpane-test--command 'undo)
@@ -2602,7 +2603,7 @@ once the turn's text arrives or the streaming ends."
       (agentpane-test--press-r)
       (agentpane--on-notification
        nil 'session/snapshot
-       (list :session ref :isStreaming t
+       (list :session ref :handle "h1" :isStreaming t
              :nodes (vector (aref agentpane-test--nodes 0) (funcall running "Bash" "bun test"))))
       (should (equal (agentpane-test--tail-status) "Bash bun test … running\n"))
       ;; The line a handled prompt holds follows the tail, nearest the
@@ -2613,20 +2614,20 @@ once the turn's text arrives or the streaming ends."
       (should (equal (agentpane-test--tail-status) "Bash bun test … running\n"))
       (agentpane--hold-handled nil)
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (funcall running "Read" "app.ts")))
+       nil 'session/node (list :session ref :handle "h1" :node (funcall running "Read" "app.ts")))
       (agentpane-test--redraw buffer)
       (should (equal (agentpane-test--tail-status) "Read app.ts … running\n"))
       (agentpane--on-notification
-       nil 'session/status (list :session ref :isStreaming :json-false))
+       nil 'session/status (list :session ref :handle "h1" :isStreaming :json-false))
       (should-not (agentpane-test--tail-status))
-      (agentpane--on-notification nil 'session/status (list :session ref :isStreaming t))
+      (agentpane--on-notification nil 'session/status (list :session ref :handle "h1" :isStreaming t))
       (should (agentpane-test--tail-status))
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (agentpane-test--assistant 2 "<p>Done.</p>")))
+       nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--assistant 2 "<p>Done.</p>")))
       (agentpane-test--redraw buffer)
       (should-not (agentpane-test--tail-status))
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (plist-put (funcall running "Bash" "again")
+       nil 'session/node (list :session ref :handle "h1" :node (plist-put (funcall running "Bash" "again")
                                                              :index 3)))
       (agentpane-test--redraw buffer)
       (should (equal (agentpane-test--tail-status) "Bash again … running\n"))
@@ -2673,25 +2674,25 @@ shows.  A session with no nodes never shows it."
       (should-not (agentpane-test--hiding-p))
       (agentpane--on-notification
        nil 'session/snapshot
-       (list :session ref :isStreaming :json-false :nodes agentpane-test--all-chrome-nodes))
+       (list :session ref :handle "h1" :isStreaming :json-false :nodes agentpane-test--all-chrome-nodes))
       (should (agentpane-test--hiding-p))
       (agentpane--on-notification
-       nil 'session/node (list :session ref :node (agentpane-test--assistant 4 "<p>Done.</p>")))
+       nil 'session/node (list :session ref :handle "h1" :node (agentpane-test--assistant 4 "<p>Done.</p>")))
       (agentpane-test--redraw buffer)
       (should-not (agentpane-test--hiding-p))
       (agentpane--on-notification
        nil 'session/snapshot
-       (list :session ref :isStreaming t
+       (list :session ref :handle "h1" :isStreaming t
              :nodes (vector (list :index 1 :role "assistant"
                                   :parts (vector (list :type "tool" :name "Bash"
                                                        :summary "bun test" :args ""
                                                        :result "" :state "running"))))))
       (should (equal (agentpane-test--above-prompt) "Bash bun test … running\n"))
       (agentpane--on-notification
-       nil 'session/status (list :session ref :isStreaming :json-false))
+       nil 'session/status (list :session ref :handle "h1" :isStreaming :json-false))
       (should (agentpane-test--hiding-p))
       (agentpane--on-notification
-       nil 'session/snapshot (list :session ref :isStreaming :json-false :nodes []))
+       nil 'session/snapshot (list :session ref :handle "h1" :isStreaming :json-false :nodes []))
       (should-not (agentpane-test--above-prompt)))))
 
 ;;;; Forking, against a stub connection
@@ -2702,8 +2703,8 @@ shows.  A session with no nodes never shows it."
 set `fork-stops', FORKED for `sessions/fork', for
 `sessions/forkAndPrompt' whatever BODY has put in `fork-prompted', else
 FORKED's summary under the handle \"h-fork\" and a started prompt, a summary of the ref
-asked for for `sessions/attach', unless BODY has put a summary of its own
-in `attached', the fixed nodes for `sessions/preview', and for
+asked for for `sessions/attach', under the handle \"h-ID\" for the ref's
+ID, unless BODY has put a summary of its own in `attached', the fixed nodes for `sessions/preview', and for
 `sessions/list' nil, for `sessions/prompt' whatever BODY has put in
 `prompted', nil, a started turn's answer, unless it has, and for
 `sessions/abort' whatever BODY has put in `aborted', nil, an abort that
@@ -2714,7 +2715,9 @@ on, in the order they go out.  The reply to an attach is preceded, as
 the helper precedes it, by the `session/snapshot' that attaches the
 buffer, through `agentpane--connection', drawing the fixed nodes under
 the summary's handle and carrying the attach's `token'
-\(`sessions/attach' in src/emacs/helper.ts), unless a snapshot has
+\(`sessions/attach' in src/emacs/helper.ts), and before that, where a
+buffer already holds the handle, by the untagged snapshot the server's
+attach of a live session sends it (`introduce' there, D31), unless a snapshot has
 reached the buffer since the attach went out: the helper writes an
 attach's reply only after the snapshot that answers it, or once none
 will.  So is the reply to a `sessions/prompt' carrying a `token', which
@@ -2769,7 +2772,9 @@ BODY made is killed afterwards."
                             (and (eq method 'sessions/prompt) (plist-get params :token)))
                     (setq snapshotted (delq (current-buffer) snapshotted)))
                   (let* ((from (current-buffer))
-                         (bound (or attached (list :ref (plist-get params :session))))
+                         (bound (or attached
+                                    (let ((ref (plist-get params :session)))
+                                      (list :ref ref :handle (format "h-%s" (plist-get ref :id))))))
                          (reply (pcase method
                                   ('sessions/forkPoints (list :points ,points
                                                               :forkStopsTurn (if fork-stops t :json-false)))
@@ -2799,6 +2804,12 @@ BODY made is killed afterwards."
                                               (or (and (eq ok t) (eq method 'sessions/attach))
                                                   (and (eq method 'sessions/prompt) (plist-get params :token)
                                                        (or (eq ok t) (and (listp ok) (plist-get ok :attached))))))
+                                     (when (agentpane--buffer-holding (plist-get bound :handle))
+                                       (agentpane--on-notification
+                                        agentpane--connection 'session/snapshot
+                                        (list :session (plist-get bound :ref)
+                                              :handle (plist-get bound :handle)
+                                              :nodes agentpane-test--nodes)))
                                      (agentpane--on-notification
                                       agentpane--connection 'session/snapshot
                                       (list :session (plist-get bound :ref)
@@ -2857,11 +2868,12 @@ leaving this one holding its session, and on Codex still attached."
           [(:id "turn-0" :text "Fix the bug" :index 0) (:id "turn-2" :text "More" :index 2)]
           forked
         (agentpane-test--with-session ref
-          (setq agentpane--attached 'connection)
+          (setq agentpane--attached 'connection
+                agentpane--handle "h1")
           (agentpane-test--goto-index 0)
           (agentpane-fork)
           (should (equal (assq 'sessions/fork sent)
-                         `(sessions/fork :session ,ref :handle nil :entryId "turn-0")))
+                         `(sessions/fork :session ,ref :handle "h1" :entryId "turn-0")))
           (should (equal (assq 'sessions/attach sent)
                          `(sessions/attach :session ,forked :token 1)))
           (let ((fork-buffer (agentpane--buffer-for forked)))
@@ -2911,7 +2923,7 @@ since `sessions/compact' answers only for an attached session."
           (with-current-buffer buffer (agentpane-compact))
           (should (equal (reverse sent)
                          `((sessions/attach :session ,ref :token 2)
-                           (sessions/compact :session ,ref :handle nil)))))))))
+                           (sessions/compact :session ,ref :handle "h-/s/parent.jsonl")))))))))
 
 (ert-deftest agentpane-test-pi-fork-leaves-the-parent-as-it-was ()
   "A Pi fork leaves the parent buffer showing the transcript it showed, and
@@ -3054,7 +3066,7 @@ reply is released, and those sent after, in order."
                 agentpane--attach-sent 7)
           (setq hold '(sessions/abort))
           (agentpane--on-notification
-           nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+           nil 'session/status (list :session ref :handle "h1" :isStreaming t :compaction nil :model nil))
           (agentpane-test--goto-index 0)
           (agentpane-fork)
           (let ((before (mapcar #'car (reverse sent))))
@@ -3091,7 +3103,7 @@ the message it is on."
           (should (seq-some (lambda (text) (string-search "press f again" text)) said))
           (agentpane--on-notification
            agentpane--connection 'session/snapshot
-           (list :session ref
+           (list :session ref :handle "h-/s/parent.jsonl"
                  :nodes (vector '(:index 0 :role "custom"
                                   :parts [(:type "text" :text "A custom message"
                                            :html "<p>A custom message</p>\n")])
@@ -3102,7 +3114,7 @@ the message it is on."
           (setq sent nil)
           (agentpane-fork)
           (should (equal (assq 'sessions/fork sent)
-                         `(sessions/fork :session ,ref :handle nil :entryId "entry-fix"))))))))
+                         `(sessions/fork :session ,ref :handle "h-/s/parent.jsonl" :entryId "entry-fix"))))))))
 
 (ert-deftest agentpane-test-fork-while-attaching-sends-nothing ()
   "A second `agentpane-fork' on a previewed buffer while the first one's
@@ -3277,7 +3289,8 @@ where the parent was (D30)."
           forked
         (agentpane-test--with-session ref
           (agentpane--draw agentpane-test--image-nodes)
-          (setq agentpane--attached 'connection)
+          (setq agentpane--attached 'connection
+                agentpane--handle "h1")
           (agentpane-test--goto-index 0)
           (agentpane-edit)
           (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
@@ -3290,7 +3303,7 @@ where the parent was (D30)."
             (agentpane-send)
             (should (equal (mapcar #'car (reverse sent)) '(sessions/forkPoints sessions/forkAndPrompt)))
             (let ((params (cdr (assq 'sessions/forkAndPrompt sent))))
-              (should (equal params `(:session ,ref :handle nil :index 0 :text "Fix the bug properly"
+              (should (equal params `(:session ,ref :handle "h1" :index 0 :text "Fix the bug properly"
                                                :token ,agentpane--attach-tokens
                                                :images [(:mimeType "image/png" :base64 "AAAA")]))))
             (should (equal (agentpane-test--draft) ""))
@@ -3451,14 +3464,14 @@ moves that edit nowhere, and the send ends it."
             (pcase how
               ('pressed-before
                (agentpane--on-notification
-                nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+                nil 'session/status (list :session ref :handle "h1" :isStreaming t :compaction nil :model nil))
                (setq hold '(sessions/forkPoints sessions/prompt))
                (agentpane-edit-last)
                (agentpane-send)
                (funcall (cdr (pop held)) t))
               ('pressed-during
                (agentpane--on-notification
-                nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+                nil 'session/status (list :session ref :handle "h1" :isStreaming t :compaction nil :model nil))
                (setq hold '(sessions/prompt))
                (agentpane-send)
                (agentpane-edit-last)
@@ -3650,7 +3663,7 @@ unanswered."
                 fork-stops (equal backend "pi"))
           (agentpane--on-notification
            nil 'session/status
-           (list :session ref :isStreaming streaming :compaction compaction :model nil))
+           (list :session ref :handle "h1" :isStreaming streaming :compaction compaction :model nil))
           (goto-char (point-max))
           (agentpane-edit-last)
           (list (mapcar #'car (reverse sent))
@@ -3695,7 +3708,7 @@ ark3/agentpane#17).  Whatever the backend: the answer decides."
                   (status (lambda (streaming compaction)
                             (agentpane--on-notification
                              nil 'session/status
-                             (list :session ref :isStreaming (if streaming t :json-false)
+                             (list :session ref :handle "h1" :isStreaming (if streaming t :json-false)
                                    :compaction compaction :model nil)))))
               (should (string-search "C-RET forks there" (funcall hint)))
               (funcall status t nil)
@@ -3732,7 +3745,7 @@ drawn (`agentpane--record', OW-roveze)."
           (setq agentpane--attached 'connection)
           (agentpane--on-notification
            nil 'session/node
-           (list :session ref
+           (list :session ref :handle "h1"
                  :node '(:index 4 :role "user"
                          :parts [(:type "text" :text "third draft"
                                   :html "<p>third draft</p>\n")])))
@@ -3801,7 +3814,7 @@ holding no user message it refuses and sends nothing."
           (setq agentpane--attached 'connection
                 agentpane--attach-sent 7)
           (agentpane--on-notification
-           nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+           nil 'session/status (list :session ref :handle "h1" :isStreaming t :compaction nil :model nil))
           (agentpane-edit-last)
           (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
           (should (seq-some (lambda (text) (string-search "not forkable" text)) said))
@@ -3869,7 +3882,7 @@ leaves here, ahead of the displaced draft as Cancel leaves them
                   fork-stops t
                   aborted '(:queued ["steered"]))
             (agentpane--on-notification
-             nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+             nil 'session/status (list :session ref :handle "h1" :isStreaming t :compaction nil :model nil))
             (goto-char (point-max))
             (insert "a draft")
             (agentpane-edit-last)
@@ -3909,7 +3922,7 @@ would leave them (OW-kijuju, OW-hakeno)."
                 fork-stops t
                 aborted '(:queued ["steered"]))
           (agentpane--on-notification
-           nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+           nil 'session/status (list :session ref :handle "h1" :isStreaming t :compaction nil :model nil))
           (goto-char (point-max))
           (insert "a draft")
           (agentpane-abort)
@@ -4225,7 +4238,7 @@ handle, carrying the token of that attach instead (D30)."
           (agentpane-send)
           (agentpane--on-notification
            agentpane--connection 'session/snapshot
-           (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+           (list :session ref :handle "h1" :isStreaming :json-false :nodes agentpane-test--nodes
                  :token 1 :error "extension failed to load" :errorId "e9" :notices []))
           (funcall (cdr (pop held)) t)
           (should (equal sent `((sessions/prompt :session ,ref :text "hello"
@@ -4245,15 +4258,15 @@ shows it, and so does this buffer (OW-lohubo)."
                 agentpane--attach-sent 7)
           (agentpane--on-notification
            agentpane--connection 'session/snapshot
-           (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+           (list :session ref :handle "h1" :isStreaming :json-false :nodes agentpane-test--nodes
                  :error "Turn failed upstream" :notices []))
           (setq hold '(sessions/prompt))
           (goto-char (point-max))
           (insert "hello")
           (agentpane-send)
-          (agentpane--on-notification nil 'session/errorCleared (list :session ref))
+          (agentpane--on-notification nil 'session/errorCleared (list :session ref :handle "h1"))
           (agentpane--on-notification
-           nil 'session/error (list :session ref :message "Turn failed upstream"))
+           nil 'session/error (list :session ref :handle "h1" :message "Turn failed upstream"))
           (funcall (cdr (pop held)) t)
           (should (equal (agentpane-test--indices) '(0 1 nil)))
           (should (equal (agentpane-test--warnings) '("Turn failed upstream"))))))))
@@ -4271,15 +4284,15 @@ and here it is not (OW-sedosu)."
           (setq agentpane--attached agentpane--connection
                 agentpane--attach-sent 7)
           (agentpane--on-notification
-           nil 'session/error (list :session ref :message "Turn failed upstream"))
+           nil 'session/error (list :session ref :handle "h1" :message "Turn failed upstream"))
           (agentpane--on-notification
-           nil 'session/error (list :session ref :message "Turn failed again"))
+           nil 'session/error (list :session ref :handle "h1" :message "Turn failed again"))
           (setq hold '(sessions/prompt))
           (goto-char (point-max))
           (insert "hello")
           (agentpane-send)
           (agentpane--on-notification
-           nil 'session/error (list :session ref :message "Turn failed upstream"))
+           nil 'session/error (list :session ref :handle "h1" :message "Turn failed upstream"))
           (funcall (cdr (pop held)) t)
           (should (equal (agentpane-test--warnings) '("Turn failed upstream"))))))))
 
@@ -4293,7 +4306,7 @@ second-guess a snapshot (OW-sedosu, OW-jopifu)."
         (snapshot (lambda (ref error)
                     (agentpane--on-notification
                      agentpane--connection 'session/snapshot
-                     (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+                     (list :session ref :handle "h1" :isStreaming :json-false :nodes agentpane-test--nodes
                            :error error :notices [])))))
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
@@ -4309,7 +4322,7 @@ second-guess a snapshot (OW-sedosu, OW-jopifu)."
           (should (equal (agentpane-test--warnings) '("Turn failed upstream")))
           (funcall snapshot ref "Turn failed upstream")
           (should (equal (agentpane-test--warnings) '("Turn failed upstream")))
-          (agentpane--on-notification nil 'session/errorCleared (list :session ref))
+          (agentpane--on-notification nil 'session/errorCleared (list :session ref :handle "h1"))
           (should-not (agentpane-test--warnings)))))))
 
 (ert-deftest agentpane-test-refetch-while-attaching-keeps-the-live-transcript ()
@@ -4328,7 +4341,7 @@ reads the stored transcript again."
         (agentpane-refetch)
         (agentpane--on-notification
          nil 'session/snapshot
-         (list :session ref :nodes (vector (agentpane-test--assistant 5 "<p>Live.</p>"))
+         (list :session ref :handle "h1" :nodes (vector (agentpane-test--assistant 5 "<p>Live.</p>"))
                :isStreaming :json-false :compaction nil :model nil))
         ;; Held in the order sent, the prompt then any preview: release in reverse.
         (dolist (entry (reverse held)) (funcall (cdr entry) t))
@@ -4442,7 +4455,7 @@ handlers clear a buffer's attaching flag."
           (agentpane--attach)
           (setq sent nil)
           (kill-buffer buffer)
-          (should (equal sent `((sessions/detach :session ,ref :tokens [1])))))
+          (should (equal sent `((sessions/detach :session ,ref :handle "h-t1" :tokens [1])))))
         (agentpane-test--with-session ref
           (setq hold '(sessions/attach))
           (agentpane--attach)
