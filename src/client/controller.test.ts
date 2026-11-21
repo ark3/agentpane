@@ -375,6 +375,27 @@ describe("client controller", () => {
 		expect(server.on["sessions/prompt"]).not.toHaveBeenCalled();
 	});
 
+	// D12's cap: the refusal's text is what the error slot shows, and the pane
+	// stays on the preview it was attached from (ark3/agentpane#31).
+	it("shows an attach and a create refused at_capacity in the error slot, keeping the preview", async () => {
+		const detail = "at capacity: all 16 live sessions are busy (streaming, starting, or not yet prompted); detach one and try again";
+		const server = fakeServer();
+		server.on["sessions/preview"].mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });
+		server.on["sessions/attach"].mockRejectedValue(new ApiClientError("at_capacity", detail));
+		server.on["sessions/create"].mockRejectedValue(new ApiClientError("at_capacity", detail));
+		const controller = createController(server.api());
+		await controller.start();
+		await controller.preview(ref);
+
+		await controller.select(ref);
+		expect(controller.getView()).toMatchObject({ error: detail, busy: "idle", preview: { ref } });
+		expect(controller.getView().state.selected).toEqual(ref);
+
+		controller.clearError();
+		await controller.create("/work", "pi");
+		expect(controller.getView().error).toBe(detail);
+	});
+
 	it("selects the authoritative ref returned by attach", async () => {
 		const server = fakeServer();
 		server.on["sessions/attach"].mockImplementation(() => ({ session: server.attached(attachedRef) }));
