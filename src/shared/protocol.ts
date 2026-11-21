@@ -644,6 +644,13 @@ export type PromptParams = Omit<PromptRequest, "handle"> & (
  *
  * Close still names a ref, since one can arrive while an attach is starting,
  * before any handle exists; whether it keeps that is ark3/agentpane#27's.
+ *
+ * A command that would start an agent -- `sessions/attach`,
+ * `sessions/create`, a `sessions/prompt` naming a ref, and the fork
+ * `sessions/forkAndPrompt` made -- may first close the least recently
+ * attached live session, and is refused `at_capacity` when D12's cap is
+ * reached and none may be closed for it (`maxSessions` in
+ * `src/server/http/session-manager.ts`).
  */
 export interface Commands {
 	hello: { params: { token: string }; result: null };

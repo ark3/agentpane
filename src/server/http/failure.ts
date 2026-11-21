@@ -6,6 +6,7 @@
 import type { ApiError } from "../../shared/protocol.ts";
 import { BackendRefusedError } from "../adapters/types.ts";
 import {
+	AtCapacityError,
 	AttachedNotPromptedError,
 	EffortNotOfferedError,
 	ForkNotPromptedError,
@@ -59,6 +60,7 @@ export function classifyFailure(thrown: unknown): Failure {
 	if (err instanceof HandleEndedError) return known("not_attached");
 	if (err instanceof UnknownBackendError) return known("no_backend");
 	if (err instanceof ServerShuttingDownError) return known("server_shutting_down");
+	if (err instanceof AtCapacityError) return known("at_capacity");
 	if (err instanceof BackendRefusedError) return known("backend_refused");
 	if (err instanceof EffortNotOfferedError) return known("bad_request");
 	if (err instanceof NotAForkPointError) return known("not_a_fork_point");

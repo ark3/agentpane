@@ -11,8 +11,8 @@
  *  - **The subprocess outlives the connection.** Its lifetime is tied to the
  *    server, not to a client's socket. A browser refresh drops the socket and
  *    the agent keeps working; reconnect is a repaint. A close disposes an
- *    adapter, whether a client asked for it or D12's idle reaper made it, and
- *    so does server shutdown.
+ *    adapter, whether a client asked for it or D12's idle reaper or cap made
+ *    it, and so does server shutdown.
  */
 
 import type {
@@ -37,6 +37,12 @@ import type {
 import type { Broadcaster } from "./broadcaster.ts";
 import type { AppDeps, SessionIndex } from "./deps.ts";
 
+/**
+ * D12's cap: the most agents the manager runs at once, counting those still
+ * starting. A startup that would pass it closes the least recently attached
+ * session the exemption predicate allows, or is refused (`#makeRoom`).
+ */
+export const maxSessions = 16;
 /** D12's idle timeout: a session with no attach, prompt or turn end for this long is closed (`#active`). */
 export const idleTimeoutMs = 15 * 60 * 1000;
 
@@ -113,6 +119,20 @@ export class AttachedNotPromptedError extends Error {
 	) {
 		super(cause instanceof Error ? cause.message : String(cause));
 		this.name = "AttachedNotPromptedError";
+	}
+}
+
+/**
+ * A startup found `maxSessions` agents live or starting and none it may
+ * close: each streaming, still starting, or created and not yet prompted
+ * (D12). Refused at once rather than waiting for one to free.
+ */
+export class AtCapacityError extends Error {
+	constructor() {
+		super(
+			`at capacity: all ${maxSessions} live sessions are busy (streaming, starting, or not yet prompted); detach one and try again`,
+		);
+		this.name = "AtCapacityError";
 	}
 }
 
@@ -240,6 +260,14 @@ interface ManagedSession {
 	 */
 	queue: Promise<void>;
 	/**
+	 * D12's LRU recency: what `#attaches` stood at when this container was last
+	 * attached, the cap closing the lowest. A prompt or a turn's end leaves it,
+	 * as they leave which session was last selected. On the container, never
+	 * in a map keyed by a backend id, so a rename leaves it where it is, and a
+	 * Pi fork's container takes it (`#forkOnto`).
+	 */
+	attachedAt: number;
+	/**
 	 * Cancels D12's idle timer, which `#active` arms at each attach, prompt
 	 * and turn end; cancelled as the container leaves the table (`#remove`).
 	 */
@@ -361,6 +389,8 @@ export class SessionManager {
 	readonly #newId: () => string;
 	readonly #now: () => string;
 	readonly #setTimer: NonNullable<AppDeps["setTimer"]>;
+	/** How many attaches have landed; see `ManagedSession.attachedAt`. */
+	#attaches = 0;
 	/** The last handle minted; see `#container`. */
 	#minted = 0;
 	/** How many error ids have been minted; see `ManagedSession.errorId`. */
@@ -470,6 +500,7 @@ export class SessionManager {
 			errorId: "",
 			notices: [],
 			queue: Promise.resolve(),
+			attachedAt: 0,
 		};
 	}
 
@@ -599,7 +630,7 @@ export class SessionManager {
 		const effectiveRef = disposing?.ref ?? ref;
 		const existing = disposing ? undefined : this.#lookup(effectiveRef);
 		if (existing?.adapter) {
-			this.#active(existing);
+			this.#attached(existing);
 			this.broadcaster.broadcastSnapshot(existing.handle);
 			return existing.adapter;
 		}
@@ -616,7 +647,7 @@ export class SessionManager {
 		if (inFlight) {
 			this.#hold(inFlight, requested);
 			const joined = await inFlight.promise;
-			this.#active(joined);
+			this.#attached(joined);
 			return joined.adapter as BackendAdapter;
 		}
 
@@ -640,10 +671,16 @@ export class SessionManager {
 		this.#hold(pending, requested);
 		if (existing) this.#bind(pending, existing);
 		const session = await pending.promise;
-		this.#active(session);
+		this.#attached(session);
 		this.broadcaster.sessionsChanged();
 		this.broadcaster.broadcastSnapshot(session.handle);
 		return session.adapter as BackendAdapter;
+	}
+
+	/** An attach landed on `session`: both of D12's clocks, its LRU recency and its idleness. */
+	#attached(session: ManagedSession): void {
+		session.attachedAt = ++this.#attaches;
+		this.#active(session);
 	}
 
 	/**
@@ -664,12 +701,33 @@ export class SessionManager {
 	}
 
 	/**
-	 * Whether D12's reaper may close `session`: it is live, and neither
+	 * Whether D12's reaper or cap may close `session`: it is live, and neither
 	 * streaming, whose turn a close would kill, nor `virtual`, which has
 	 * nothing on disk to resume from.
 	 */
 	#evictable(session: ManagedSession): boolean {
 		return session.adapter !== undefined && !session.virtual && !session.adapter.getState().isStreaming;
+	}
+
+	/**
+	 * D12's cap, checked by a startup about to spawn, whatever asked for it:
+	 * an attach, a create, a prompt naming a ref, or the attach of a fork
+	 * `forkAndPrompt` made. With `maxSessions` agents live or starting, it
+	 * closes the least recently attached session `#evictable` allows, as
+	 * Detach closes one (D25), or refuses with `AtCapacityError` when there is
+	 * none. Synchronous, as the run in `#start` that calls it is: the close
+	 * takes its session out of the table at once, and the spawn does not wait
+	 * for its disposal, as an attach after a Detach never did.
+	 */
+	#makeRoom(): void {
+		for (;;) {
+			const live = [...this.#sessions.values()].filter((session) => session.adapter);
+			const starting = new Set([...this.#attaching.values()].flatMap((held) => [...held].filter((pending) => pending.adapter)));
+			if (live.length + starting.size < maxSessions) return;
+			const [coldest] = live.filter((session) => this.#evictable(session)).sort((a, b) => a.attachedAt - b.attachedAt);
+			if (!coldest) throw new AtCapacityError();
+			void this.close(coldest.ref);
+		}
 	}
 
 	/**
@@ -1193,6 +1251,7 @@ export class SessionManager {
 		fork.lastEffort = parent.lastEffort;
 		fork.lastUnrestoredModel = parent.lastUnrestoredModel;
 		fork.lastName = parent.lastName;
+		fork.attachedAt = parent.attachedAt;
 		this.#remove(parent);
 		parent.adapter = undefined;
 		this.#add(fork);
@@ -1323,6 +1382,9 @@ export class SessionManager {
 			// still holds borrows that connection rather than spawning -- but the
 			// handle is still the direct route and the only one that works for a
 			// fork whose rollout the index cannot answer for.
+			// The cap first, inside the `try`, so a refusal takes the container
+			// out as any failed start does, and leaves a parked fork parked.
+			this.#makeRoom();
 			adapter = forkStart?.adapter ?? factory.create(bound.ref);
 			pending.adapter = adapter;
 			// A handle is single-use, and from here its adapter is this startup's:
@@ -1555,9 +1617,10 @@ export class SessionManager {
 	 * app-server (OW-lajehi), so closing either of them releases a share and only
 	 * the last one out kills the child.
 	 *
-	 * A client's close comes here, and so does D12's idle reaper (`#active`),
-	 * a visible close as Detach is (D25), with the disposal guard that keeps a
-	 * re-attach from sharing a session file with the adapter being evicted.
+	 * A client's close comes here, and so do D12's idle reaper (`#active`) and
+	 * cap (`#makeRoom`), each a visible close as Detach is (D25), with the
+	 * disposal guard that keeps a re-attach from sharing a session file with
+	 * the adapter being evicted.
 	 */
 	async close(ref: SessionRef): Promise<void> {
 		// Everything up to the first await below is one synchronous run, so an

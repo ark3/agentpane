@@ -16,6 +16,7 @@ import { FakeCodexProcess } from "../adapters/codex/test-support.ts";
 import { BackendRefusedError } from "../adapters/types.ts";
 import { Broadcaster } from "./broadcaster.ts";
 import {
+	AtCapacityError,
 	AttachedNotPromptedError,
 	ForkNotPromptedError,
 	HandleEndedError,
@@ -24,6 +25,7 @@ import {
 	UnknownBackendError,
 	UnknownSessionError,
 	idleTimeoutMs,
+	maxSessions,
 } from "./session-manager.ts";
 import type { SessionIndex } from "./deps.ts";
 import {
@@ -3921,5 +3923,111 @@ describe("the idle reaper (D12)", () => {
 		await sessions.attach(REF);
 		await sessions.disposeAll();
 		expect(timers.pending).toEqual([]);
+	});
+});
+
+describe("the subprocess cap (D12)", () => {
+	/** `maxSessions + 1` stored sessions, the last one the attach that passes the cap. */
+	const STORED: SessionRef[] = Array.from({ length: maxSessions + 1 }, (_, i) => ({
+		backend: "pi",
+		id: `/home/u/.pi/agent/sessions/cap-${i}.jsonl`,
+	}));
+	const OVER = STORED[maxSessions] as SessionRef;
+
+	beforeEach(() => {
+		index = new FakeSessionIndex(STORED.map((ref) => storedSession(ref, WORKSPACE)));
+		sessions = new SessionManager({ index, adapters: { pi }, newId: () => "created" }, broadcaster);
+	});
+
+	/** Attach the first `maxSessions` stored sessions, in order. */
+	async function fill(): Promise<void> {
+		for (const ref of STORED.slice(0, maxSessions)) await sessions.attach(ref);
+	}
+
+	it("closes the least recently attached eligible session before spawning past it", async () => {
+		await fill();
+		const [first, streaming, coldest] = STORED as [SessionRef, SessionRef, SessionRef];
+		// Attached again, the first is no longer the coldest; streaming, the
+		// second is exempt; so the third is the one to go.
+		await sessions.attach(first);
+		(pi.forRef(streaming) as FakeAdapter).setStreaming(true);
+		const handle = sessions.summaryOf(coldest)?.handle;
+		const events = broadcastEvents();
+
+		await sessions.attach(OVER);
+
+		expect(sessions.isAttached(coldest)).toBe(false);
+		expect((pi.forRef(coldest) as FakeAdapter).disposals).toBe(1);
+		expect(sessions.isAttached(first)).toBe(true);
+		expect(sessions.isAttached(streaming)).toBe(true);
+		expect(sessions.isAttached(OVER)).toBe(true);
+		expect(sessions.liveRefs()).toHaveLength(maxSessions);
+		expect(pi.created).toHaveLength(maxSessions + 1);
+		expect(naming(coldest, events)).toEqual([{ type: "ended", session: coldest, handle }]);
+	});
+
+	it("refuses at once, spawning and closing nothing, when every session under it is exempt", async () => {
+		for (const ref of STORED.slice(0, maxSessions - 1)) {
+			await sessions.attach(ref);
+			(pi.forRef(ref) as FakeAdapter).setStreaming(true);
+		}
+		await sessions.create(WORKSPACE, "pi");
+
+		await expect(sessions.attach(OVER)).rejects.toThrow(AtCapacityError);
+
+		expect(pi.created).toHaveLength(maxSessions);
+		expect(pi.created.every((adapter) => !adapter.disposed)).toBe(true);
+		expect(sessions.isAttached(OVER)).toBe(false);
+		expect(sessions.holds(OVER)).toBe(false);
+	});
+
+	it("counts a startup still in flight, which it cannot close", async () => {
+		const held = deferred();
+		const slow = new FakeAdapterFactory({ holdStart: held.promise });
+		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
+		const starts = STORED.slice(0, maxSessions).map((ref) => sessions.attach(ref));
+		await settle();
+
+		const over = sessions.attach(OVER).catch((err: unknown) => err);
+		await settle();
+		expect(slow.created).toHaveLength(maxSessions);
+
+		held.resolve();
+		await Promise.all(starts);
+		expect(await over).toBeInstanceOf(AtCapacityError);
+	});
+
+	it("bounds a create and a prompt naming a ref as it bounds an attach, leaving nothing of either", async () => {
+		for (const ref of STORED.slice(0, maxSessions)) {
+			await sessions.attach(ref);
+			(pi.forRef(ref) as FakeAdapter).setStreaming(true);
+		}
+
+		await expect(sessions.create(WORKSPACE, "pi")).rejects.toThrow(AtCapacityError);
+		expect(sessions.holds(CREATED)).toBe(false);
+		await expect(sessions.attachAndSubmit(OVER, "hello", undefined, null)).rejects.toThrow(AtCapacityError);
+		expect(pi.created).toHaveLength(maxSessions);
+	});
+
+	it("bounds the fork a Claude Code fork-and-prompt starts, keeping the fork parked for a retry", async () => {
+		const claudeRefs: SessionRef[] = STORED.map((ref) => ({ backend: "claude", id: ref.id }));
+		const parent = claudeRefs[0] as SessionRef;
+		const claude = new FakeAdapterFactory({ forkMode: "claude", forkPoints: [{ id: "e1", text: "hi", index: 0 }] });
+		index = new FakeSessionIndex(claudeRefs.map((ref) => storedSession(ref, WORKSPACE)));
+		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
+		for (const ref of claudeRefs.slice(0, maxSessions)) {
+			await sessions.attach(ref);
+			(claude.forRef(ref) as FakeAdapter).setStreaming(true);
+		}
+		const handle = sessions.summaryOf(parent)?.handle;
+
+		const refused = await sessions.forkAndPrompt(parent, 0, "again", undefined, handle).catch((err: unknown) => err);
+
+		expect(refused).toBeInstanceOf(ForkNotPromptedError);
+		expect((refused as ForkNotPromptedError).cause).toBeInstanceOf(AtCapacityError);
+		const fork = (refused as ForkNotPromptedError).fork;
+		expect(fork.handle).toBeNull();
+		expect(claude.created).toHaveLength(maxSessions);
+		expect(sessions.holds(fork.ref)).toBe(true);
 	});
 });

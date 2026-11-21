@@ -18,6 +18,7 @@ import {
 import { BackendRefusedError } from "../adapters/types.ts";
 import { type App, createApp } from "./app.ts";
 import type { AppDeps } from "./deps.ts";
+import { AtCapacityError, maxSessions } from "./session-manager.ts";
 import {
 	assistantMessage,
 	deferred,
@@ -523,6 +524,22 @@ describe("commands that name a ref", () => {
 		const reply = await socket.refused("sessions/attach", { ref: PI_SESSION });
 		expect([reply.code, reply.detail]).toEqual(["server_shutting_down", "server is shutting down; not spawning a new agent"]);
 		expect(pi.created).toHaveLength(0);
+	});
+
+	it("refuses at_capacity an attach past the cap when every live session is exempt (D12)", async () => {
+		const refs: SessionRef[] = Array.from({ length: maxSessions + 1 }, (_, i) => ({ backend: "pi", id: `/cap-${i}.jsonl` }));
+		index = new FakeSessionIndex(refs.map((ref) => storedSession(ref, WORKSPACE)));
+		rebuild({ pi });
+		const socket = await connected();
+		for (const ref of refs.slice(0, maxSessions)) {
+			await socket.ok("sessions/attach", { ref });
+			pi.forRef(ref)?.setStreaming(true);
+		}
+
+		const reply = await socket.refused("sessions/attach", { ref: refs[maxSessions] as SessionRef });
+		expect([reply.code, reply.detail]).toEqual(["at_capacity", new AtCapacityError().message]);
+		expect(pi.created).toHaveLength(maxSessions);
+		expect(logged).toEqual([]);
 	});
 
 	it("logs an attach failure with its session ref", async () => {

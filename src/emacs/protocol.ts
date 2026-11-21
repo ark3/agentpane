@@ -398,7 +398,11 @@
  * being the refusal's code (D31 point 2) and `detail` its text, and `fork`
  * or `attached` beside them where the refusal has one
  * (`sessions/forkAndPrompt`, `sessions/prompt`), so a mid-turn prompt
- * rejection reads in Emacs as it does in the browser. A request that never
+ * rejection reads in Emacs as it does in the browser. One that would start
+ * an agent -- `sessions/attach`, `sessions/create`, a `sessions/prompt`
+ * naming no handle, and the fork `sessions/forkAndPrompt` made -- is refused
+ * `at_capacity` when D12's cap is reached and no live session may be closed
+ * for it, its `message` saying so. A request that never
  * reached the server is refused the same way, with a code of the helper's
  * own: `unreachable` for one read with the socket not up, `frame_too_large`
  * for one over the server's frame limit, and `unauthorized`, its `message`
