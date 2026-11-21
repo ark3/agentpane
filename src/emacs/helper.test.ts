@@ -330,7 +330,7 @@ describe("requests", () => {
 	it("answers sessions/prompt with the disposition for a prompt handled without a turn, and null for a started one (OW-dulipe)", async () => {
 		const { io } = start({ "sessions/prompt": (params) => ({ disposition: params.text === "/mcp" ? "handled" : "started" }) });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/prompt", params: { session: pi, view: 1, text: "/mcp" } });
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 1, text: "hello" } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 2, text: "hello" } });
 		await io.until(2);
 		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: { disposition: "handled" } });
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
@@ -1032,6 +1032,7 @@ describe("views (D32)", () => {
 		});
 		await bindView(io, pi, 1);
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 2, text: "hello" } });
+		await io.until(4);
 		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/prompt", params: { session: pi, view: 2, text: "again" } });
 		await io.until(6);
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: { view: 1 } });
@@ -1129,30 +1130,27 @@ describe("views (D32)", () => {
 		]);
 	});
 
-	// X's attach timed out in Emacs and X sent another; the helper answers the
-	// first under h1, binding X, and X is killed while the second still waits.
-	// Until OW-nowihu nothing X could send named the first, and h1 stayed
-	// attached with no buffer.
-	it("unbinds a view and gives up its attach still out at its detach (OW-nowihu)", async () => {
+	// X's attach timed out in Emacs, X sent another, which joins the first
+	// still out (D32 point 4), and X is killed before either answers. Until
+	// OW-nowihu nothing X could send named the first, and h1 stayed attached
+	// with no buffer.
+	it("unbinds a view and gives up its attach still out at its detach, the one joining it with it (OW-nowihu)", async () => {
 		const first = held();
-		const second = held();
-		const { io, server } = start({
-			"sessions/attach": attaching({ summary: summary(pi, "h1"), hold: first.hold }, { summary: summary(pi, "h1"), hold: second.hold }),
-		});
+		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1"), hold: first.hold }) });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await tick();
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await tick();
-		first.release();
-		await io.until(2);
 		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, view: 1 } });
+		await io.until(1);
+		first.release();
 		await io.until(3);
-		second.release();
-		await io.until(4);
 		server.emit(status(pi, "h1", 2));
 		await tick();
-		expect(told(io)).toEqual([["session/snapshot", "h1", 1]]);
+		expect(told(io)).toEqual([]);
+		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: summary(pi, "h1") });
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: summary(pi, "h1") });
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
 	});
 
 	// The server's attach waits out the close's disposal and spawns afresh.
@@ -1209,6 +1207,236 @@ describe("views (D32)", () => {
 			["session/snapshot", "h2", 1],
 			["session/status", "h2", 1],
 		]);
+	});
+});
+
+describe("requests still out (D32 point 4)", () => {
+	// A second Send while the first prompt is out, as the browser's `submit`
+	// refuses one (OW-nasofa): the stub server sees one prompt.
+	it("refuses a second prompt from a view while its first is out busy, and sends the server one", async () => {
+		const first = held();
+		const { io, server } = start({
+			...attachScript(pi),
+			"sessions/prompt": async () => {
+				await first.hold;
+				return { disposition: "started" };
+			},
+		});
+		await bindView(io, pi, 1);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 1, live: true, text: "hello" } });
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/prompt", params: { session: pi, view: 1, live: true, text: "hello" } });
+		await io.until(3);
+		expect(io.response(3)!["error"]).toMatchObject({ code: -32000, data: { error: "busy" } });
+		first.release();
+		await io.until(4);
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
+		expect(sent(server).filter(([cmd]) => cmd === "sessions/prompt")).toHaveLength(1);
+		// Settled, the view sends again.
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, view: 1, live: true, text: "again" } });
+		await io.until(5);
+		expect(io.response(4)).toEqual({ jsonrpc: "2.0", id: 4, result: null });
+	});
+
+	it("counts a fork and prompt from a view as its send still out, refusing a prompt beside it busy", async () => {
+		const fork = held();
+		const { io, server } = start({
+			...attachScript(pi),
+			"sessions/forkAndPrompt": async (_params, server) => {
+				await fork.hold;
+				server.emit(snapshot(codex, "h9"));
+				return { session: summary(codex, "h9"), disposition: "started" };
+			},
+			"sessions/prompt": () => ({ disposition: "started" }),
+		});
+		await bindView(io, pi, 1);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/forkAndPrompt", params: { session: pi, view: 1, forkView: 7, index: 0, text: "again" } });
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/prompt", params: { session: pi, view: 1, live: true, text: "hello" } });
+		await io.until(3);
+		expect(io.response(3)!["error"]).toMatchObject({ data: { error: "busy" } });
+		fork.release();
+		await io.until(5);
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach", "sessions/forkAndPrompt"]);
+	});
+
+	// Send pressed between Compact's click and its reply, before the server's
+	// status says a compaction runs: held as the browser's `compacting` holds it.
+	it("refuses a prompt, a fork and prompt or a second compact from a view while its compact is out busy, and sends the server none", async () => {
+		const compact = held();
+		const { io, server } = start({
+			...attachScript(pi),
+			"sessions/compact": async () => {
+				await compact.hold;
+				return null;
+			},
+			"sessions/prompt": () => ({ disposition: "started" }),
+		});
+		await bindView(io, pi, 1);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/compact", params: { session: pi, view: 1 } });
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/prompt", params: { session: pi, view: 1, live: true, text: "hello" } });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, view: 1, forkView: 7, index: 0, text: "again" } });
+		io.send({ jsonrpc: "2.0", id: 5, method: "sessions/compact", params: { session: pi, view: 1 } });
+		await io.until(5);
+		for (const id of [3, 4, 5]) expect(io.response(id)!["error"]).toMatchObject({ code: -32000, data: { error: "busy" } });
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach", "sessions/compact"]);
+		compact.release();
+		await io.until(6);
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
+		io.send({ jsonrpc: "2.0", id: 6, method: "sessions/prompt", params: { session: pi, view: 1, live: true, text: "hello" } });
+		await io.until(7);
+		expect(io.response(6)).toEqual({ jsonrpc: "2.0", id: 6, result: null });
+	});
+
+	// `g` twice on a preview, or a send's attach and `a`: one attach, and both
+	// get its reply, the holder's view included.
+	it("joins a second attach from a view to its first still out, sending the server one and answering both alike", async () => {
+		const first = held();
+		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1"), hold: first.hold }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 1 } });
+		await tick();
+		first.release();
+		await io.until(3);
+		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: summary(pi, "h1") });
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: summary(pi, "h1") });
+		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot"]);
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
+		// Settled, a third goes to the server, and gets the snapshot again.
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/attach", params: { session: pi, view: 1 } });
+		await io.until(5);
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach", "sessions/attach"]);
+	});
+
+	it("joins an attach to the view's refused attach still out, answering it the refusal", async () => {
+		const first = held();
+		const { io, server } = start({
+			"sessions/attach": async () => {
+				await first.hold;
+				throw new ApiClientError("at_capacity", "no room");
+			},
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 1 } });
+		await tick();
+		first.release();
+		await io.until(2);
+		expect(io.response(2)!["error"]).toEqual(io.response(1)!["error"]);
+		expect(io.response(2)!["error"]).toMatchObject({ data: { error: "at_capacity" } });
+		expect(sent(server)).toHaveLength(1);
+	});
+
+	// A send from a preview while its `g` is out: the prompt waits for the
+	// attach and goes under the handle it bound, never by ref.
+	it("sends a prompt from a view whose attach is out under the handle that attach bound", async () => {
+		const attach = held();
+		const { io, server } = start({
+			"sessions/attach": attaching({ summary: summary(pi, "h2"), hold: attach.hold }),
+			"sessions/prompt": () => ({ disposition: "started" }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 1, text: "hello", priorErrorId: null } });
+		await tick();
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
+		attach.release();
+		await io.until(3);
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1, 2]);
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
+		expect(sent(server)).toEqual([
+			["sessions/attach", { ref: pi }],
+			["sessions/prompt", { handle: "h2", text: "hello", priorErrorId: null }],
+		]);
+	});
+
+	it("refuses a prompt whose attach is refused with that refusal, sending the server no prompt", async () => {
+		const attach = held();
+		const { io, server } = start({
+			"sessions/attach": async () => {
+				await attach.hold;
+				throw new ApiClientError("at_capacity", "no room");
+			},
+			"sessions/prompt": () => ({ disposition: "started" }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 1, text: "hello" } });
+		await tick();
+		attach.release();
+		await io.until(2);
+		expect(io.response(2)!["error"]).toMatchObject({ code: -32000, data: { error: "at_capacity" } });
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
+	});
+
+	// The attach's session ended before its reply, or it landed on the handle
+	// another view holds (D32 point 2): the prompt goes nowhere, never by ref.
+	it("refuses a prompt whose attach bound nothing not_attached, naming the view holding the handle where another does", async () => {
+		const attach = held();
+		const { io, server } = start({
+			"sessions/attach": attaching({ summary: summary(pi, "h1") }, { summary: summary(pi, "h1"), hold: attach.hold }),
+			"sessions/prompt": () => ({ disposition: "started" }),
+		});
+		await bindView(io, pi, 1);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 2 } });
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/prompt", params: { session: pi, view: 2, text: "hello" } });
+		await tick();
+		attach.release();
+		await io.until(5);
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: { ...summary(pi, "h1"), view: 1 } });
+		expect(io.response(3)!["error"]).toMatchObject({ data: { error: "not_attached", attached: { ref: pi, handle: "h1", view: 1 } } });
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach", "sessions/attach"]);
+	});
+
+	it("drops a prompt waiting on an attach its view's detach gave up", async () => {
+		const attach = held();
+		const { io, server } = start({
+			"sessions/attach": attaching({ summary: summary(pi, "h1"), hold: attach.hold }),
+			"sessions/prompt": () => ({ disposition: "started" }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 1, text: "hello" } });
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, view: 1 } });
+		await tick();
+		attach.release();
+		await io.until(3);
+		expect(io.response(2)!["error"]).toMatchObject({ data: { error: "not_attached" } });
+		expect(io.notifications()).toEqual([]);
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
+	});
+
+	// A sibling buffer previewing the edit's parent, or the parent itself, a
+	// Pi parent the server has already let go of: an attach would resume its
+	// old branch (D30, OW-tukuvo).
+	it("refuses an attach, and a prompt by ref, of the session a fork and prompt still out forks, from any view, and none after", async () => {
+		const fork = held();
+		const { io, server } = start({
+			...attachScript(pi),
+			"sessions/forkAndPrompt": async (_params, server) => {
+				await fork.hold;
+				server.emit(snapshot(codex, "h9"));
+				return { session: summary(codex, "h9"), disposition: "started" };
+			},
+			"sessions/prompt": () => ({ disposition: "started" }),
+		});
+		await bindView(io, pi, 1);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/forkAndPrompt", params: { session: pi, view: 1, forkView: 7, index: 0, text: "again" } });
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/attach", params: { session: pi, view: 2 } });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, view: 3, text: "hello" } });
+		await io.until(4);
+		expect(io.response(3)!["error"]).toMatchObject({ code: -32000, data: { error: "forking" } });
+		expect(io.response(4)!["error"]).toMatchObject({ code: -32000, data: { error: "forking" } });
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach", "sessions/forkAndPrompt"]);
+		fork.release();
+		await io.until(6);
+		io.send({ jsonrpc: "2.0", id: 5, method: "sessions/attach", params: { session: pi, view: 2 } });
+		await io.until(8);
+		expect(io.response(5)).toMatchObject({ result: { view: 1 } });
 	});
 });
 

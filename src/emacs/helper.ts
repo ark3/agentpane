@@ -57,9 +57,31 @@
  * lands on a handle another view holds binds nothing, and its reply names
  * the holder, for agentpane-mode to show (D32 point 2); no buffers merge.
  * Until D32 agentpane-mode minted a token per attach, and the helper held
- * a claim per token on each handle (OW-wukako, OW-nowihu). The helper does not
- * reconnect: when the socket closes, or fails to open, the helper exits
- * (D25 point 4, D31 point 6). Agentpane is local-only, so a close means the
+ * a claim per token on each handle (OW-wukako, OW-nowihu).
+ *
+ * Requests still out (D32 point 4). The helper holds each view's requests
+ * still out, as the browser's controller holds its own (`Outstanding` in
+ * `src/client/controller.ts`), and applies the browser's rules and no
+ * others. A second send from a view, a prompt or a fork and prompt, is
+ * refused `busy` (`sendsOut`), and so is one, or a second compact, while
+ * a compact from the view is out (`compactsOut`), as the browser's
+ * `compacting` holds Send and Compact from the click to the reply; the
+ * server's status reporting the compaction covers the rest, which
+ * agentpane-mode reads itself. A second attach from a view joins its first
+ * attach, create or by-ref prompt still out, sending the server nothing
+ * and answering as that one does (`attachesOut`). A prompt from an unbound
+ * view whose attach is out waits for it and goes under the handle it
+ * bound, or is refused, never sent by ref. While a fork and prompt is out,
+ * an attach or a by-ref prompt of the session it forks is refused
+ * `forking`, from any view (`forksOut`), since on Pi it would resume the
+ * parent's old branch (D30). agentpane-mode keeps its own record of its
+ * send, refusing a second before it reaches this one, as the browser keeps
+ * `submit`'s guard beside its own; until ark3/agentpane#71 it held its
+ * attach's waiters, its close in flight and its fork and prompt in flight
+ * itself.
+ *
+ * The helper does not reconnect: when the socket closes, or fails to open,
+ * the helper exits (D25 point 4, D31 point 6). Agentpane is local-only, so a close means the
  * server went away, and there is nothing to reconnect to. agentpane-mode takes the exit to mean every
  * buffer the helper served is detached, and the next command that needs a
  * helper starts a new one (`agentpane--helper-gone` and
@@ -96,7 +118,7 @@
 import { ApiClientError, ConnectionLostError, createAgentpaneApi, type ApiOptions, type EventHandlers } from "$client/api.ts";
 import { previewMessages } from "$client/preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
-import type { BackendId, ModelInfo, ServerEvent, SessionRef } from "$shared/protocol.ts";
+import type { BackendId, ModelInfo, ServerEvent, SessionRef, SessionSummary } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { locateUpsert, projectTarget, projectTranscript, type Render, type UpsertTarget } from "./nodes.ts";
 import type { HelperNotification, HelperRequests, TranscriptNode } from "./protocol.ts";
@@ -140,6 +162,18 @@ type View = number;
 interface Attaching {
 	view: View;
 	done: boolean;
+}
+
+/**
+ * What the first attach still out from a view settled to, for a second
+ * attach from the view that joins it and a prompt from the view that waits
+ * on it (D32 point 4): the session its reply names, the view holding that
+ * session where another does, and the handle it bound the view to, if any.
+ */
+interface Joined {
+	summary: SessionSummary | undefined;
+	holder: View | undefined;
+	bound: string | undefined;
 }
 
 /**
@@ -212,6 +246,15 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	};
 	/** Every request that attaches, not yet replied to; see `Attaching`. */
 	const attaching = new Set<Attaching>();
+	/** Each view's first attach, create or by-ref prompt still out, for a later attach to join and a prompt to wait on (D32 point 4). */
+	const attachesOut = new Map<View, Promise<Joined>>();
+	/** The views with a prompt or a fork and prompt still out, as the browser's one `"submitting"` (D32 point 4). */
+	const sendsOut = new Set<View>();
+	/** The views with a `sessions/compact` still out, as the browser's `"compacting"`: no send and no second compact goes from one meanwhile (D32 point 4). */
+	const compactsOut = new Set<View>();
+	/** The session each fork and prompt still out forks, by every ref it is known by: nothing attaches it meanwhile (D30, D32 point 4). */
+	const forksOut = new Set<string[]>();
+	const keyOf = (ref: SessionRef): string => JSON.stringify([ref.backend, ref.id]);
 	let stopped = false;
 	const reader = options.input.getReader();
 	/** Held nodes by handle and node index, in the order each was first held; a later upsert keeps its place. */
@@ -342,23 +385,73 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * reads from its reply, or from its refusal where one names a session it
 	 * attached (D30); answer the reply and the view holding that handle, if
 	 * another does, and throw a refusal naming one as `HeldElsewhere`.
+	 * With `joinable`, which reads the session from the reply, it is the
+	 * view's attach still out until it settles, which a later attach from
+	 * the view joins and a prompt from it waits on (`attachesOut`).
 	 */
-	const attachingBy = async <T>(view: View, request: () => Promise<T>, handleOf: (reply: T) => string | null | undefined): Promise<{ reply: T; holder: View | undefined }> => {
+	const attachingBy = <T>(
+		view: View,
+		request: () => Promise<T>,
+		handleOf: (reply: T) => string | null | undefined,
+		joinable?: (reply: T) => SessionSummary | undefined,
+	): Promise<{ reply: T; holder: View | undefined }> => {
 		const attach: Attaching = { view, done: false };
 		attaching.add(attach);
-		try {
-			let reply: T;
+		const run = (async () => {
 			try {
-				reply = await request();
-			} catch (error: unknown) {
-				const handle = error instanceof ApiClientError ? (error.attached?.handle ?? error.fork?.handle) : undefined;
+				let reply: T;
+				try {
+					reply = await request();
+				} catch (error: unknown) {
+					const handle = error instanceof ApiClientError ? (error.attached?.handle ?? error.fork?.handle) : undefined;
+					const holder = handle ? bind(attach, handle) : undefined;
+					throw holder === undefined ? error : new HeldElsewhere(error as ApiClientError, holder);
+				}
+				const handle = handleOf(reply) ?? undefined;
 				const holder = handle ? bind(attach, handle) : undefined;
-				throw holder === undefined ? error : new HeldElsewhere(error as ApiClientError, holder);
+				const bound = handle !== undefined && holder === undefined && views.get(view) === handle ? handle : undefined;
+				return { reply, holder, bound };
+			} finally {
+				attaching.delete(attach);
 			}
-			const handle = handleOf(reply);
-			return { reply, holder: handle ? bind(attach, handle) : undefined };
+		})();
+		if (joinable) {
+			const joined = run.then(({ reply, holder, bound }) => ({ summary: joinable(reply), holder, bound }));
+			attachesOut.set(view, joined);
+			const forget = () => {
+				if (attachesOut.get(view) === joined) attachesOut.delete(view);
+			};
+			joined.then(forget, forget);
+		}
+		return run;
+	};
+
+	/**
+	 * Refuse a send from `view` while one is out, or while a compact from it
+	 * is, `busy`, as the browser's `submit` and `send` refuse one (OW-nasofa,
+	 * OW-natiha): the backends cannot safely admit a turn beside a compaction,
+	 * and the server's status saying one runs comes only with the compact's
+	 * reply.
+	 */
+	const refuseBusy = (view: View): void => {
+		if (sendsOut.has(view)) throw new ApiClientError("busy", "a prompt from this buffer is still being sent");
+		if (compactsOut.has(view)) throw new ApiClientError("busy", "a compaction requested from this buffer has not answered");
+	};
+
+	/** Refuse what would attach `session` while a fork and prompt of it is out, `forking` (D30): on Pi it would resume the parent's old branch. */
+	const refuseForking = (session: SessionRef): void => {
+		const key = keyOf(session);
+		for (const keys of forksOut) if (keys.includes(key)) throw new ApiClientError("forking", "a fork of this session is in flight");
+	};
+
+	/** Run `send` as `view`'s send still out, after refusing one already out. */
+	const sending = async <T>(view: View, send: () => Promise<T>): Promise<T> => {
+		refuseBusy(view);
+		sendsOut.add(view);
+		try {
+			return await send();
 		} finally {
-			attaching.delete(attach);
+			sendsOut.delete(view);
 		}
 	};
 
@@ -497,6 +590,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 */
 	const detach = (view: View): void => {
 		for (const attach of attaching) if (attach.view === view) attach.done = true;
+		attachesOut.delete(view);
 		const handle = views.get(view);
 		views.delete(view);
 		if (handle !== undefined) dropHeld(handle);
@@ -550,7 +644,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		// An attach of the new session for `view`, as well as the operation
 		// (D30), bound as `sessions/attach` binds its own.
 		"sessions/create": async ({ view, ...body }) => {
-			const { reply, holder } = await attachingBy(view, () => api.createSession(body), (summary) => summary.handle);
+			const { reply, holder } = await attachingBy(view, () => api.createSession(body), (summary) => summary.handle, (summary) => summary);
 			return naming(reply, holder);
 		},
 		"models/list": ({ backend }) => api.listModels(backend),
@@ -558,32 +652,73 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		// snapshot of a session already live, so the reducer holds the view the
 		// reply's handle names, and the snapshot that binds the buffer goes
 		// out from it ahead of the reply (`bind`). `session.ref` in the reply is
-		// authoritative and may differ from the one asked for (D9).
+		// authoritative and may differ from the one asked for (D9). A second
+		// attach from a view whose first is still out joins it, sending the
+		// server nothing and answering as the first does (D32 point 4).
 		"sessions/attach": async ({ session, view }) => {
-			const { reply, holder } = await attachingBy(view, () => api.attach(session), (summary) => summary.handle);
+			refuseForking(session);
+			const out = attachesOut.get(view);
+			if (out) {
+				const { summary, holder } = await out;
+				if (summary === undefined) throw new ApiClientError("not_attached", "the attach this one joined attached no session");
+				return naming(summary, holder);
+			}
+			const { reply, holder } = await attachingBy(view, () => api.attach(session), (summary) => summary.handle, (summary) => summary);
 			return naming(reply, holder);
 		},
+		// One at a time from a view, a second refused `busy` (D32 point 4).
 		// Routed by the view's binding (D30): a bound view's goes only to the
-		// live session under its handle; an unbound view's is an attach for it
-		// as well, the server attaching the session if it must, bound as
-		// `sessions/attach` binds its own, a refusal naming the session
-		// attached included; and one marked `live` from an unbound view, whose
-		// binding an `ended` or a gap took after it was sent, is refused, since
-		// by ref it would resume what was closed. Emacs gets the disposition,
-		// and the view holding the session where another does.
-		"sessions/prompt": async ({ session, view, live, ...body }) => {
-			const handle = views.get(view);
-			if (handle === undefined && live) liveHandle(view);
-			const { reply, holder } =
-				handle !== undefined
-					? { reply: await api.prompt(session, { ...body, handle }), holder: undefined }
-					: await attachingBy(view, () => api.prompt(session, body), (reply) => reply?.session?.handle);
-			const answer = reply?.disposition === "handled" ? { disposition: "handled" as const } : null;
-			return holder === undefined ? answer : { ...answer, view: holder };
-		},
+		// live session under its handle; an unbound view's waits on the
+		// view's attach still out, if any, and then goes under the handle that
+		// attach bound, or is refused with its error, or `not_attached` where
+		// it bound nothing or landed on another view's handle, naming that
+		// view; with none out it is an attach for the view as well, the server
+		// attaching the session if it must, bound as `sessions/attach` binds
+		// its own, a refusal naming the session attached included, and
+		// refused while a fork and prompt of the session is out. One marked
+		// `live` from an unbound view, whose binding an `ended` or a gap took
+		// after it was sent, is refused before any wait, since by ref it would
+		// resume what was closed. Emacs gets the disposition, and the view
+		// holding the session where another does.
+		"sessions/prompt": ({ session, view, live, ...body }) =>
+			sending(view, async () => {
+				let handle = views.get(view);
+				if (handle === undefined && live) liveHandle(view);
+				const out = handle === undefined ? attachesOut.get(view) : undefined;
+				if (out) {
+					const { summary, holder, bound } = await out;
+					handle = views.get(view);
+					if (bound === undefined || handle !== bound) {
+						const refusal = new ApiClientError("not_attached", "the attach this prompt waited on did not attach this buffer", undefined, summary && { ref: summary.ref, handle: summary.handle! });
+						throw holder === undefined ? refusal : new HeldElsewhere(refusal, holder);
+					}
+				}
+				if (handle === undefined) refuseForking(session);
+				const { reply, holder } =
+					handle !== undefined
+						? { reply: await api.prompt(session, { ...body, handle }), holder: undefined }
+						: await attachingBy(
+								view,
+								() => api.prompt(session, body),
+								(reply) => reply?.session?.handle,
+								(reply) => reply?.session,
+							);
+				const answer = reply?.disposition === "handled" ? { disposition: "handled" as const } : null;
+				return holder === undefined ? answer : { ...answer, view: holder };
+			}),
 		"sessions/abort": async ({ view }) => (await api.abort(liveHandle(view))) ?? null,
+		// A view's compact still out holds its sends and a second compact,
+		// `busy`, as the browser's `compacting` holds Send and Compact from the
+		// click to the reply (D32 point 4).
 		"sessions/compact": async ({ view }) => {
-			await api.compact(liveHandle(view));
+			if (compactsOut.has(view)) throw new ApiClientError("busy", "a compaction requested from this buffer has not answered");
+			const handle = liveHandle(view);
+			compactsOut.add(view);
+			try {
+				await api.compact(handle);
+			} finally {
+				compactsOut.delete(view);
+			}
 			return null;
 		},
 		// By ref, as ever. The view's binding goes at the `ended` the close
@@ -622,11 +757,21 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		// as an attach's binds that attach. So does a refusal naming a fork
 		// that was attached; one whose own start failed names no handle, and
 		// binds nothing.
-		"sessions/forkAndPrompt": async ({ session: _session, view, forkView, ...body }) => {
-			const handle = liveHandle(view);
-			const { reply, holder } = await attachingBy(forkView, () => api.forkAndPrompt(handle, body), (reply) => reply.session.handle);
-			return naming(reply, holder);
-		},
+		// It is `view`'s send still out, refused `busy` beside a prompt from
+		// it, and while it is out nothing attaches the session forked, by any
+		// ref it is known by, from any view (D32 point 4).
+		"sessions/forkAndPrompt": ({ session, view, forkView, ...body }) =>
+			sending(view, async () => {
+				const handle = liveHandle(view);
+				const forked = [session, state.sessions[handle]?.ref].filter((ref) => ref !== undefined).map(keyOf);
+				forksOut.add(forked);
+				try {
+					const { reply, holder } = await attachingBy(forkView, () => api.forkAndPrompt(handle, body), (reply) => reply.session.handle);
+					return naming(reply, holder);
+				} finally {
+					forksOut.delete(forked);
+				}
+			}),
 	};
 
 	const respond = async (request: JsonRpcRequest): Promise<void> => {

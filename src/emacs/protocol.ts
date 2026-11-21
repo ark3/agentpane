@@ -94,7 +94,17 @@
  * `sessions/prompt` carries `live`; `sessions/forkAndPrompt` carries
  * `forkView`; and a reply, or a refusal's `attached` or `fork`, names the
  * view holding the session where another does. The tokens of OW-wukako,
- * OW-linowe and OW-nowihu are history.
+ * OW-linowe and OW-nowihu, and those ark3/agentpane#48, #49 and #51 put on
+ * `sessions/create`, `sessions/prompt` and `sessions/forkAndPrompt`, are
+ * history.
+ * D32 raised it a twenty-fifth, under point 4 (ark3/agentpane#71): the
+ * helper holds each view's requests still out, refusing a second send
+ * from a view `busy`, and a send or a second compact while a compact from
+ * the view is out, joining a second attach from a view to its first
+ * still out, holding a prompt from an unbound view until the view's
+ * attach still out has bound it, and refusing an attach or a by-ref
+ * prompt of a session a `sessions/forkAndPrompt` still out forks
+ * `forking`.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -231,7 +241,7 @@
  * its handle, and by a `seq` gap, the last two said by `session/detached`.
  * No request carries `handle`, `token` or `tokens`.
  * `compaction` is `"requesting"`, `"running"` or `null`;
- * `model` is a string or `null`; * `model` is a string or `null`; so is `effort`, the reasoning effort the
+ * `model` is a string or `null`; so is `effort`, the reasoning effort the
  * session's next turn runs at, `null` when the backend reports none; so is
  * `defaultEffort`, the `defaultEffort` of `model`'s `models/list` entry,
  * which the helper asks for once per backend and holds (D32 point 8), `null`
@@ -297,6 +307,13 @@
  *   the view that already holds the handle, as `g` sends, is answered with
  *   the snapshot again. A snapshot under a handle already bound goes out as
  *   it arrives, as every later snapshot under it does.
+ *   An attach from a view whose first `sessions/attach`, `sessions/create`
+ *   or by-ref `sessions/prompt` is still out joins that one: nothing goes
+ *   to the server, no second snapshot goes out, and it is answered with
+ *   that one's answer, its reply, `view` included, or its refusal (D32
+ *   point 4). One sent once that has been answered goes to the server.
+ *   One naming a session a `sessions/forkAndPrompt` still out forks is
+ *   refused `forking`, from any view.
  *   From here on the per-session notifications below flow for this
  *   session, under the view.
  * - `sessions/prompt` -- `{ session, view, text, images?, priorErrorId?,
@@ -309,6 +326,9 @@
  *   in `pi 1.2.0`, read at the installed package, not measured); after
  *   `/refs`, `/llama` and `/mcp` on `pi 1.2.0` none did (docs/MANUAL_TESTING.md,
  *   OW-kokotu). No other backend answers it.
+ *   One prompt at a time from a view: one sent while a `sessions/prompt`,
+ *   a `sessions/forkAndPrompt` or a `sessions/compact` from the view is
+ *   still out is refused `busy` and reaches no server (D32 point 4).
  *   The view's binding says what it may do (D30). From a bound view it goes
  *   only to the live session under the view's handle and starts nothing: a
  *   handle that has ended is refused with `data.error` `not_attached`, a
@@ -316,8 +336,16 @@
  *   meaning false) says the buffer held a handle when it sent: one marked
  *   so from a view the helper has unbound since, at an `ended` or a gap, is
  *   refused `not_attached` too and reaches no server, since by ref it would
- *   resume a session another client closed. From an unbound view, and not
- *   `live`, it goes by ref, and the server attaches the session if it must
+ *   resume a session another client closed. From an unbound view whose
+ *   attach is still out, and not `live`, it waits for that attach, and
+ *   then goes under the handle it bound, as from a bound view. Where the
+ *   attach bound nothing it never goes by ref: it is refused with the
+ *   attach's refusal where the attach was refused, and otherwise with
+ *   `not_attached`, carrying `attached`, `{ ref, handle, view }`, where the
+ *   attach landed on the handle another view holds (D32 point 4). From an
+ *   unbound view with no attach out, and not `live`, it goes by ref, unless
+ *   a `sessions/forkAndPrompt` still out forks the session, which refuses
+ *   it `forking`; and the server attaches the session if it must
  *   and then prompts it: the snapshot that answers that attach binds the
  *   view and goes out before the reply, as `sessions/attach` above says of
  *   its own, and where another view holds the handle nothing is bound and
@@ -346,7 +374,12 @@
  *   server's own `AbortResponse`, the text of each prompt steered into the turn
  *   and not yet delivered, which only Pi holds, for the buffer that stopped
  *   it to take back (D16, OW-wisifo). No notification carries them.
- * - `sessions/compact` -- `{ session, view }` -> `null`.
+ * - `sessions/compact` -- `{ session, view }` -> `null`. While it is out,
+ *   a `sessions/prompt`, a `sessions/forkAndPrompt` or a second
+ *   `sessions/compact` from `view` is refused `busy`, as the browser's
+ *   `compacting` holds Send and Compact from the click to the reply; from
+ *   before the reply the session's `compaction` says one runs, until it
+ *   ends (D32 point 4).
  * - `sessions/close` -- `{ session, view }` -> `null`. Kills the
  *   subprocess of the session `session` names; the server's `ended` for its
  *   handle, written ahead of the reply, unbinds the view and stops this
@@ -403,6 +436,13 @@
  *   sent as for `sessions/attach` and before the reply. A refusal that
  *   names a fork under a handle answers the same way before its error goes
  *   out; one that names none, or no fork, answers nothing.
+ *   It is `view`'s send still out, so a `sessions/prompt` from `view`
+ *   meanwhile is refused `busy`, as it is itself while a `sessions/compact`
+ *   from `view` is out, and while it is out an attach, or a
+ *   by-ref prompt, of the session forked, by the ref it names or the one
+ *   the helper holds under the handle, is refused `forking` from any view
+ *   (D30, D32 point 4). Until ark3/agentpane#71 agentpane-mode refused its
+ *   own buffer's attach meanwhile, and nothing refused another's.
  *   Until ark3/agentpane#51 it attached nothing.
  *
  * Errors: a request the server refused answers with `-32000` as `code`, the
@@ -423,6 +463,12 @@
  * says nothing of whether the server acted on the request; an unknown
  * method is `-32601`. A request on a live session from a view bound to no
  * handle is refused `not_attached` by the helper, its `message` saying so.
+ * Two more of the helper's own refusals reach no server (D32 point 4):
+ * `busy`, for a prompt or a fork and prompt from a view whose send or
+ * compact is still out, or a compact from one whose compact is, and
+ * `forking`, for an attach or a by-ref prompt of a session
+ * a fork and prompt still out forks. A prompt that waited on its view's
+ * attach is refused with that attach's refusal, or `not_attached`.
  * A request still out when the socket closes, at the
  * end of the helper's input or the server's going, gets no reply at all
  * (`runHelper` in helper.ts): Emacs answers it as the helper's death
