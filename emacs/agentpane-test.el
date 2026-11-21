@@ -6004,6 +6004,42 @@ listing through the next helper: nothing observed the end, watched or not
               (should-not (agentpane-test--finished-p picker "h-a")))
           (agentpane-test--end-helper replacement))))))
 
+(ert-deftest agentpane-test-picker-keeps-a-mark-through-the-helpers-death-until-opened ()
+  "A session whose turn ended unseen keeps its finished-turn mark through
+the death of the helper its transcript was attached through, and through
+the first listing by the next, until it is opened from the picker, which
+drops the mark (owner, 2026-11-20, ark3/agentpane#64): the browser's
+\"keeps a finished-turn marker through a socket drop until its row is
+selected\".  The death leaves the buffer holding no handle, so only its
+ref finds it as seen."
+  (agentpane-test--listing
+    (let ((agentpane--connection nil)
+          (replacement nil))
+      (cl-letf (((symbol-function 'agentpane--start-helper) #'agentpane-test--mute-helper))
+        (unwind-protect
+            (let* ((dead (agentpane--connection))
+                   (a (agentpane-test--holding (agentpane-test--summary "a" nil)))
+                   (picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
+              (with-current-buffer a (setq agentpane--attached dead))
+              (funcall relist (agentpane-test--summary "a" nil))
+              (funcall relist (agentpane-test--summary "a" t))
+              (funcall relist (agentpane-test--summary "a" nil))
+              (should (agentpane-test--finished-p picker "h-a"))
+              (kill-process (jsonrpc--process dead))
+              (agentpane-test--heard-out dead)
+              (should-not (buffer-local-value 'agentpane--handle a))
+              (should (agentpane-test--finished-p picker "h-a"))
+              (setq replacement (agentpane--connection))
+              (funcall relist (agentpane-test--summary "a" nil))
+              (should (agentpane-test--finished-p picker "h-a"))
+              (with-current-buffer picker
+                (goto-char (point-min))
+                (agentpane-sessions-open))
+              (should (eq (window-buffer (selected-window)) a))
+              (agentpane-test--show a)
+              (should-not (agentpane-test--finished-p picker "h-a")))
+          (agentpane-test--end-helper replacement))))))
+
 (ert-deftest agentpane-test-picker-forgets-a-handle-the-server-let-go ()
   "A handle the listing no longer carries, which the server never mints
 again, leaves both the streaming levels and the marks (OW-wazipa)."
