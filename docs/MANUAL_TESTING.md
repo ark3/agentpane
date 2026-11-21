@@ -5230,6 +5230,26 @@ A throwaway Bun script, kept outside the repo, started `bun src/server/index.ts`
 **A socket left idle past Bun's default idle timeout stayed open.**
 After a `hello` and a `sessions/list`, both answered, the socket sat idle for 15 s, past the 10 s `idleTimeout` `Bun.serve` now runs at by default, and a `models/list` sent then was answered.
 
+## A server's death with the watch in the helper (ark3/agentpane#72, ark3/agentpane#73)
+
+Run on the home server on 2026-11-21, on its system `bun 1.4.0` and Emacs 31.1 with its bundled jsonrpc.el 1.0.29, against this checkout once the helper held the turn-done watch and answered every request still out at its socket's close (D32 points 6 and 7).
+It is the live confirmation of D32 point 7's reading of jsonrpc.el 1.0.29's source: the dead helper's last messages are still handled after its sentinel has run.
+`emacs_helper_server_death_probe.el` drove the real helper, `bun run src/emacs/main.ts`, over its stand-in server, `emacs_helper_server_death_server.ts`, so no backend took part and no state directory was used.
+
+```bash
+emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
+  -l resources/probes/emacs_helper_server_death_probe.el \
+  --eval '(ert-run-tests-batch-and-exit "agentpane-probe-")'
+```
+
+**The helper's `session/turnEnded` raised the indicator before the teardown, 8 of 8, three times.**
+The stand-in sent the session's status streaming over the socket at the prompt, leaving the prompt unanswered, so the helper's watch saw the turn, and was SIGKILLed 0.3 s after the prompt went out.
+Three runs of 8 each printed `RAISED 8 of 8`.
+With the stand-in's status sent as `isStreaming: false` instead, a run of 3 printed `RAISED 0 of 3`, so the raise came from the helper's watch and not from agentpane-mode.
+
+**The helper's `-32001` reached the prompt, 8 of 8, three times.**
+Each run printed `ANSWERED 8 of 8`, every prompt failing with "agentpane: sessions/prompt failed: the connection to the agentpane server closed before it answered", the helper's own message, and none read as a refusal.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.

@@ -595,9 +595,10 @@ What it showed is `docs/MANUAL_TESTING.md`, "A request the helper's teardown abo
 
 ## `emacs_helper_server_death_probe.el`
 
-Proves: **a prompt in flight when the agentpane server is killed keeps its turn-done watch for the helper's teardown** (OW-hiliti).
-Until D31 the helper, `bun run src/emacs/main.ts`, could answer the prompt first with its HTTP request's error, a `-32603` carrying no `data`; over the socket it writes no reply for it until ark3/agentpane#73, and since then answers it with its own `-32001`, again carrying no `data` (D32 point 7).
-The server is `emacs_helper_server_death_server.ts`, a stand-in socket on a free loopback port that answers the `hello` and every listing, holds the prompt unanswered, and is SIGKILLed 0.3 s after the prompt goes out.
+Proves: **when the agentpane server is killed with a prompt in flight, the helper raises the prompt's turn and answers the prompt before it exits, and both reach agentpane-mode** (OW-hiliti, D32 points 6 and 7).
+The helper, `bun run src/emacs/main.ts`, sends the turn-done watch that saw the turn streaming as `session/turnEnded`, watched, at its socket's close, and agentpane-mode raises the indicator from it; it answers the prompt with its own `-32001`, carrying no `data`, so it does not read as a refusal.
+Until D31 the helper could answer the prompt first with its HTTP request's error, a `-32603` carrying no `data`; until ark3/agentpane#72 agentpane-mode kept the watch itself and raised it at its own teardown.
+The server is `emacs_helper_server_death_server.ts`, a stand-in socket on a free loopback port that answers the `hello` and every listing, sends the session's status streaming at the prompt and holds the prompt unanswered, and is SIGKILLed 0.3 s after the prompt goes out.
 
 ```bash
 emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
@@ -606,9 +607,9 @@ emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ```
 
 Run from the repository root; `PROBE_RUNS` sets the runs (8).
-It prints `RAISED k of n`, with each run's result and the prompt's failure message, and passes only when every run raised.
+It prints `RAISED k of n` and `ANSWERED k of n`, with each run's result and the prompt's failure message, and passes only when every run raised and every prompt's failure was reported.
 
-Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19; again under views (ark3/agentpane#70), 2026-11-20, raising 8 of 8.
+Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19; again under views (ark3/agentpane#70), 2026-11-20, raising 8 of 8; again with the watch in the helper (ark3/agentpane#72, ark3/agentpane#73), 2026-11-21, raising and answering 8 of 8.
 What it showed is in the same `docs/MANUAL_TESTING.md` sections.
 
 ## Why these live here

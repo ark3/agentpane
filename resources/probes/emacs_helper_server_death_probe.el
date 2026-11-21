@@ -2,15 +2,17 @@
 
 ;; Proves (OW-hiliti): the real helper, `bun run src/emacs/main.ts', over
 ;; a stand-in server (`emacs_helper_server_death_server.ts') that is
-;; SIGKILLed 0.3 s after this Emacs's prompt goes out, whose turn this
-;; Emacs saw streaming: the prompt keeps its turn-done watch for the
-;; helper's teardown, which ends the turn and raises the indicator
-;; (OW-zedawo).  Until D31 the prompt's own HTTP request could fail
-;; before the event stream's drop reached the helper, which wrote it back
-;; as a -32603 error reply carrying no `data', which must not read as a
-;; refusal; over the one socket the close settles the prompt as the
-;; connection lost, which the helper answers with its own -32001 and no
-;; `data' before it exits (D32 point 7).
+;; SIGKILLed 0.3 s after this Emacs's prompt goes out, and that meets
+;; the prompt with the session's status streaming, so the helper's
+;; turn-done watch sees the turn: at its socket's close the helper sends
+;; that watch as `session/turnEnded', watched, before it exits, and
+;; agentpane-mode raises the indicator from it (D32 point 6).  The
+;; prompt itself is answered with the helper's own -32001 and no `data'
+;; before the exit (D32 point 7), which must reach the prompt and not read
+;; as a refusal.  Both rest on jsonrpc.el handling the dead helper's last
+;; messages after its sentinel (D32 point 7).  Until D31 the prompt's own
+;; HTTP request could fail first and be written back as a -32603 carrying
+;; no `data'.
 ;;
 ;; Run from the repository root; PROBE_RUNS sets the runs (8):
 ;;
@@ -18,8 +20,9 @@
 ;;     -l resources/probes/emacs_helper_server_death_probe.el \
 ;;     --eval '(ert-run-tests-batch-and-exit "agentpane-probe-")'
 ;;
-;; It prints `RAISED k of n', with each run's result and the prompt's
-;; failure message, and passes only when every run raised.
+;; It prints `RAISED k of n' and `ANSWERED k of n', with each run's
+;; result and the prompt's failure message, and passes only when every
+;; run raised and every prompt's failure was reported.
 
 (require 'agentpane-test)
 
@@ -28,9 +31,10 @@
   "This probe's directory.")
 
 (defun agentpane-probe--death-once ()
-  "Start the stand-in server and the helper against it, send a prompt, see
-its turn stream, kill the server, and return whether the teardown raised
-the indicator and the prompt's failure message, as a list."
+  "Start the stand-in server and the helper against it, send a prompt whose
+turn the server reports streaming, kill the server, and return whether the
+helper's `session/turnEnded' raised the indicator and the prompt's failure
+message, as a list."
   (agentpane-test--watching
     (let* ((agentpane--connection nil)
            (ref '(:backend "codex" :id "t1"))
@@ -69,9 +73,6 @@ the indicator and the prompt's failure message, as a list."
                     (goto-char (point-max))
                     (insert "hello")
                     (agentpane-send)
-                    (agentpane--on-notification connection 'session/status
-                                                (list :view agentpane--view :session ref :handle "h1"
-                                                      :isStreaming t))
                     (sleep-for 0.3)
                     (signal-process server 'SIGKILL)
                     (agentpane-test--heard-out connection)
@@ -84,13 +85,16 @@ the indicator and the prompt's failure message, as a list."
   "See the file's commentary."
   (let ((runs (string-to-number (or (getenv "PROBE_RUNS") "8")))
         (raised 0)
+        (answered 0)
         (log nil))
     (dotimes (_ runs)
       (let ((result (agentpane-probe--death-once)))
         (when (car result) (cl-incf raised))
+        (when (cadr result) (cl-incf answered))
         (push result log)))
-    (princ (format "\nRAISED %d of %d\n%s\n" raised runs
+    (princ (format "\nRAISED %d of %d\nANSWERED %d of %d\n%s\n" raised runs answered runs
                    (mapconcat (lambda (entry) (format "%S" entry)) (reverse log) "\n")))
-    (should (= raised runs))))
+    (should (= raised runs))
+    (should (= answered runs))))
 
 ;;; emacs_helper_server_death_probe.el ends here
