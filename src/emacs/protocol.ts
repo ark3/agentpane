@@ -105,6 +105,13 @@
  * attach still out has bound it, and refusing an attach or a by-ref
  * prompt of a session a `sessions/forkAndPrompt` still out forks
  * `forking`.
+ * D32 raised it a twenty-sixth, under point 6 (ark3/agentpane#72): the
+ * helper holds the turn-done watch and the streaming levels, and sends
+ * `session/turnEnded` for every live session whose turn ends, saying
+ * whether this Emacs's prompt was watching it; `sessions/forkAndPrompt`
+ * carries `stops`; `sessions/abort` and `sessions/fork` carry `unwatch`; and
+ * `session/detached` loses OW-kutome's `cause`, its only reader the watch
+ * agentpane-mode no longer keeps.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -369,11 +376,15 @@
  * from a view bound to none the helper refuses `not_attached` itself.
  * `session` goes nowhere.
  *
- * - `sessions/abort` -- `{ session, view }` -> `null` for a stop that took nothing
+ * - `sessions/abort` -- `{ session, view, unwatch? }` -> `null` for a stop that took nothing
  *   out of the backend's queue, or `{ queued }` for one that did: the
  *   server's own `AbortResponse`, the text of each prompt steered into the turn
  *   and not yet delivered, which only Pi holds, for the buffer that stopped
  *   it to take back (D16, OW-wisifo). No notification carries them.
+ *   `unwatch` (boolean, absent meaning false) drops the turn-done watch on
+ *   the view's handle before the abort goes out, so the stop raises
+ *   nothing: agentpane-mode's plain Pi fork sends it, and
+ *   ark3/agentpane#17 retires it with that fork.
  * - `sessions/compact` -- `{ session, view }` -> `null`. While it is out,
  *   a `sessions/prompt`, a `sessions/forkAndPrompt` or a second
  *   `sessions/compact` from `view` is refused `busy`, as the browser's
@@ -418,9 +429,14 @@
  *   a fork of the session stops a turn running when it lands, which is what
  *   "Stop and fork" reads (D30). Until ark3/agentpane#47 the result was the
  *   array alone.
- * - `sessions/fork` -- `{ session, view, entryId }` -> the fork's ref.
+ * - `sessions/fork` -- `{ session, view, entryId, unwatch? }` -> the fork's ref.
+ *   `unwatch` (boolean, absent meaning false) drops the turn-done watch on
+ *   the view's handle before the fork goes out, as `sessions/abort`'s does:
+ *   agentpane-mode's plain Pi fork sends it every time, since a Pi fork
+ *   stops the parent's turn whether or not it read streaming, and
+ *   ark3/agentpane#17 retires it with that fork.
  * - `sessions/forkAndPrompt` -- `{ session, view, index, text, images?,
- *   forkView }` -> `{ session, disposition }`. An edit of an earlier message as one
+ *   forkView, stops? }` -> `{ session, disposition }`. An edit of an earlier message as one
  *   server operation (D30): fork at the user message whose transcript
  *   `index` this is, attach the fork, and prompt it with `text`, clearing no
  *   turn error. `session` in the result is the fork's summary, with its
@@ -444,6 +460,12 @@
  *   (D30, D32 point 4). Until ark3/agentpane#71 agentpane-mode refused its
  *   own buffer's attach meanwhile, and nothing refused another's.
  *   Until ark3/agentpane#51 it attached nothing.
+ *   `stops` (boolean, absent meaning false) says the edit's hint read the
+ *   fork as stopping a running turn (`forkStopsTurn` above): the turn-done
+ *   watch on `view`'s handle goes as the request goes out, raising nothing
+ *   for the turn the fork stops, as the browser reads `stopsBeforeFork`.
+ *   The fork's watch is armed at the reply, unless the prompt was handled
+ *   (`session/turnEnded` below).
  *
  * Errors: a request the server refused answers with `-32000` as `code`, the
  * server's text as `message`, and `{ error, detail }` as `data`, `error`
@@ -476,9 +498,10 @@
  *
  * Notifications, by `method`, with `params`; each names the session it is
  * about and the view it is for, and none arrives for a session no view is
- * bound to, except `sessions/changed`; the first under a view's handle is
- * the `session/snapshot` that binds it. Emacs drops one for a view no
- * buffer holds:
+ * bound to, except `sessions/changed` and `session/turnEnded`; the first
+ * under a view's handle is the `session/snapshot` that binds it. Emacs
+ * drops one for a view no buffer holds, but `session/turnEnded`, which it
+ * reads before any view:
  *
  * - `session/snapshot` -- `{ session, view, handle, nodes, isStreaming, compaction,
  *   model, effort, defaultEffort, unrestoredModel, error, errorId, notices }`.
@@ -533,19 +556,43 @@
  *   where the backend named a place in it). The Codex and Pi adapters
  *   produce them; Claude Code's does not. Every later `session/snapshot`
  *   carries it again, in `notices`.
- * - `session/detached` -- `{ session, view, handle, cause }`. Nothing more comes
+ * - `session/detached` -- `{ session, view, handle }`. Nothing more comes
  *   under `handle`, and the helper has unbound `view`: either the
  *   server let go of the handle and said so with an `ended` under it -- a
  *   close, by another client or this one, or on Pi a fork moving the
- *   process onto a conversation of its own (D26) -- and `cause` is
- *   `"ended"`, or the session's `seq` gapped, and the helper detaches that
- *   one session rather than attach it again (D25 point 5, OW-filuge), and
- *   `cause` is `"gapped"`: the handle stays live on the server, and a turn
- *   running under it may go on unheard. `session` is the ref it last named
- *   the session by. The view's buffer lets go of the handle and counts
- *   itself detached and not streaming, keeping its ref and what it drew;
- *   its next `sessions/attach`, by that ref, is answered under whatever
- *   handle and ref the session has now, if any, as a first attach is.
+ *   process onto a conversation of its own (D26) -- or the session's `seq`
+ *   gapped, and the helper detaches that one session rather than attach it
+ *   again (D25 point 5, OW-filuge): the handle stays live on the server,
+ *   and a turn running under it may go on unheard. `session` is the ref it
+ *   last named the session by. The view's buffer lets go of the handle and
+ *   counts itself detached and not streaming, keeping its ref and what it
+ *   drew; its next `sessions/attach`, by that ref, is answered under
+ *   whatever handle and ref the session has now, if any, as a first attach
+ *   is. Until D32 point 6 it carried `cause`, `"ended"` or `"gapped"`,
+ *   which agentpane-mode's turn-done watch read (OW-kutome).
+ * - `session/turnEnded` -- `{ session, handle, watched, view? }`. A turn
+ *   ended in the live session under `handle`, whether or not a view of
+ *   Emacs's is bound to it, and `view` (integer) names the one that is, if
+ *   any. Sent wherever the session's `isStreaming` falls from true to false
+ *   after one read true, every live session included (D32 point 6), as the
+ *   browser's row marks fold it (`foldSessionTurns`); a false that follows
+ *   no true is no turn's end. `watched` (boolean) says this Emacs's prompt
+ *   was watching that turn, as the browser's favicon watch does
+ *   (`src/client/favicon.ts`): a prompt or a fork and prompt arms the
+ *   watch where none stands, from the session's level as it goes, and its
+ *   refusal or a `handled` disposition takes down only a watch it armed.
+ *   The watch also raises, `watched` true, for a turn seen streaming whose
+ *   handle the server's `ended` let go of, ahead of the `session/detached`
+ *   under it, and for each turn seen streaming when the socket closes,
+ *   before the helper exits (D31 point 6). It raises nothing, and goes,
+ *   at a `seq` gap, at the view's `sessions/detach`, at a close's reply,
+ *   at the end of the helper's input (D25 points 4 and 5), and with
+ *   `unwatch` on `sessions/abort` or `sessions/fork`, or
+ *   `sessions/forkAndPrompt`'s `stops`.
+ *   The watch on a handle and what has been seen are agentpane-mode's to
+ *   draw: it marks the session's row unless a window shows the session,
+ *   and raises its indicator for a turn watched in a buffer no window
+ *   shows.
  * - `sessions/changed` -- no `params`. Refetch the listing. A listing
  *   detaches nothing: where the server lets go of a handle Emacs attached,
  *   the `session/detached` for it goes out ahead of the `sessions/changed`
@@ -597,7 +644,7 @@ export interface HelperRequests {
 		params: ViewParams & Omit<PromptRequest, "handle"> & { live?: boolean };
 		result: Naming<{ disposition?: "handled" }> | null;
 	};
-	"sessions/abort": { params: ViewParams; result: AbortResponse | null };
+	"sessions/abort": { params: ViewParams & { unwatch?: boolean }; result: AbortResponse | null };
 	"sessions/compact": { params: ViewParams; result: null };
 	"sessions/close": { params: ViewParams; result: null };
 	"sessions/dismissError": { params: ViewParams & DismissErrorRequest; result: null };
@@ -606,8 +653,8 @@ export interface HelperRequests {
 	"sessions/setEffort": { params: ViewParams & { effort: string }; result: null };
 	"sessions/setName": { params: ViewParams & { name: string }; result: null };
 	"sessions/forkPoints": { params: ViewParams; result: ForkPointsResponse };
-	"sessions/fork": { params: ViewParams & ForkRequest; result: SessionRef };
-	"sessions/forkAndPrompt": { params: ViewParams & ForkAndPromptRequest & { forkView: number }; result: Naming<ForkAndPromptResponse> };
+	"sessions/fork": { params: ViewParams & ForkRequest & { unwatch?: boolean }; result: SessionRef };
+	"sessions/forkAndPrompt": { params: ViewParams & ForkAndPromptRequest & { forkView: number; stops?: boolean }; result: Naming<ForkAndPromptResponse> };
 }
 
 export interface SessionStatusParams {
@@ -637,7 +684,8 @@ export type HelperNotification =
 	| { method: "session/error"; params: { session: SessionRef; view: number; handle: string; message: string; errorId: string } }
 	| { method: "session/errorCleared"; params: { session: SessionRef; view: number; handle: string } }
 	| { method: "session/notice"; params: { session: SessionRef; view: number; handle: string; notice: AgentNotice } }
-	| { method: "session/detached"; params: { session: SessionRef; view: number; handle: string; cause: "ended" | "gapped" } }
+	| { method: "session/detached"; params: { session: SessionRef; view: number; handle: string } }
+	| { method: "session/turnEnded"; params: { session: SessionRef; handle: string; watched: boolean; view?: number } }
 	| { method: "sessions/changed"; params?: undefined };
 
 export interface TranscriptNode {

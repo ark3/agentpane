@@ -32,7 +32,7 @@
  * server sends an opening snapshot for every live session and broadcasts
  * every event to every client, so views Emacs never attached form in the
  * reducer too; notifications go out only for a handle a view of Emacs's is
- * bound to. `sessions/changed` is unfiltered.
+ * bound to. `sessions/changed` and `session/turnEnded` are unfiltered.
  *
  * Views (D32 points 1 and 2). Each transcript buffer is a view, named by an
  * integer agentpane-mode mints when it makes the buffer and never changes,
@@ -80,6 +80,39 @@
  * attach's waiters, its close in flight and its fork and prompt in flight
  * itself.
  *
+ * Turn ends (D32 point 6). The helper hosts the browser's turn-done watch,
+ * `watchSubmit`, `watchAbandon`, `watchSessions` and `watchClose` from
+ * `src/client/favicon.ts`, with no focus, keyed by handle (`turnWatch`),
+ * and the level half of its row marks, `foldSessionTurns` in
+ * `src/client/session-turns.ts`, as the last `isStreaming` seen under each
+ * live session's handle (`levels`). The selection that function reads and
+ * the marks it keeps are agentpane-mode's, which knows what windows show.
+ * After every event that changes the reducer's state, a session whose level
+ * falls from true to false is sent `session/turnEnded`, whether or not a
+ * view of Emacs's is bound to it, `watched` where the watch on its handle
+ * ended there (`foldTurns`). A send arms the watch only where none stands,
+ * from the session's level as it goes, so a steer into a running turn
+ * raises; a server refusal or a `handled` disposition abandons it only
+ * where that send armed it, as the browser's `disarmSubmit` does, and an
+ * outcome unknown, the connection lost or a throw of the helper's own,
+ * never does (`arm`). A prompt from a bound view arms at receipt; one by
+ * ref, or one that waited on its view's attach, arms under the handle the
+ * attach landed on, which may be another view's (D32 point 2); one the
+ * helper refuses itself arms nothing. A fork and prompt arms the fork's
+ * handle at its reply, unless handled, and with `stops` abandons the
+ * parent's as it goes out, as the browser reads `stopsBeforeFork`.
+ * `unwatch` on `sessions/abort` and on `sessions/fork` abandons the view's
+ * watch before the request goes out, for agentpane-mode's plain Pi fork,
+ * until ark3/agentpane#17 retires it.
+ * A view's detach, a gap and a close's reply abandon the watch on the
+ * handle, raising nothing (D25 point 5); the server's `ended` raises a
+ * watch that has seen streaming, which the browser leaves waiting, a
+ * difference D32 point 6 records. At a socket close each watch that has
+ * seen streaming is raised before the helper exits (D31 point 6); at the
+ * input's end, as at `agentpane-shutdown`, nothing is (D25 point 4).
+ * Until D32 agentpane-mode kept the watch per handle with a claim per
+ * prompt (OW-kakasu), and read the levels from its picker's listings.
+ *
  * The helper does not reconnect: when the socket closes, or fails to open,
  * the helper exits (D25 point 4, D31 point 6). Agentpane is local-only, so a close means the
  * server went away, and there is nothing to reconnect to. agentpane-mode takes the exit to mean every
@@ -116,6 +149,7 @@
  */
 
 import { ApiClientError, ConnectionLostError, createAgentpaneApi, type ApiOptions, type EventHandlers } from "$client/api.ts";
+import { emptyTurnWatch, watchAbandon, watchClose, watchSessions, watchSubmit, type TurnWatch } from "$client/favicon.ts";
 import { previewMessages } from "$client/preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
 import type { BackendId, ModelInfo, ServerEvent, SessionRef, SessionSummary } from "$shared/protocol.ts";
@@ -158,10 +192,13 @@ type View = number;
 /**
  * A request that attaches a session for `view` (OW-rebawa), not yet replied
  * to; `done` once its snapshot has gone out, or the view's detach gave it up.
+ * `onLand`, where given, is told the handle it landed on, bound for the view
+ * or held by another, as `bind` finds it (D32 point 6).
  */
 interface Attaching {
 	view: View;
 	done: boolean;
+	onLand?: (handle: string) => void;
 }
 
 /**
@@ -200,18 +237,19 @@ interface HeldNode {
 
 /**
  * Runs until `input` ends, or the socket closes or fails to open (D25 point
- * 4); then closes the socket and resolves.
+ * 4); then closes the socket and resolves. At a socket close, and not at
+ * the input's end, each turn-done watch that has seen streaming is raised
+ * first (D31 point 6; see the head of this file).
  *
  * A request still out when the socket closes gets no reply (OW-hiliti): the
  * api client settles it as the connection lost, which says nothing of
  * whether it reached the backend (D31 point 6), so agentpane-mode answers it
  * as the helper's death, and the echo area says the helper exited. That
  * holds whichever end closed it, the server going away or this helper
- * closing it as `input` ended. agentpane-mode takes only a refusal carrying
- * the server's `error` code as saying a request reached no backend, and
- * reads any other error reply, this helper's own -32603 among them, as an
- * outcome unknown, leaving a prompt's turn-done watch for its teardown to
- * settle (`agentpane--request` in emacs/agentpane.el, OW-zedawo).
+ * closing it as `input` ended. Nor does it abandon a turn-done watch its
+ * prompt armed: only a refusal carrying the server's `error` code says a
+ * request reached no backend (OW-zedawo), and the helper's own -32603 is
+ * an outcome unknown too.
  *
  * A request that was never written is refused with a code of the api
  * client's own: `unreachable` for one read before a first open that failed,
@@ -255,6 +293,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	/** The session each fork and prompt still out forks, by every ref it is known by: nothing attaches it meanwhile (D30, D32 point 4). */
 	const forksOut = new Set<string[]>();
 	const keyOf = (ref: SessionRef): string => JSON.stringify([ref.backend, ref.id]);
+	/** The browser's turn-done watch, keyed by handle, its focus always false (D32 point 6). */
+	let turnWatch: TurnWatch = emptyTurnWatch();
+	/** Each live session's last `isStreaming`, by handle: the level half of the browser's row marks (`foldSessionTurns`). */
+	const levels = new Map<string, boolean>();
 	let stopped = false;
 	const reader = options.input.getReader();
 	/** Held nodes by handle and node index, in the order each was first held; a later upsert keeps its place. */
@@ -371,6 +413,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		attach.done = true;
 		const view = state.sessions[handle];
 		if (!view) return undefined;
+		attach.onLand?.(handle);
 		const holder = holderOf(handle);
 		if (holder !== undefined && holder !== attach.view) return holder;
 		const old = views.get(attach.view);
@@ -387,15 +430,17 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * another does, and throw a refusal naming one as `HeldElsewhere`.
 	 * With `joinable`, which reads the session from the reply, it is the
 	 * view's attach still out until it settles, which a later attach from
-	 * the view joins and a prompt from it waits on (`attachesOut`).
+	 * the view joins and a prompt from it waits on (`attachesOut`). With
+	 * `onLand`, see `Attaching`.
 	 */
 	const attachingBy = <T>(
 		view: View,
 		request: () => Promise<T>,
 		handleOf: (reply: T) => string | null | undefined,
 		joinable?: (reply: T) => SessionSummary | undefined,
+		onLand?: (handle: string) => void,
 	): Promise<{ reply: T; holder: View | undefined }> => {
-		const attach: Attaching = { view, done: false };
+		const attach: Attaching = { view, done: false, onLand };
 		attaching.add(attach);
 		const run = (async () => {
 			try {
@@ -466,6 +511,54 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	};
 
 	/**
+	 * Arm the turn-done watch on `handle` for a send, from the session's
+	 * level now, unless one already stands there, and answer whether this
+	 * send armed it: only then may its disarm take it down, as the
+	 * browser's `armBadge` answers (OW-zikiga). A session streaming as the
+	 * send goes is running the turn the send joins, a steer, whose end
+	 * raises though no further `isStreaming: true` comes, as the browser's
+	 * fork arms from its level.
+	 */
+	const arm = (handle: string): boolean => {
+		if (turnWatch.waiting.has(handle)) return false;
+		turnWatch = watchSubmit(turnWatch, handle, state.sessions[handle]?.isStreaming === true);
+		return true;
+	};
+
+	/** Drop the turn-done watch on `handle`, if any, raising nothing. */
+	const unwatch = (handle: string | undefined): void => {
+		if (handle !== undefined) turnWatch = watchAbandon(turnWatch, handle);
+	};
+
+	/** Tell Emacs the turn under `handle` ended, naming the view bound to it, if any. */
+	const turnEnded = (handle: string, session: SessionRef, watched: boolean): void => {
+		const bound = holderOf(handle);
+		notify({ method: "session/turnEnded", params: { session, handle, watched, ...(bound === undefined ? {} : { view: bound }) } });
+	};
+
+	/**
+	 * Fold the reducer's state into the levels and the watch, after an event
+	 * that changed it, and send `session/turnEnded` for each session whose
+	 * level fell from true to false, `watched` where `watchSessions` ended
+	 * the watch on its handle. A false that follows no true ends nothing:
+	 * a session still reads idle for a beat after a prompt goes out
+	 * (`watchSessions`). A session the state no longer holds leaves the
+	 * levels, an `ended` or a gap having settled its watch already.
+	 */
+	const foldTurns = (): void => {
+		const streaming = new Map(Object.entries(state.sessions).map(([handle, view]) => [handle, view.isStreaming]));
+		const before = turnWatch;
+		turnWatch = watchSessions(turnWatch, streaming, false);
+		for (const [handle, isStreaming] of streaming) {
+			const was = levels.get(handle);
+			levels.set(handle, isStreaming);
+			const watched = before.waiting.has(handle) && !turnWatch.waiting.has(handle);
+			if ((was === true && !isStreaming) || watched) turnEnded(handle, state.sessions[handle]!.ref, watched);
+		}
+		for (const handle of levels.keys()) if (!streaming.has(handle)) levels.delete(handle);
+	};
+
+	/**
 	 * Forward the snapshot `event`, whose view the reducer now holds under
 	 * its handle, to the view bound to the handle, if any. Nothing but a
 	 * snapshot binds a view (OW-rebawa), since only a snapshot tells Emacs
@@ -489,13 +582,13 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		for (const [key, node] of waiting) if (node.handle === handle) waiting.delete(key);
 	};
 
-	/** Unbind the view bound to `held`, if any, and tell it `session/detached` for `cause`, naming `session`, the ref it last had. */
-	const release = (held: string, session: SessionRef, cause: "ended" | "gapped"): void => {
+	/** Unbind the view bound to `held`, if any, and tell it `session/detached`, naming `session`, the ref it last had. */
+	const release = (held: string, session: SessionRef): void => {
 		const bound = holderOf(held);
 		if (bound === undefined) return;
 		views.delete(bound);
 		dropHeld(held);
-		notify({ method: "session/detached", params: { session, view: bound, handle: held, cause } });
+		notify({ method: "session/detached", params: { session, view: bound, handle: held } });
 	};
 
 	/**
@@ -510,8 +603,16 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * Re-attaching here instead would respawn the session the other client
 	 * closed. An attach still out whose reply names the handle finds no view
 	 * under it, and binds nothing (`bind`).
+	 * The turn under it is over: a watch on it that has seen streaming
+	 * raises, as agentpane-mode raised at an `ended` before D32, and any
+	 * watch on it goes (D32 point 6). The browser leaves such a watch
+	 * waiting and raises nothing.
 	 */
-	const end = (handle: string, session: SessionRef): void => release(handle, session, "ended");
+	const end = (handle: string, session: SessionRef): void => {
+		if (turnWatch.waiting.get(handle) === true) turnEnded(handle, session, true);
+		unwatch(handle);
+		release(handle, session);
+	};
 
 	/**
 	 * Detach the session whose `seq` gapped under `handle` (D25 point 5): its
@@ -523,17 +624,27 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * `sessions/close` is out. The buffer comes back by a send or `a`, `g`
 	 * previewing it (D26). An attach still out whose reply names the handle
 	 * finds no view under it, and ends with the buffer not attached, which
-	 * point 5 accepts (`bind`).
+	 * point 5 accepts (`bind`). The watch on the handle goes, raising
+	 * nothing, streamed or not: a later snapshot under the handle cannot say
+	 * whether the turn it shows ending is the one watched (D25 point 5).
 	 */
 	const detachGapped = (handle: string): void => {
 		const session = state.sessions[handle]?.ref;
 		const sessions = { ...state.sessions };
 		delete sessions[handle];
 		state = { ...state, sessions };
-		if (session !== undefined) release(handle, session, "gapped");
+		unwatch(handle);
+		if (session !== undefined) release(handle, session);
 	};
 
 	const onEvent = (event: ServerEvent): void => {
+		const before = state;
+		forward(event);
+		if (state !== before) foldTurns();
+	};
+
+	/** Apply `event` to the reducer's state, and send Emacs what it says for a bound view. */
+	const forward = (event: ServerEvent): void => {
 		const before = state;
 		const result = reduceServerEvent(before, event);
 		state = result.state;
@@ -592,6 +703,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		for (const attach of attaching) if (attach.view === view) attach.done = true;
 		attachesOut.delete(view);
 		const handle = views.get(view);
+		// Nothing more is heard here of that handle's turn, as a closed tab hears nothing (D32 point 6).
+		unwatch(handle);
 		views.delete(view);
 		if (handle !== undefined) dropHeld(handle);
 	};
@@ -619,9 +732,19 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		// OW-nuzoto). Under node they win anyway, and the vitest case passes
 		// either way: only `resources/probes/emacs_helper_no_server_probe.py`
 		// sees it.
+		// Each turn-done watch that has seen streaming is raised before the
+		// exit, the server having gone and its turns with it (D31 point 6),
+		// as the browser's `watchClose` badges. The input's end closes the
+		// socket from this end, which reports no disconnect, so it raises
+		// nothing (D25 point 4).
 		onDisconnect() {
 			if (stopped) return;
 			flushNodes();
+			for (const [handle, sawStreaming] of turnWatch.waiting) {
+				const session = state.sessions[handle]?.ref;
+				if (sawStreaming && session !== undefined) turnEnded(handle, session, true);
+			}
+			turnWatch = watchClose(turnWatch, false);
 			stopped = true;
 			void reader.cancel();
 		},
@@ -694,19 +817,43 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 					}
 				}
 				if (handle === undefined) refuseForking(session);
-				const { reply, holder } =
-					handle !== undefined
-						? { reply: await api.prompt(session, { ...body, handle }), holder: undefined }
-						: await attachingBy(
-								view,
-								() => api.prompt(session, body),
-								(reply) => reply?.session?.handle,
-								(reply) => reply?.session,
-							);
-				const answer = reply?.disposition === "handled" ? { disposition: "handled" as const } : null;
-				return holder === undefined ? answer : { ...answer, view: holder };
+				// The handle this prompt armed the turn-done watch on, the only
+				// one its refusal or handled answer takes down (D32 point 6).
+				let armed: string | undefined;
+				const armOn = (landed: string): void => {
+					if (arm(landed)) armed = landed;
+				};
+				try {
+					let sent: { reply: Awaited<ReturnType<typeof api.prompt>>; holder: View | undefined };
+					if (handle !== undefined) {
+						armOn(handle);
+						sent = { reply: await api.prompt(session, { ...body, handle }), holder: undefined };
+					} else {
+						sent = await attachingBy(
+							view,
+							() => api.prompt(session, body),
+							(reply) => reply?.session?.handle,
+							(reply) => reply?.session,
+							armOn,
+						);
+					}
+					const { reply, holder } = sent;
+					if (reply?.disposition === "handled") unwatch(armed);
+					const answer = reply?.disposition === "handled" ? { disposition: "handled" as const } : null;
+					return holder === undefined ? answer : { ...answer, view: holder };
+				} catch (error: unknown) {
+					if (error instanceof ApiClientError || error instanceof HeldElsewhere) unwatch(armed);
+					throw error;
+				}
 			}),
-		"sessions/abort": async ({ view }) => (await api.abort(liveHandle(view))) ?? null,
+		// `unwatch`, from agentpane-mode's plain Pi fork, drops the view's
+		// turn-done watch first, the user having stopped that turn on purpose
+		// (D32 point 6); ark3/agentpane#17 retires it with that fork.
+		"sessions/abort": async ({ view, unwatch: drop }) => {
+			const handle = liveHandle(view);
+			if (drop) unwatch(handle);
+			return (await api.abort(handle)) ?? null;
+		},
 		// A view's compact still out holds its sends and a second compact,
 		// `busy`, as the browser's `compacting` holds Send and Compact from the
 		// click to the reply (D32 point 4).
@@ -722,9 +869,13 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			return null;
 		},
 		// By ref, as ever. The view's binding goes at the `ended` the close
-		// brings, which the server writes ahead of the reply (D31 point 3).
-		"sessions/close": async ({ session }) => {
+		// brings, which the server writes ahead of the reply (D31 point 3),
+		// and so does the turn-done watch on its handle; whatever still stands
+		// on the handle the view held as the close went out goes at the reply.
+		"sessions/close": async ({ session, view }) => {
+			const handle = views.get(view);
 			await api.close(session);
+			unwatch(handle);
 			return null;
 		},
 		"sessions/dismissError": async ({ view, errorId }) => {
@@ -750,7 +901,15 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			return null;
 		},
 		"sessions/forkPoints": async ({ view }) => api.forkPoints(liveHandle(view)),
-		"sessions/fork": async ({ session: _session, view, ...body }) => api.fork(liveHandle(view), body),
+		// `unwatch`, from agentpane-mode's plain Pi fork, drops the view's
+		// turn-done watch first, as `sessions/abort`'s does (D32 point 6); a Pi
+		// fork stops the parent's turn, streamed or not, and its end is not
+		// news. ark3/agentpane#17 retires it with that fork.
+		"sessions/fork": async ({ session: _session, view, unwatch: drop, ...body }) => {
+			const handle = liveHandle(view);
+			if (drop) unwatch(handle);
+			return api.fork(handle, body);
+		},
 		// An attach of the fork for `forkView`, the buffer agentpane-mode made
 		// for it before sending (D32 point 3), as well as the operation (D30):
 		// the fork's snapshot, broadcast before its prompt goes out, is bound
@@ -760,13 +919,20 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		// It is `view`'s send still out, refused `busy` beside a prompt from
 		// it, and while it is out nothing attaches the session forked, by any
 		// ref it is known by, from any view (D32 point 4).
-		"sessions/forkAndPrompt": ({ session, view, forkView, ...body }) =>
+		// The fork's turn-done watch arms at the reply, unless its prompt was
+		// handled, from the level the fork's view holds then, as the browser's
+		// `send()` arms it; with `stops`, the parent's watch goes as the
+		// request goes out, the user stopping that turn by forking it
+		// (OW-rihanu, D32 point 6).
+		"sessions/forkAndPrompt": ({ session, view, forkView, stops, ...body }) =>
 			sending(view, async () => {
 				const handle = liveHandle(view);
+				if (stops) unwatch(handle);
 				const forked = [session, state.sessions[handle]?.ref].filter((ref) => ref !== undefined).map(keyOf);
 				forksOut.add(forked);
 				try {
 					const { reply, holder } = await attachingBy(forkView, () => api.forkAndPrompt(handle, body), (reply) => reply.session.handle);
+					if (reply.disposition !== "handled" && reply.session.handle) arm(reply.session.handle);
 					return naming(reply, holder);
 				} finally {
 					forksOut.delete(forked);

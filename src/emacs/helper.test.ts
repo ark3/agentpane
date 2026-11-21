@@ -553,9 +553,13 @@ describe("notifications", () => {
 		await tick();
 		expect(io.out).toEqual([]);
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
-		await io.until(2);
-		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
-		expect(io.out[0]).toMatchObject({ params: { view: 1, handle: h(pi) } });
+		await io.until(3);
+		// The attach's snapshot reads idle the turn the opening one read
+		// streaming: a turn's end, told before any view is bound (D32 point 6).
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/turnEnded", "session/snapshot", 1]);
+		expect(io.out[0]).toMatchObject({ params: { handle: h(pi), watched: false } });
+		expect(io.out[0]!["params"]).not.toHaveProperty("view");
+		expect(io.out[1]).toMatchObject({ params: { view: 1, handle: h(pi) } });
 	});
 
 	it("detaches a session whose seq gaps, attaching nothing, and says nothing more under it until Emacs attaches it again (OW-filuge)", async () => {
@@ -565,7 +569,7 @@ describe("notifications", () => {
 
 		server.emit(status(pi, h(pi), 3));
 		await io.until(3);
-		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, view: 1, handle: h(pi), cause: "gapped" } });
+		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, view: 1, handle: h(pi) } });
 		// A later event under the handle finds no view to gap against again.
 		server.emit(status(pi, h(pi), 4, false));
 		// A gap in a view Emacs never attached is told nothing.
@@ -956,7 +960,7 @@ describe("a handle's end (D26, OW-likopo)", () => {
 			["session/detached", "h1"],
 			["sessions/changed", undefined],
 		]);
-		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, view: 1, handle: "h1", cause: "ended" } });
+		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, view: 1, handle: "h1" } });
 		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
 	});
 
@@ -1097,6 +1101,7 @@ describe("views (D32)", () => {
 			["session/snapshot", "h1", 1],
 			["session/status", "h1", 1],
 			["session/snapshot", "h1", 1],
+			["session/turnEnded", "h1", 1],
 		]);
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: summary(pi, "h1") });
 	});
@@ -1440,6 +1445,270 @@ describe("requests still out (D32 point 4)", () => {
 	});
 });
 
+describe("turn ends (D32 point 6)", () => {
+	/** Each `session/turnEnded` sent so far, as its handle, `watched` and view. */
+	const ended = (io: ReturnType<typeof stdio>) =>
+		io
+			.notifications()
+			.filter((message) => message["method"] === "session/turnEnded")
+			.map((message) => {
+				const params = message["params"] as { handle: string; watched: boolean; view?: number };
+				return [params.handle, params.watched, params.view];
+			});
+
+	const prompt = (io: ReturnType<typeof stdio>, id: number, view = 1) =>
+		io.send({ jsonrpc: "2.0", id, method: "sessions/prompt", params: { session: pi, view, live: true, text: "hello" } });
+
+	it("sends turnEnded watched for a prompt's turn seen streaming and then idle, and nothing for the idle before it streams", async () => {
+		const { io, server } = start({ ...attachScript(pi), "sessions/prompt": () => ({ disposition: "started" }) });
+		await bindView(io, pi, 1);
+		prompt(io, 2);
+		await io.until(3);
+		// Still idle for a beat after the prompt (`watchSessions`): no turn's end.
+		server.emit(status(pi, h(pi), 2, false));
+		await io.until(4);
+		server.emit(status(pi, h(pi), 3, true));
+		server.emit(status(pi, h(pi), 4, false));
+		await io.until(7);
+		expect(io.out.at(-1)).toEqual({ jsonrpc: "2.0", method: "session/turnEnded", params: { session: pi, handle: h(pi), watched: true, view: 1 } });
+		expect(ended(io)).toHaveLength(1);
+		// The watch ended with that turn: the next, from elsewhere, is not watched.
+		server.emit(status(pi, h(pi), 5, true));
+		server.emit(status(pi, h(pi), 6, false));
+		await io.until(10);
+		expect(ended(io)).toEqual([
+			[h(pi), true, 1],
+			[h(pi), false, 1],
+		]);
+	});
+
+	it("sends turnEnded unwatched, naming no view, for a session no view of Emacs's holds", async () => {
+		const { io, server } = start({ "sessions/list": () => ({ sessions: [] }) });
+		server.opening = [snapshot(codex)];
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		await io.until(1);
+		server.emit(status(codex, h(codex), 2, true));
+		server.emit(status(codex, h(codex), 3, false));
+		await io.until(2);
+		expect(io.out.at(-1)).toEqual({ jsonrpc: "2.0", method: "session/turnEnded", params: { session: codex, handle: h(codex), watched: false } });
+	});
+
+	it("arms from the level a prompt finds, so a steer into a running turn, or one an attach by ref finds, raises at its end", async () => {
+		const { io, server } = start({
+			...attachScript(pi),
+			"sessions/prompt": (params, server) => {
+				if (params.handle !== undefined) return { disposition: "started" };
+				server.emit(snapshot(codex, h(codex), { isStreaming: true }));
+				return { disposition: "started", session: summary(codex) };
+			},
+		});
+		await bindView(io, pi, 1);
+		server.emit(status(pi, h(pi), 2, true));
+		await io.until(3);
+		// Each turn's end is the first event after its prompt, so no fold
+		// between reads the level into the watch for it.
+		prompt(io, 2);
+		await io.until(4);
+		server.emit(status(pi, h(pi), 3, false));
+		await io.until(6);
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/prompt", params: { session: codex, view: 2, text: "hello" } });
+		await io.until(8);
+		server.emit(status(codex, h(codex), 2, false));
+		await io.until(10);
+		expect(ended(io)).toEqual([
+			[h(pi), true, 1],
+			[h(codex), true, 2],
+		]);
+	});
+
+	it("leaves no watch for the next turn after a refused prompt, and takes down only the watch a prompt armed (OW-mifuki, OW-zikiga)", async () => {
+		const refusing = { now: true };
+		const { io, server } = start({
+			...attachScript(pi),
+			"sessions/prompt": (params) => {
+				if (refusing.now) throw new ApiClientError("backend_refused", "not now");
+				return { disposition: params.text === "/mcp" ? "handled" : "started" };
+			},
+		});
+		await bindView(io, pi, 1);
+		prompt(io, 2);
+		await io.until(3);
+		server.emit(status(pi, h(pi), 2, true));
+		server.emit(status(pi, h(pi), 3, false));
+		await io.until(6);
+		expect(ended(io)).toEqual([[h(pi), false, 1]]);
+
+		// A prompt's turn running, a second refused and a third handled
+		// beside it, each of which found the first's watch standing.
+		refusing.now = false;
+		prompt(io, 3);
+		await io.until(7);
+		server.emit(status(pi, h(pi), 4, true));
+		await io.until(8);
+		refusing.now = true;
+		prompt(io, 4);
+		await io.until(9);
+		refusing.now = false;
+		io.send({ jsonrpc: "2.0", id: 5, method: "sessions/prompt", params: { session: pi, view: 1, live: true, text: "/mcp" } });
+		await io.until(10);
+		server.emit(status(pi, h(pi), 5, false));
+		await io.until(12);
+		expect(ended(io)).toEqual([
+			[h(pi), false, 1],
+			[h(pi), true, 1],
+		]);
+	});
+
+	it("drops a handled prompt's watch, and its turn's end, streamed or not, raises nothing (OW-yobayi)", async () => {
+		const { io, server } = start({ ...attachScript(pi), "sessions/prompt": () => ({ disposition: "handled" }) });
+		await bindView(io, pi, 1);
+		prompt(io, 2);
+		await io.until(3);
+		server.emit(status(pi, h(pi), 2, true));
+		server.emit(status(pi, h(pi), 3, false));
+		await io.until(6);
+		expect(ended(io)).toEqual([[h(pi), false, 1]]);
+	});
+
+	it("arms a fork and prompt's fork at the reply, and with stops abandons the parent's watch as it goes out", async () => {
+		const { io, server } = start({
+			...attachScript(pi),
+			"sessions/prompt": () => ({ disposition: "started" }),
+			"sessions/forkAndPrompt": (params, server) => {
+				const fork = params.index === 0 ? "h8" : "h9";
+				server.emit(snapshot(codex, fork, { isStreaming: true }));
+				return { session: summary(codex, fork), disposition: "started" };
+			},
+		});
+		await bindView(io, pi, 1);
+		prompt(io, 2);
+		await io.until(3);
+		server.emit(status(pi, h(pi), 2, true));
+		await io.until(4);
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/forkAndPrompt", params: { session: pi, view: 1, forkView: 7, index: 0, text: "again" } });
+		await io.until(6);
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, view: 1, forkView: 8, index: 1, text: "again", stops: true } });
+		await io.until(8);
+		expect(sent(server)).toContainEqual(["sessions/forkAndPrompt", { handle: h(pi), index: 1, text: "again" }]);
+		server.emit(status(codex, "h8", 2, false));
+		server.emit(status(codex, "h9", 2, false));
+		server.emit(status(pi, h(pi), 3, false));
+		await io.until(14);
+		expect(ended(io)).toEqual([
+			["h8", true, 7],
+			["h9", true, 8],
+			[h(pi), false, 1],
+		]);
+	});
+
+	it("drops a view's watch at its detach, at unwatch on an abort, and at a gap, each raising nothing", async () => {
+		const { io, server } = start({
+			"sessions/attach": attaching({ summary: summary(pi) }, { summary: summary(codex) }, { summary: summary(pi, "h3") }),
+			"sessions/prompt": () => ({ disposition: "started" }),
+			"sessions/abort": () => ({ queued: [] }),
+		});
+		await bindView(io, pi, 1);
+		await bindView(io, codex, 2);
+		await bindView(io, pi, 3);
+		for (const [id, view] of [[2, 1], [3, 2], [4, 3]] as const) prompt(io, id, view);
+		await io.until(9);
+		server.emit(status(pi, h(pi), 2, true));
+		server.emit(status(codex, h(codex), 2, true));
+		server.emit(status(pi, "h3", 2, true));
+		await io.until(12);
+		io.send({ jsonrpc: "2.0", id: 5, method: "sessions/detach", params: { session: pi, view: 1 } });
+		io.send({ jsonrpc: "2.0", id: 6, method: "sessions/abort", params: { session: codex, view: 2, unwatch: true } });
+		await io.until(14);
+		// The gap: seq 4 where 3 was due.
+		server.emit(status(pi, "h3", 4, false));
+		server.emit(status(pi, h(pi), 3, false));
+		server.emit(status(codex, h(codex), 3, false));
+		await io.until(18);
+		expect(io.notifications().filter((message) => message["method"] === "session/detached")).toMatchObject([{ params: { view: 3, handle: "h3" } }]);
+		// Attached again under the same handle, which a gap leaves live, a
+		// turn seen streaming and then idle is not the one watched (D25 point 5).
+		await bindView(io, pi, 3);
+		server.emit(status(pi, "h3", 2, true));
+		server.emit(status(pi, "h3", 3, false));
+		await io.until(23);
+		expect(ended(io)).toEqual([
+			[h(pi), false, undefined],
+			[h(codex), false, 2],
+			["h3", false, 3],
+		]);
+	});
+
+	// agentpane-mode's plain Pi fork, pressed after a prompt and before its
+	// turn read streaming: the fork's own stop brings the turn's statuses and
+	// the parent's ended, none of which is news (until ark3/agentpane#17).
+	it("drops a view's watch at unwatch on a plain fork, so the stop the fork brings raises nothing", async () => {
+		const { io, server } = start({
+			...attachScript(pi),
+			"sessions/prompt": () => new Promise<never>(() => {}),
+			"sessions/fork": (_params, server) => {
+				server.emit(status(pi, h(pi), 2, true));
+				server.emit(status(pi, h(pi), 3, false));
+				server.emit({ type: "ended", session: pi, handle: h(pi) });
+				return { ref: codex };
+			},
+		});
+		await bindView(io, pi, 1);
+		prompt(io, 2);
+		await tick();
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/fork", params: { session: pi, view: 1, entryId: "e1", unwatch: true } });
+		await io.until(7);
+		expect(sent(server)).toContainEqual(["sessions/fork", { handle: h(pi), entryId: "e1" }]);
+		expect(io.response(3)).toEqual({ jsonrpc: "2.0", id: 3, result: codex });
+		expect(ended(io)).toEqual([[h(pi), false, 1]]);
+	});
+
+	it("raises a watch seen streaming at the server's ended, ahead of the detached", async () => {
+		const { io, server } = start({ ...attachScript(pi), "sessions/prompt": () => ({ disposition: "started" }) });
+		await bindView(io, pi, 1);
+		prompt(io, 2);
+		await io.until(3);
+		server.emit(status(pi, h(pi), 2, true));
+		server.emit({ type: "ended", session: pi, handle: h(pi) });
+		await io.until(6);
+		expect(io.notifications().slice(-2).map((message) => message["method"])).toEqual(["session/turnEnded", "session/detached"]);
+		expect(ended(io)).toEqual([[h(pi), true, 1]]);
+	});
+
+	it("raises each watch that has seen streaming at a socket close, a prompt still out included, before it exits (D31 point 6)", async () => {
+		const { io, server, done } = start({
+			"sessions/attach": attaching({ summary: summary(pi) }, { summary: summary(codex) }),
+			"sessions/prompt": (params) => (params.handle === h(pi) ? new Promise<never>(() => {}) : { disposition: "started" }),
+		});
+		await bindView(io, pi, 1);
+		await bindView(io, codex, 2);
+		prompt(io, 2, 1);
+		prompt(io, 3, 2);
+		await io.until(5);
+		server.emit(status(pi, h(pi), 2, true));
+		await io.until(6);
+		server.drop(1006);
+		expect(await settled(done)).toBe("resolved");
+		stop = null;
+		// The codex watch never saw its turn stream, and raises nothing.
+		expect(ended(io)).toEqual([[h(pi), true, 1]]);
+		expect(io.response(2)).toBeUndefined();
+	});
+
+	it("sends nothing when its input ends, a watch that has seen streaming standing (D25 point 4)", async () => {
+		const { io, server, done } = start({ ...attachScript(pi), "sessions/prompt": () => ({ disposition: "started" }) });
+		await bindView(io, pi, 1);
+		prompt(io, 2);
+		await io.until(3);
+		server.emit(status(pi, h(pi), 2, true));
+		await io.until(4);
+		io.end();
+		expect(await settled(done)).toBe("resolved");
+		stop = null;
+		await tick();
+		expect(ended(io)).toEqual([]);
+	});
+});
+
 describe("the node throttle (OW-jeruye)", () => {
 	const turn = fixtureMessages().at(-1) as AssistantMessage;
 	const user: PaneMessage = { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 0 };
@@ -1524,10 +1793,10 @@ describe("the node throttle (OW-jeruye)", () => {
 		upsert(1, said("a"));
 		upsert(1, said("ab"));
 		statusTo(false);
-		expect(since()).toEqual(["session/node", "session/status"]);
+		expect(since()).toEqual(["session/node", "session/status", "session/turnEnded"]);
 		expect(textOf(io.out[2]!)).toEqual(["ab"]);
 		vi.advanceTimersByTime(250);
-		expect(since()).toHaveLength(2);
+		expect(since()).toHaveLength(3);
 	});
 
 	it("sends a held node before another node's, each where it was first held, so none is drawn ahead of one before it", async () => {

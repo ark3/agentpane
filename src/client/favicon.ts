@@ -164,8 +164,9 @@ export function watchSessions(
  * ends as a turn ending does, badging an unfocused window, and every watch is
  * dropped: one that never saw its turn stream asked for nothing that is now
  * over, and a reconnect that finds a turn running under the same handle is
- * not one this tab can still tell from another's. agentpane-mode does the
- * same at its helper's death, a deliberate shutdown aside (D25 point 4).
+ * not one this tab can still tell from another's. The Emacs helper runs
+ * this at its own socket's close, and not when its input ends (D32 point 6,
+ * D25 point 4).
  */
 export function watchClose(watch: TurnWatch, hasFocus: boolean): TurnWatch {
 	if (watch.waiting.size === 0) return watch;

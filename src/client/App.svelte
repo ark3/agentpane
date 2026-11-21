@@ -945,8 +945,8 @@
 	 * armed elsewhere, in `send()`, on the fork's own handle (OW-koledi).
 	 *
 	 * A watch already standing on the session, an earlier submit's whose turn
-	 * may be streaming now, is joined rather than armed again, as
-	 * `agentpane--watch-submit` joins one in agentpane-mode. Returns whether
+	 * may be streaming now, is joined rather than armed again, as the Emacs
+	 * helper's `arm` joins one (D32 point 6). Returns whether
 	 * this submit armed one, the only watch its disarm may take down
 	 * (OW-zikiga).
 	 */
@@ -1489,7 +1489,7 @@
 		// its turn can already be streaming: the follow engages on the edited
 		// message's index once that message is in the fork's transcript, and the
 		// watch starts from the level the fork's view holds at the reply, as
-		// agentpane-mode's `agentpane--watch-submit` does. A turn that ends
+		// the Emacs helper's `arm` does (D32 point 6). A turn that ends
 		// before the reply lands leaves the watch for the next turn there, which
 		// takes a whole turn inside the time between the prompt's admission and
 		// its reply, and costs one stray badge.
@@ -1504,8 +1504,9 @@
 		// A watch this tab's own earlier submit armed on the parent is left
 		// alone, except where the fork stops that turn: the user stopped it by
 		// forking it, and a dot for it would announce a turn the user just
-		// stopped, which agentpane-mode drops at the same point (OW-dunahe). It
-		// goes here, as the request does, wherever the label says the fork stops
+		// stopped, which the Emacs helper drops at the same point, on the
+		// edit's `stops` (OW-dunahe, D32 point 6). It goes here, as the
+		// request does, wherever the label says the fork stops
 		// the turn: the server stops it inside the request, and its `status:false`
 		// can reach this tab before the reply does (OW-rihanu). A refusal before
 		// the fork leaves that turn running unwatched, as a failed stop did.

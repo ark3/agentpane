@@ -65,14 +65,13 @@ point 1)."
 (defun agentpane-test--refusing (request)
   "REQUEST, a function in place of `agentpane--request', made to answer
 first what the server refuses (`agentpane-test--refusal') as
-`agentpane--request' answers a refusal: saying so, then running UNSENT,
-and FAILED and ERRED with the refusal in the buffer that sent it."
-  (lambda (method params callback &optional always failed timeout unsent erred replied)
+`agentpane--request' answers a refusal: saying so, then running FAILED
+and ERRED with the refusal in the buffer that sent it."
+  (lambda (method params callback &optional always failed timeout erred)
     (let ((refusal (agentpane-test--refusal method params)))
       (if (not refusal)
-          (funcall request method params callback always failed timeout unsent erred replied)
+          (funcall request method params callback always failed timeout erred)
         (message "agentpane: %s failed: %s" method (plist-get refusal :detail))
-        (when unsent (funcall unsent))
         (when failed (funcall failed))
         (when erred (funcall erred refusal))
         nil))))
@@ -1339,7 +1338,7 @@ ref, and either buffer could take it."
                      (session/node :node ,(agentpane-test--assistant 4 "<p>Stray.</p>"))
                      (session/status :isStreaming t)
                      (session/error :message "Stray" :errorId "e1")
-                     (session/detached :cause "ended")))
+                     (session/detached)))
             (agentpane--on-notification
              agentpane--connection (car notification)
              (append (list :view gone :session ref :handle "h1") (cdr notification))))
@@ -1386,7 +1385,7 @@ said nothing more under."
           (agentpane--on-notification agentpane--connection 'session/snapshot
                                       (list :view (agentpane-test--view buffer) :session ref :handle "h1" :nodes []))
           (agentpane--on-notification agentpane--connection 'session/detached
-                                      (list :view (agentpane-test--view buffer) :session ref :handle "h1" :cause "gapped"))
+                                      (list :view (agentpane-test--view buffer) :session ref :handle "h1"))
           (should (equal (cdr (assq 'sessions/prompt sent))
                          `(:session ,ref :view ,(agentpane-test--view buffer) :text "hello" :priorErrorId nil)))
           (funcall (cdr (pop held)) 'reply)
@@ -1586,10 +1585,10 @@ point 2)."
   "A prompt from a buffer only previewing its session, sent by ref, that
 lands on the handle another buffer holds binds nothing for this one, and
 its reply names the other's view (D32 point 2): the text counts as sent
-here, clearing it, the other buffer is shown in this one's window, and
-the turn-done watch is armed in the other, which holds the handle.  This
-one stays a preview, free to send again."
-  (let ((agentpane--turn-watches nil))
+here, clearing it, and the other buffer is shown in this one's window;
+the helper arms the turn-done watch on the handle the other holds (D32
+point 6).  This one stays a preview, free to send again."
+  (progn
     (agentpane-test--with-helper
       (agentpane-test--held-elsewhere
         (delete-other-windows)
@@ -1606,7 +1605,6 @@ one stays a preview, free to send again."
         (should (member (format "agentpane: this session is open in %s; %s stays a preview"
                                 (buffer-name holder) (buffer-name previewing))
                         said))
-        (should (assoc "h1" agentpane--turn-watches))
         (with-current-buffer previewing
           (should-not (agentpane--attached-p))
           (should-not agentpane--handle)
@@ -2368,12 +2366,9 @@ nil to fail the request as `agentpane--request' fails one on an error
 that carries no `data', running its FAILED alone, or with a plist, the
 error's `data', to fail it so and then run its ERRED with that plist, as
 `agentpane--request' does for an error the helper answered with that
-`data', running its UNSENT first when the plist carries the server's `error'
-code, as the server's refusal does (OW-hiliti).  ERRED runs with nil for a
-failure by nil.  A reply runs the request's REPLIED with it before its
-CALLBACK (OW-kejire).  Either way the answer runs in the buffer that sent the
-request, and to a buffer since killed it runs only UNSENT and REPLIED,
-as `agentpane--request' does.  A request the helper refuses before
+`data' (OW-hiliti).  ERRED runs with nil for a failure by nil.  Either
+way the answer runs in the buffer that sent the request, and to a buffer
+since killed it runs nothing, as `agentpane--request' does.  A request the helper refuses before
 running it, one on a live session from a buffer holding no handle among
 them, is refused so at once and recorded nowhere
 \(`agentpane-test--refusing').  Every buffer BODY made is killed afterwards."
@@ -2398,7 +2393,7 @@ them, is refused so at once and recorded nowhere
                   (apply attach-by args)))
                ((symbol-function 'agentpane--request)
                 (agentpane-test--refusing
-                (lambda (method params callback &optional always failed _timeout unsent erred replied)
+                (lambda (method params callback &optional always failed _timeout erred)
                   (push (cons method params) sent)
                   (when (or (eq method 'sessions/attach)
                             (and (eq method 'sessions/prompt) (not (plist-get params :live))))
@@ -2460,12 +2455,9 @@ them, is refused so at once and recorded nowhere
                                                            (append (list :view holder)
                                                                    (plist-get ok :attached))))))
                                    (if (and ok (atom ok))
-                                       (progn (when replied (funcall replied reply))
-                                              (when (buffer-live-p from)
-                                                (with-current-buffer from
-                                                  (funcall callback reply))))
-                                     (when (and unsent (plist-get ok :error))
-                                       (funcall unsent))
+                                       (when (buffer-live-p from)
+                                         (with-current-buffer from
+                                           (funcall callback reply)))
                                      (when (buffer-live-p from)
                                        (with-current-buffer from
                                          (when failed (funcall failed))
@@ -2759,7 +2751,8 @@ the message it is on."
           (setq sent nil)
           (agentpane-fork)
           (should (equal (assq 'sessions/fork sent)
-                         `(sessions/fork :session ,ref :view ,(agentpane-test--view buffer) :entryId "entry-fix"))))))))
+                         `(sessions/fork :session ,ref :view ,(agentpane-test--view buffer) :entryId "entry-fix"
+                                         :unwatch t))))))))
 
 (ert-deftest agentpane-test-fork-while-attaching-attaches-again ()
   "A second `agentpane-fork' on a previewed buffer while the first one's
@@ -3801,8 +3794,7 @@ handle under the handle \"h1\", and no turn watched or marked done."
 (ert-deftest agentpane-test-detached-send-is-one-prompt ()
   "A send from a buffer not attached is one `sessions/prompt' not marked
 `live' (D30), which the helper sends by ref: the snapshot under the
-buffer's view attaches it, and the turn-done watch is armed at the
-reply, under the handle that snapshot bound, and not before."
+buffer's view attaches it, and the reply frees the buffer."
   (agentpane-test--sending-detached
     (setq hold '(sessions/prompt))
     (agentpane-send)
@@ -3813,30 +3805,26 @@ reply, under the handle that snapshot bound, and not before."
      (list :view agentpane--view :session ref :handle "h1" :isStreaming :json-false :nodes []))
     (should (agentpane--attached-p))
     (should (equal agentpane--handle "h1"))
-    (should-not (assoc "h1" agentpane--turn-watches))
+    (should agentpane--sending)
     (funcall (cdr (pop held)) t)
-    (should (assoc "h1" agentpane--turn-watches))
     (should-not agentpane--sending)
     (should (equal (agentpane-test--draft) ""))))
 
-(ert-deftest agentpane-test-detached-send-handled-arms-no-watch ()
+(ert-deftest agentpane-test-detached-send-handled-says-so ()
   "A detached buffer's prompt the backend handled attaches the buffer and
-arms no turn-done watch, saying no turn was started, as an attached
-buffer's does (OW-yobayi, D30)."
+says no turn was started, as an attached buffer's does (OW-yobayi, D30)."
   (agentpane-test--sending-detached
     (setq prompted '(:disposition "handled"))
     (agentpane-send)
     (should (agentpane--attached-p))
-    (should-not agentpane--turn-watches)
     (should agentpane--handled)
     (should (equal (agentpane-test--draft) ""))))
 
 (ert-deftest agentpane-test-detached-send-refused-keeps-its-text ()
   "A detached buffer's prompt the server refused after attaching its
 session keeps its text, frees the buffer, and leaves it attached by the
-snapshot under its view, the refusal naming that session; it arms no
-turn-done watch.  One refused with nothing attached leaves the buffer
-not attached (D30)."
+snapshot under its view, the refusal naming that session.  One refused
+with nothing attached leaves the buffer not attached (D30)."
   (agentpane-test--sending-detached
     (setq hold '(sessions/prompt))
     (agentpane-send)
@@ -3846,7 +3834,6 @@ not attached (D30)."
     (should (agentpane--attached-p))
     (should (equal agentpane--handle "h1"))
     (should-not agentpane--sending)
-    (should-not agentpane--turn-watches)
     (should (equal (agentpane-test--draft) "hello")))
   (agentpane-test--sending-detached
     (setq hold '(sessions/prompt))
@@ -3872,8 +3859,7 @@ refuses an attach of a session an edit forks (D32 point 4)."
 (ert-deftest agentpane-test-send-while-attaching-goes-out-at-once ()
   "A send while the buffer's own attach is in flight goes out at once, one
 prompt not marked `live', which the helper waits to send on that attach
-and then sends under the handle it bound (D32 point 4); the turn-done
-watch is armed at the prompt's reply, under that handle.  Until
+and then sends under the handle it bound (D32 point 4).  Until
 ark3/agentpane#71 the buffer waited on its attach itself, and sent a
 prompt marked `live' once it had answered."
   (agentpane-test--sending-detached
@@ -3886,9 +3872,8 @@ prompt marked `live' once it had answered."
                                       :priorErrorId nil))))
     (funcall (cdr (pop held)) t)
     (should (equal agentpane--handle "h1"))
-    (should-not (assoc "h1" agentpane--turn-watches))
+    (should agentpane--sending)
     (funcall (cdr (pop held)) t)
-    (should (assoc "h1" agentpane--turn-watches))
     (should-not agentpane--sending)
     (should (equal (agentpane-test--draft) ""))))
 
@@ -4082,7 +4067,7 @@ reads the stored transcript again."
           (should (buffer-live-p buffer))
           (should (equal (agentpane-test--indices) '(5)))
           ;; Let go of, as a gap leaves it.
-          (agentpane--let-go 'gapped)
+          (agentpane--let-go)
           (insert "again")
           (agentpane-send)
           (funcall (cdr (pop held)) nil)
@@ -4302,8 +4287,7 @@ drawn by a snapshot under that handle as the node at index 5 alone, idle
 on the model \"luna\".  Every request is answered as
 `agentpane-test--forking' answers it, and `sent' starts empty."
   (declare (indent 0))
-  `(let ((ref '(:backend "codex" :id "t1"))
-         (agentpane--turn-watches nil))
+  `(let ((ref '(:backend "codex" :id "t1")))
      (agentpane-test--with-helper
        (agentpane-test--forking nil nil
          (setq attached (list :ref ref :handle "h1"))
@@ -4320,12 +4304,11 @@ on the model \"luna\".  Every request is answered as
   "`agentpane-close-session' on an idle attached session sends
 `sessions/close' under the buffer's handle, as the browser's Tools Detach
 sends its DELETE, and once it answers leaves the buffer holding no handle
-and unattached, the turn-done watch on the handle ended, and redrawn from
+and unattached, and redrawn from
 its `sessions/preview', as the browser lands on the read-only preview,
 asking no `sessions/list' first (D26).  A kill after that detaches its
 view alone, which the helper holds no binding for since the `ended'."
   (agentpane-test--closing
-    (push (list "h1" 'sent (list 'claim)) agentpane--turn-watches)
     (with-current-buffer buffer
       (agentpane-close-session)
       (should (equal (reverse sent)
@@ -4333,7 +4316,6 @@ view alone, which the helper holds no binding for since the `ended'."
                        (sessions/preview :session ,ref))))
       (should-not agentpane--handle)
       (should-not (agentpane--attached-p))
-      (should-not (assoc "h1" agentpane--turn-watches))
       (should (equal (agentpane-test--indices)
                      (mapcar (lambda (node) (plist-get node :index)) agentpane-test--nodes)))
       (setq sent nil)
@@ -4597,16 +4579,15 @@ send goes out.  Until ark3/agentpane#71 agentpane-mode sent it."
 (ert-deftest agentpane-test-send-refused-busy-keeps-its-text ()
   "A send the helper refuses `busy', as it refuses one from a view whose
 compact has not answered (D32 point 4), says the helper's text in the
-echo area as any refusal does, keeps the text, frees the buffer to send
-again, and arms no turn-done watch.  A second send while the first is
+echo area as any refusal does, keeps the text, and frees the buffer to
+send again.  A second send while the first is
 out never reaches the helper, so a `busy' never answers it and never
 clears the first's `agentpane--sending'.  Through `agentpane--request'
 over a stub jsonrpc, the refusal built as `toRpcError' in
 src/emacs/helper.ts builds one."
   (let ((ref '(:backend "codex" :id "t1"))
         (detail "a compaction requested from this buffer has not answered")
-        (calls nil)
-        (agentpane--turn-watches nil))
+        (calls nil))
     (agentpane-test--with-helper
       (agentpane-test--noting
         (cl-letf (((symbol-function 'jsonrpc-async-request)
@@ -4624,7 +4605,6 @@ src/emacs/helper.ts builds one."
                      `(:code -32000 :message ,detail :data (:error "busy" :detail ,detail)))
             (should (member (format "agentpane: sessions/prompt failed: %s" detail) said))
             (should-not agentpane--sending)
-            (should-not agentpane--turn-watches)
             (should (equal (agentpane-test--draft) "hello"))
             (agentpane-send)
             (should (= 2 (length calls)))
@@ -4650,7 +4630,7 @@ Until ark3/agentpane#71 it attached first, and marked the status
        (list :view agentpane--view :session ref :handle "h1" :isStreaming :json-false
              :compaction "requesting" :model "luna"))
       (should-error (agentpane-compact) :type 'user-error)
-      (agentpane--let-go 'gapped)
+      (agentpane--let-go)
       (should-error (agentpane-compact) :type 'user-error)
       (should-not sent))))
 
@@ -4918,23 +4898,14 @@ in CWD, else in /tmp."
   "Run BODY with `sessions/list' answered from `listing', a list of
 summaries, filtered by the request's `cwd' as the server filters it, and
 `relist' bound to a function that makes its arguments the listing and
-delivers a `sessions/changed'.  A listing asked for from a buffer in
-`failing', a list BODY may set, fails instead, running its FAILED as
-`agentpane--request' does after an error or a timeout.  One asked for
-while `holding', which BODY may set, is non-nil is answered by neither,
-and is appended to `held' as (LAND . FAIL), two functions that answer it
-later, LAND reading `listing' then.  `agentpane--connection' is a
-stand-in that counts as running, unless BODY binds it.  The finished-turn
-marks start empty, and every buffer BODY made is killed afterwards."
+delivers a `sessions/changed'.  `agentpane--connection' is a stand-in
+that counts as running, unless BODY binds it.  The finished-turn marks
+start empty, and every buffer BODY made is killed afterwards."
   (declare (indent 0))
   `(let* ((listing nil)
-          (failing nil)
-          (holding nil)
-          (held nil)
           (agentpane--connection 'connection)
           (running (symbol-function 'jsonrpc-running-p))
           (buffers (buffer-list))
-          (agentpane--listed-streaming (make-hash-table :test #'equal))
           (agentpane--finished-turns (make-hash-table :test #'equal))
           (relist (lambda (&rest summaries)
                     (setq listing summaries)
@@ -4943,28 +4914,29 @@ marks start empty, and every buffer BODY made is killed afterwards."
                 (lambda (connection)
                   (or (eq connection 'connection) (funcall running connection))))
                ((symbol-function 'agentpane--request)
-                (lambda (method params callback &optional _always failed &rest _)
+                (lambda (method params callback &rest _)
                   (when (eq method 'sessions/list)
-                    (let* ((buffer (current-buffer))
-                           (fail (lambda ()
-                                   (when failed
-                                     (with-current-buffer buffer (funcall failed)))))
-                           (land (lambda ()
-                                   (let ((cwd (plist-get params :cwd)))
-                                     (with-current-buffer buffer
-                                       (funcall callback
-                                                (vconcat (seq-filter
-                                                          (lambda (summary)
-                                                            (or (null cwd)
-                                                                (equal (plist-get summary :cwd) cwd)))
-                                                          listing))))))))
-                      (cond (holding (setq held (append held (list (cons land fail)))))
-                            ((memq buffer failing) (funcall fail))
-                            (t (funcall land))))))))
+                    (let ((cwd (plist-get params :cwd)))
+                      (funcall callback
+                               (vconcat (seq-filter
+                                         (lambda (summary)
+                                           (or (null cwd)
+                                               (equal (plist-get summary :cwd) cwd)))
+                                         listing))))))))
        (unwind-protect
            (save-window-excursion ,@body)
          (dolist (buffer (buffer-list))
            (unless (memq buffer buffers) (kill-buffer buffer)))))))
+
+(defun agentpane-test--turn-ended (id &optional watched view)
+  "Deliver the helper's `session/turnEnded' for the Pi session ID under the
+handle `h-ID', as `agentpane-test--summary' lists it, WATCHED or not, and
+naming VIEW where given (D32 point 6)."
+  (agentpane--on-notification
+   nil 'session/turnEnded
+   (append (list :session (list :backend "pi" :id id) :handle (concat "h-" id)
+                 :watched (if watched t :json-false))
+           (and view (list :view view)))))
 
 (defun agentpane-test--show (buffer)
   "Show BUFFER in the selected window, and run the hook redisplay runs for a
@@ -5016,10 +4988,11 @@ finished-turn mark."
         (not (eq found 'unmarked))))))
 
 (ert-deftest agentpane-test-picker-marks-a-turn-that-finished-unseen ()
-  "A session whose turn ends while no window shows its transcript keeps a
-finished-turn mark through later listings, until a window shows it; one
-whose transcript is shown when its turn ends, and one never seen
-streaming, are not marked."
+  "A session whose turn ends, as the helper's `session/turnEnded' says,
+while no window shows its transcript is marked at once, watched or not,
+and keeps the mark through later listings, until a window shows it; one
+whose transcript is shown when its turn ends, and one whose turn did not
+end, are not marked (D32 point 6)."
   (agentpane-test--listing
     (let ((unseen (agentpane--transcript-buffer (agentpane-test--summary "a" nil)))
           (seen (agentpane--transcript-buffer (agentpane-test--summary "b" nil)))
@@ -5031,10 +5004,8 @@ streaming, are not marked."
       (set-window-buffer (selected-window) seen)
       (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
                (agentpane-test--summary "c" nil))
-      (funcall relist (agentpane-test--summary "a" t) (agentpane-test--summary "b" t)
-               (agentpane-test--summary "c" nil))
-      (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
-               (agentpane-test--summary "c" nil))
+      (agentpane-test--turn-ended "a")
+      (agentpane-test--turn-ended "b" t)
       (should (agentpane-test--finished-p picker "h-a"))
       (should-not (agentpane-test--finished-p picker "h-b"))
       (should-not (agentpane-test--finished-p picker "h-c"))
@@ -5239,28 +5210,10 @@ another project has no mark when its own project is listed again (OW-yufahi)."
       (let ((a (agentpane-test--holding (agentpane-test--summary "a" nil one)))
             (picker (agentpane-test--pick one)))
         (funcall relist (agentpane-test--summary "a" nil one) (agentpane-test--summary "b" nil two))
-        (funcall relist (agentpane-test--summary "a" t one) (agentpane-test--summary "b" nil two))
-        (funcall relist (agentpane-test--summary "a" nil one) (agentpane-test--summary "b" nil two))
+        (agentpane-test--turn-ended "a")
         (should (agentpane-test--finished-p picker "h-a"))
         (agentpane-test--pick two)
         (agentpane-test--show a)
-        (agentpane-test--show picker)
-        (agentpane-test--pick one)
-        (should-not (agentpane-test--finished-p picker "h-a"))))))
-
-(ert-deftest agentpane-test-picker-does-not-mark-a-turn-watched-while-filtered-out ()
-  "A session listed streaming whose turn ends, while the picker lists another
-project, with its transcript on screen is not marked when its own project is
-listed again after the user looked away (OW-yufahi)."
-  (agentpane-test--with-directories (one two)
-    (agentpane-test--listing
-      (let ((a (agentpane-test--holding (agentpane-test--summary "a" nil one)))
-            (picker (agentpane-test--pick one)))
-        (funcall relist (agentpane-test--summary "a" nil one) (agentpane-test--summary "b" nil two))
-        (funcall relist (agentpane-test--summary "a" t one) (agentpane-test--summary "b" nil two))
-        (agentpane-test--pick two)
-        (agentpane-test--show a)
-        (funcall relist (agentpane-test--summary "a" nil one) (agentpane-test--summary "b" nil two))
         (agentpane-test--show picker)
         (agentpane-test--pick one)
         (should-not (agentpane-test--finished-p picker "h-a"))))))
@@ -5270,15 +5223,14 @@ listed again after the user looked away (OW-yufahi)."
 snapshot under its view, drops the mark
 at the next redisplay, with no window changing buffer (OW-yufahi,
 OW-piweyi): the binding itself sets the flag that makes redisplay run the
-hook."
+hook, which the mark's `session/turnEnded' installed."
   (agentpane-test--listing
     (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer)))
           (x (agentpane--transcript-buffer (list :ref '(:backend "pi" :id "x"))))
           (y (agentpane--transcript-buffer (list :ref '(:backend "pi" :id "y")))))
       (agentpane-test--show x)
       (funcall relist (agentpane-test--summary "a" nil))
-      (funcall relist (agentpane-test--summary "a" t))
-      (funcall relist (agentpane-test--summary "a" nil))
+      (agentpane-test--turn-ended "a")
       (should (agentpane-test--finished-p picker "h-a"))
       (agentpane--on-notification
        agentpane--connection 'session/snapshot
@@ -5287,8 +5239,8 @@ hook."
       (agentpane-test--redisplay)
       (should-not (agentpane-test--finished-p picker "h-a"))
       (agentpane-test--show y)
-      (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "c" t))
       (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "c" nil))
+      (agentpane-test--turn-ended "c")
       (should (agentpane-test--finished-p picker "h-c"))
       (agentpane--on-notification
        nil 'session/snapshot
@@ -5298,163 +5250,22 @@ hook."
       (agentpane-test--redisplay)
       (should-not (agentpane-test--finished-p picker "h-c")))))
 
-(ert-deftest agentpane-test-new-picker-does-not-mark-a-turn-that-ended-with-no-picker ()
-  "A session listed streaming by a picker since killed, or since turned to
-another major mode, whose turn ended while there was none, is not marked by
-a new picker's listing: nothing observed the end, watched or not
-\(OW-yufahi, OW-wazipa)."
-  (dolist (gone (list #'kill-buffer
-                      (lambda (buffer) (with-current-buffer buffer (fundamental-mode)))))
-    (agentpane-test--listing
-      (let ((a (agentpane-test--holding (agentpane-test--summary "a" nil))))
-        (save-window-excursion (agentpane-sessions t))
-        (funcall relist (agentpane-test--summary "a" t))
-        (funcall gone (get-buffer "*agentpane sessions*"))
-        (setq listing (list (agentpane-test--summary "a" nil)))
-        (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
-          (should-not (eq (window-buffer (selected-window)) a))
-          (should-not (agentpane-test--finished-p picker "h-a")))))))
-
-(ert-deftest agentpane-test-new-picker-keeps-the-levels-a-live-picker-reads ()
-  "A second picker, made while the first still lists, does not wipe the
-streaming level the first read: a turn that ends before the second's
-first listing is marked (OW-wazipa)."
+(ert-deftest agentpane-test-turn-ended-marks-a-row-with-no-picker-open ()
+  "A turn that ends unseen while no picker is open, or before any listing
+has read the session streaming, is marked by its `session/turnEnded', and
+the first picker opened after draws the mark, as the browser's sidebar
+marks it (D32 point 6, D26).  Until D32 only a picker's listings made the
+mark, and a new picker marked nothing that ended before it."
   (agentpane-test--listing
-    (let ((first (save-window-excursion (agentpane-sessions t) (current-buffer))))
-      (with-current-buffer first (rename-buffer "*agentpane sessions: first*"))
-      (funcall relist (agentpane-test--summary "a" nil))
-      (funcall relist (agentpane-test--summary "a" t))
-      (setq listing (list (agentpane-test--summary "a" nil)))
-      (let ((second (save-window-excursion (agentpane-sessions t) (current-buffer))))
-        (should-not (eq second first))
-        (funcall relist (agentpane-test--summary "a" nil))
-        (should (agentpane-test--finished-p first "h-a"))
-        (should (agentpane-test--finished-p second "h-a"))))))
-
-(ert-deftest agentpane-test-picker-gone-keeps-the-levels-another-picker-reads ()
-  "A picker killed, or turned to another major mode, while a second still
-lists, does not wipe the streaming level the second read: a turn that ends
-after is marked (OW-wazipa)."
-  (dolist (gone (list #'kill-buffer
-                      (lambda (buffer) (with-current-buffer buffer (fundamental-mode)))))
-    (agentpane-test--listing
-      (let ((first (save-window-excursion (agentpane-sessions t) (current-buffer))))
-        (with-current-buffer first (rename-buffer "*agentpane sessions: first*"))
-        (let ((second (save-window-excursion (agentpane-sessions t) (current-buffer))))
-          (funcall relist (agentpane-test--summary "a" nil))
-          (funcall relist (agentpane-test--summary "a" t))
-          (funcall gone first)
-          (funcall relist (agentpane-test--summary "a" nil))
-          (should (agentpane-test--finished-p second "h-a")))))))
-
-(ert-deftest agentpane-test-picker-does-not-mark-a-turn-that-ended-while-its-listing-failed ()
-  "A session listed streaming, whose turn ended while the only picker's
-listing failed, is not marked by the next listing that lands: nothing
-observed the end, watched or not (OW-vehuji)."
-  (agentpane-test--listing
-    (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
-      (funcall relist (agentpane-test--summary "a" nil))
-      (funcall relist (agentpane-test--summary "a" t))
-      (setq failing (list picker))
-      (funcall relist (agentpane-test--summary "a" nil))
-      (setq failing nil)
-      (funcall relist (agentpane-test--summary "a" nil))
-      (should-not (agentpane-test--finished-p picker "h-a")))))
-
-(ert-deftest agentpane-test-failed-listing-keeps-the-levels-another-picker-reads ()
-  "A picker whose listing fails while a second's listings still land does
-not wipe the streaming level the second read: a turn that ends after is
-marked (OW-vehuji, as OW-wazipa for a picker gone)."
-  (agentpane-test--listing
-    (let ((first (save-window-excursion (agentpane-sessions t) (current-buffer))))
-      (with-current-buffer first (rename-buffer "*agentpane sessions: first*"))
-      (let ((second (save-window-excursion (agentpane-sessions t) (current-buffer))))
-        (funcall relist (agentpane-test--summary "a" nil))
-        (funcall relist (agentpane-test--summary "a" t))
-        (setq failing (list first))
-        (with-current-buffer first (revert-buffer))
-        (funcall relist (agentpane-test--summary "a" nil))
-        (should (agentpane-test--finished-p second "h-a"))))))
-
-(ert-deftest agentpane-test-new-picker-keeps-the-levels-of-a-picker-gone-before-it-lands ()
-  "A second picker, whose first listing goes out while the first picker
-still lists, keeps the streaming level the first read though the first
-goes before that listing lands: a turn that ended meanwhile is marked
-\(OW-vehuji, as OW-wazipa for a picker gone after)."
-  (agentpane-test--listing
-    (let ((first (save-window-excursion (agentpane-sessions t) (current-buffer))))
-      (with-current-buffer first (rename-buffer "*agentpane sessions: first*"))
-      (funcall relist (agentpane-test--summary "a" nil))
-      (funcall relist (agentpane-test--summary "a" t))
-      (setq holding t)
-      (let ((second (save-window-excursion (agentpane-sessions t) (current-buffer))))
-        (setq holding nil)
-        (should (= (length held) 1))
-        (kill-buffer first)
-        (setq listing (list (agentpane-test--summary "a" nil)))
-        (funcall (car (pop held)))
-        (should (agentpane-test--finished-p second "h-a"))))))
-
-(ert-deftest agentpane-test-superseded-listing-failing-keeps-the-levels ()
-  "A picker's listing that fails after a later one of its own went out
-breaks nothing, whether the later one landed before or lands after: a
-turn the later one reads ended is marked, and so is one that ends after
-\(OW-vehuji)."
-  (dolist (later-lands-first '(t nil))
-    (agentpane-test--listing
+    (setq listing (list (agentpane-test--summary "a" nil)))
+    (let ((a (agentpane-test--holding (agentpane-test--summary "a" nil))))
+      (should-not (get-buffer "*agentpane sessions*"))
+      (agentpane-test--turn-ended "a")
+      (should (memq #'agentpane--clear-seen-turns
+                    (default-value 'window-state-change-functions)))
       (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
-        (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil))
-        (funcall relist (agentpane-test--summary "a" t) (agentpane-test--summary "b" t))
-        (setq holding t)
-        (funcall relist (agentpane-test--summary "a" t) (agentpane-test--summary "b" t))
-        (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" t))
-        (setq holding nil)
-        (let ((superseded (pop held))
-              (later (pop held)))
-          (if later-lands-first
-              (progn (funcall (car later)) (funcall (cdr superseded)))
-            (funcall (cdr superseded))
-            (funcall (car later))))
-        (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil))
-        (should (agentpane-test--finished-p picker "h-a"))
-        (should (agentpane-test--finished-p picker "h-b"))))))
-
-(ert-deftest agentpane-test-listing-landing-after-the-teardown-keeps-the-levels ()
-  "A listing that went out through a helper, and whose reply lands only
-after that helper's teardown, as one jsonrpc.el held back behind a
-synchronous request does (`agentpane--request'), reads levels unbroken up
-to it: the turn it reads ended is marked (OW-vehuji)."
-  (agentpane-test--listing
-    (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
-      (funcall relist (agentpane-test--summary "a" nil))
-      (funcall relist (agentpane-test--summary "a" t))
-      (setq holding t)
-      (funcall relist (agentpane-test--summary "a" nil))
-      (setq holding nil)
-      (let ((agentpane--connection nil))
-        (funcall (car (pop held))))
-      (should (agentpane-test--finished-p picker "h-a")))))
-
-(ert-deftest agentpane-test-picker-does-not-mark-a-turn-that-ended-while-the-helper-was-gone ()
-  "A session listed streaming through a helper that has since exited and
-been torn down, whose turn ended meanwhile, is not marked by the first
-listing through the next helper: nothing observed the end, watched or not
-\(OW-vehuji)."
-  (agentpane-test--listing
-    (let ((agentpane--connection nil)
-          (replacement nil))
-      (cl-letf (((symbol-function 'agentpane--start-helper) #'agentpane-test--mute-helper))
-        (unwind-protect
-            (let ((dead (agentpane--connection))
-                  (picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
-              (funcall relist (agentpane-test--summary "a" nil))
-              (funcall relist (agentpane-test--summary "a" t))
-              (kill-process (jsonrpc--process dead))
-              (agentpane-test--heard-out dead)
-              (setq replacement (agentpane--connection))
-              (funcall relist (agentpane-test--summary "a" nil))
-              (should-not (agentpane-test--finished-p picker "h-a")))
-          (agentpane-test--end-helper replacement))))))
+        (should-not (eq (window-buffer (selected-window)) a))
+        (should (agentpane-test--finished-p picker "h-a"))))))
 
 (ert-deftest agentpane-test-picker-keeps-a-mark-through-the-helpers-death-until-opened ()
   "A session whose turn ended unseen keeps its finished-turn mark through
@@ -5462,8 +5273,9 @@ the death of the helper its transcript was attached through, and through
 the first listing by the next, until it is opened from the picker, which
 drops the mark (owner, 2026-11-20, ark3/agentpane#64): the browser's
 \"keeps a finished-turn marker through a socket drop until its row is
-selected\".  The death leaves the buffer holding no handle, so only its
-ref finds it as seen."
+selected\".  The mark is made by `session/turnEnded' (D32 point 6).  The
+death leaves the buffer holding no handle, so only its ref finds it as
+seen."
   (agentpane-test--listing
     (let ((agentpane--connection nil)
           (replacement nil))
@@ -5474,8 +5286,7 @@ ref finds it as seen."
                    (picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
               (with-current-buffer a (setq agentpane--attached dead))
               (funcall relist (agentpane-test--summary "a" nil))
-              (funcall relist (agentpane-test--summary "a" t))
-              (funcall relist (agentpane-test--summary "a" nil))
+              (agentpane-test--turn-ended "a")
               (should (agentpane-test--finished-p picker "h-a"))
               (kill-process (jsonrpc--process dead))
               (agentpane-test--heard-out dead)
@@ -5494,17 +5305,15 @@ ref finds it as seen."
 
 (ert-deftest agentpane-test-picker-forgets-a-handle-the-server-let-go ()
   "A handle the listing no longer carries, which the server never mints
-again, leaves both the streaming levels and the marks (OW-wazipa)."
+again, leaves the marks (OW-wazipa)."
   (agentpane-test--listing
     (save-window-excursion (agentpane-sessions t))
     (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil))
-    (funcall relist (agentpane-test--summary "a" t) (agentpane-test--summary "b" t))
-    (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" t))
+    (agentpane-test--turn-ended "a")
+    (agentpane-test--turn-ended "b")
     (should (gethash "h-a" agentpane--finished-turns))
-    (funcall relist (agentpane-test--summary "c" nil))
-    (should (equal (list (hash-table-keys agentpane--listed-streaming)
-                         (hash-table-keys agentpane--finished-turns))
-                   '(("h-c") nil)))))
+    (funcall relist (agentpane-test--summary "b" nil) (agentpane-test--summary "c" nil))
+    (should (equal (hash-table-keys agentpane--finished-turns) '("h-b")))))
 
 (ert-deftest agentpane-test-picker-marks-a-turn-shown-only-in-a-background-tty-frame ()
   "A transcript shown only in a text terminal's frame that is not the one
@@ -5519,12 +5328,13 @@ Batch Emacs has no text terminal, so `tty-top-frame' answers as one would."
         (agentpane-test--show a)
         (setq top 'another-frame)
         (funcall relist (agentpane-test--summary "a" nil))
-        (funcall relist (agentpane-test--summary "a" t))
-        (funcall relist (agentpane-test--summary "a" nil))
+        (agentpane-test--turn-ended "a")
         (should (agentpane-test--finished-p picker "h-a"))
         (setq top (selected-frame))
-        (funcall relist (agentpane-test--summary "a" t))
+        ;; The listing drops the mark of a session now seen, and its next
+        ;; turn's end marks nothing.
         (funcall relist (agentpane-test--summary "a" nil))
+        (agentpane-test--turn-ended "a")
         (should-not (agentpane-test--finished-p picker "h-a"))))))
 
 (ert-deftest agentpane-test-picker-mark-cleared-when-its-tty-frame-is-raised ()
@@ -5544,8 +5354,7 @@ text terminal, so `tty-top-frame' answers as one would."
         (agentpane-test--show a)
         (setq top 'another-frame)
         (funcall relist (agentpane-test--summary "a" nil))
-        (funcall relist (agentpane-test--summary "a" t))
-        (funcall relist (agentpane-test--summary "a" nil))
+        (agentpane-test--turn-ended "a")
         (should (agentpane-test--finished-p picker "h-a"))
         (setq top (selected-frame))
         (with-temp-buffer
@@ -5571,12 +5380,10 @@ Batch Emacs has no text terminal and makes no child frame, so
                    (if (eq (or frame (selected-frame)) (selected-frame)) 'root-frame frame))))
         (agentpane-test--show a)
         (funcall relist (agentpane-test--summary "a" nil))
-        (funcall relist (agentpane-test--summary "a" t))
-        (funcall relist (agentpane-test--summary "a" nil))
+        (agentpane-test--turn-ended "a")
         (should-not (agentpane-test--finished-p picker "h-a"))
         (setq top 'another-frame)
-        (funcall relist (agentpane-test--summary "a" t))
-        (funcall relist (agentpane-test--summary "a" nil))
+        (agentpane-test--turn-ended "a")
         (should (agentpane-test--finished-p picker "h-a"))))))
 
 ;;;; The turn-done indicator, against a stub connection
@@ -5585,14 +5392,16 @@ Batch Emacs has no text terminal and makes no child frame, so
   "Run BODY in a transcript buffer attached under the handle \"h1\", not
 shown in any window, with every request answered as
 `agentpane-test--forking' answers it, an attach naming that handle, and no
-turn watched or marked done.  `status' is bound to a function that
+turn marked done.  `status' is bound to a function that
 delivers a `session/status' under the handle the buffer holds, reading
 streaming when its argument is non-nil, and `submit' to one that types a
-prompt and sends it."
+prompt and sends it, and `ended' to one that delivers the helper's
+`session/turnEnded' for that handle under the buffer's view, watched
+when its argument is non-nil."
   (declare (indent 0))
   `(let ((ref '(:backend "codex" :id "t1"))
          (agentpane--turns-done nil)
-         (agentpane--turn-watches nil))
+         (agentpane--finished-turns (make-hash-table :test #'equal)))
      (agentpane-test--with-helper
        (agentpane-test--forking nil nil
          (agentpane-test--with-session ref
@@ -5607,8 +5416,13 @@ prompt and sends it."
                  (submit (lambda ()
                            (goto-char (point-max))
                            (insert "hello")
-                           (agentpane-send))))
-             (ignore status submit)
+                           (agentpane-send)))
+                 (ended (lambda (watched)
+                          (agentpane--on-notification
+                           nil 'session/turnEnded
+                           (list :session ref :handle "h1" :view (buffer-local-value 'agentpane--view buffer)
+                                 :watched (if watched t :json-false))))))
+             (ignore status submit ended)
              ,@body))))))
 
 (defun agentpane-test--turn-done-p ()
@@ -5629,15 +5443,20 @@ entries."
                  global-mode-string)))
 
 (ert-deftest agentpane-test-turn-done-raised-unseen-and-cleared-on-show ()
-  "A turn this Emacs submitted that ends while no window shows its buffer
-raises the indicator, and showing the buffer clears it (OW-lohavi)."
+  "A `session/turnEnded' for a turn this Emacs watched, ended in a buffer
+no window shows, raises the indicator and marks the session's row, and
+showing the buffer clears both (OW-lohavi, D32 point 6)."
   (agentpane-test--submitting
     (funcall submit)
     (funcall status t)
     (funcall status nil)
+    (should-not (agentpane-test--turn-done-p))
+    (funcall ended t)
     (should (agentpane-test--turn-done-p))
+    (should (gethash "h1" agentpane--finished-turns))
     (agentpane-test--show buffer)
-    (should-not (agentpane-test--turn-done-p))))
+    (should-not (agentpane-test--turn-done-p))
+    (should-not (gethash "h1" agentpane--finished-turns))))
 
 (ert-deftest agentpane-test-turn-done-raised-beside-a-users-own-construct ()
   "A `global-mode-string' the user set to a single mode-line construct, a
@@ -5649,148 +5468,43 @@ and the status that ends the turn still reaches the mode line (OW-ratati)."
         (funcall submit)
         (funcall status t)
         (funcall status nil)
+        (funcall ended t)
         (should-not (member "streaming" agentpane--status-fields))
         (should (agentpane-test--turn-done-p))
         (should (member own global-mode-string))))))
 
 (ert-deftest agentpane-test-turn-done-not-raised-for-a-turn-not-submitted-here ()
-  "A turn this Emacs did not submit, one prompted from elsewhere, raises
-nothing when it ends unseen (OW-lohavi)."
+  "A `session/turnEnded' not watched, a turn this Emacs did not submit,
+raises nothing when it ends unseen, though it marks the session's row
+\(OW-lohavi, D32 point 6)."
   (agentpane-test--submitting
-    (funcall status t)
-    (funcall status nil)
-    (should-not (agentpane-test--turn-done-p))))
-
-(ert-deftest agentpane-test-turn-done-not-raised-by-the-idle-status-after-submit ()
-  "The not-streaming status that still stands just after a submit raises
-nothing, and the watch stays armed for the turn's real end (OW-lohavi)."
-  (agentpane-test--submitting
-    (funcall submit)
-    (funcall status nil)
-    (funcall status nil)
+    (funcall ended nil)
     (should-not (agentpane-test--turn-done-p))
-    (funcall status t)
-    (funcall status nil)
-    (should (agentpane-test--turn-done-p))))
+    (should (gethash "h1" agentpane--finished-turns))))
 
 (ert-deftest agentpane-test-turn-done-not-raised-for-a-turn-that-ended-in-view ()
-  "A submitted turn that ends while a window shows its buffer raises
-nothing, and ends the watch, so a later turn from elsewhere that ends
-unseen raises nothing either (OW-lohavi)."
+  "A watched turn that ends while a window shows its buffer raises
+nothing and marks nothing (OW-lohavi)."
   (agentpane-test--submitting
-    (funcall submit)
-    (funcall status t)
     (agentpane-test--show buffer)
-    (funcall status nil)
+    (funcall ended t)
     (should-not (agentpane-test--turn-done-p))
-    (agentpane-test--show (get-buffer-create "*scratch*"))
-    (funcall status t)
-    (funcall status nil)
-    (should-not (agentpane-test--turn-done-p))))
+    (should-not (gethash "h1" agentpane--finished-turns))))
 
-(ert-deftest agentpane-test-turn-done-not-raised-after-a-refused-prompt ()
-  "A prompt the server refused arms nothing, so a turn from elsewhere that
-then ends unseen raises nothing (OW-lohavi)."
-  (agentpane-test--submitting
-    (setq hold '(sessions/prompt))
-    (funcall submit)
-    (funcall (cdr (pop held)) '(:error "backend_refused"))
-    (funcall status t)
-    (funcall status nil)
-    (should-not (agentpane-test--turn-done-p))))
-
-(ert-deftest agentpane-test-turn-done-kept-armed-by-a-prompt-refused-mid-turn ()
-  "A prompt the server refuses mid-turn leaves the watch the turn's own
-prompt armed, so the turn's end still raises the indicator (OW-lohavi)."
-  (agentpane-test--submitting
-    (funcall submit)
-    (funcall status t)
-    (setq hold '(sessions/prompt))
-    (funcall submit)
-    (funcall (cdr (pop held)) '(:error "backend_refused"))
-    (funcall status nil)
-    (should (agentpane-test--turn-done-p))))
-
-(ert-deftest agentpane-test-turn-done-not-raised-after-a-handled-prompt ()
+(ert-deftest agentpane-test-handled-prompt-says-so-until-the-next-send ()
   "A prompt the backend answered as handled, a Pi extension command such
-as `/mcp' that starts no turn for it, drops the watch it armed, clears the
-draft as a sent prompt does, and has the buffer say no turn was started
-for it, until the next send (OW-taviju).
-The turn that then ends unseen raises nothing, though it may be one the
-handling extension started of its own, as Pi's `/ask' does: nothing on the
-stream tells it from a turn prompted elsewhere, and the indicator must
-never be raised for a turn this Emacs did not ask for, as the browser
-decided (OW-yobayi).  That holds only when the answer comes before the
-turn's events, as here: on `pi 1.2.0' the handler runs before Pi answers,
-so a turn it starts, or another client's, can stream and end first and
-raise the indicator, which stays raised (OW-kejire)."
+as `/mcp' that starts no turn for it, clears the draft as a sent prompt
+does, and has the buffer say no turn was started for it, until the next
+send (OW-taviju).  The helper drops the turn-done watch it armed (D32
+point 6)."
   (agentpane-test--submitting
     (setq prompted '(:disposition "handled"))
     (funcall submit)
-    (should-not (assoc "h1" agentpane--turn-watches))
     (should (equal (agentpane-test--draft) ""))
     (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
-    (funcall status t)
-    (funcall status nil)
-    (should-not (agentpane-test--turn-done-p))
     (setq prompted nil)
     (funcall submit)
-    (should-not (agentpane-test--above-prompt))
-    (funcall status t)
-    (funcall status nil)
-    (should (agentpane-test--turn-done-p))))
-
-(ert-deftest agentpane-test-turn-done-kept-armed-by-a-prompt-handled-mid-turn ()
-  "A prompt handled while a turn this Emacs submitted runs joined that
-turn's watch and takes back only its own claim, so the turn's end still
-raises the indicator, as a prompt refused mid-turn leaves it (OW-taviju,
-OW-kakasu)."
-  (agentpane-test--submitting
-    (funcall submit)
-    (funcall status t)
-    (setq prompted '(:disposition "handled"))
-    (funcall submit)
-    (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
-    (funcall status nil)
-    (should (agentpane-test--turn-done-p))))
-
-(ert-deftest agentpane-test-turn-done-dropped-by-a-handled-answer-after-streaming ()
-  "A handled answer that comes while the turn its prompt armed for is
-already streaming, as on `pi 1.2.0' a turn the extension's handler starts
-can, still drops that watch, so the turn's end raises nothing, as the
-browser's `disarmSubmit' drops a watch that has seen streaming
-\(OW-kejire, OW-zikiga)."
-  (agentpane-test--submitting
-    (setq prompted '(:disposition "handled")
-          hold '(sessions/prompt))
-    (funcall submit)
-    (funcall status t)
-    (funcall (cdr (pop held)) t)
-    (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
-    (funcall status nil)
-    (should-not (agentpane-test--turn-done-p))))
-
-(ert-deftest agentpane-test-turn-done-kept-raised-by-a-handled-answer-after-the-turn ()
-  "A turn that streams and ends unseen before its prompt's handled answer
-has raised the indicator, and the answer leaves it raised, as the
-browser's `disarmSubmit' leaves its badge: nothing tells that turn from
-one this Emacs asked for, and missing it costs a glance (OW-kejire,
-OW-zikiga).  The answer takes back only its own prompt's claim, which
-went with the ended watch, so one armed on the handle since, as by a
-prompt from another buffer holding it, still stands on its own claim
-\(OW-kakasu)."
-  (agentpane-test--submitting
-    (setq prompted '(:disposition "handled")
-          hold '(sessions/prompt))
-    (funcall submit)
-    (funcall status t)
-    (funcall status nil)
-    (should (agentpane-test--turn-done-p))
-    (let ((later (agentpane--watch-submit)))
-      (funcall (cdr (pop held)) t)
-      (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
-      (should (agentpane-test--turn-done-p))
-      (should (memq later (cddr (assoc "h1" agentpane--turn-watches)))))))
+    (should-not (agentpane-test--above-prompt))))
 
 (defconst agentpane-test--slash-warning
   "Agentpane does not run slash commands — depending on the agent, this may run as a command or be read as plain text."
@@ -5862,8 +5576,7 @@ draft starts with `/', and gets it back once it stops (OW-sidese)."
 
 (ert-deftest agentpane-test-edit-send-handled-says-so-in-the-fork ()
   "An edit's send whose prompt the fork's backend handled ends the edit,
-arms no watch on the fork, and says no turn was started in the fork's
-buffer, where the prompt went, taking down the line a handled prompt left
+and says no turn was started in the fork's buffer, where the prompt went, taking down the line a handled prompt left
 in the parent (OW-taviju)."
   (agentpane-test--watching
     (agentpane-test--editing "pi"
@@ -5877,270 +5590,54 @@ in the parent (OW-taviju)."
       (should-not (agentpane-test--above-prompt))
       (with-current-buffer (agentpane--buffer-for '(:backend "pi" :id "fork"))
         (should (equal agentpane--handle "h2"))
-        (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line)))
-      (should-not agentpane--turn-watches))))
-
-(ert-deftest agentpane-test-turn-done-raised-for-a-running-turn-a-prompt-joins ()
-  "A prompt sent while a turn from elsewhere streams, which the server takes
-into that turn with no fresh streaming status, makes that turn this Emacs's:
-its end raises the indicator, and the watch ends with it, so a later turn
-from elsewhere raises nothing (OW-lohavi)."
-  (agentpane-test--submitting
-    (funcall status t)
-    (funcall submit)
-    (funcall status nil)
-    (should (agentpane-test--turn-done-p))
-    (agentpane-test--show buffer)
-    (agentpane-test--show (get-buffer-create "*scratch*"))
-    (should-not (agentpane-test--turn-done-p))
-    (funcall status t)
-    (funcall status nil)
-    (should-not (agentpane-test--turn-done-p))))
-
-(ert-deftest agentpane-test-turn-done-one-watch-per-handle ()
-  "A second prompt accepted into a running turn, as a Codex steer, joins
-the watch the first armed rather than arming one of its own, so the
-turn's end in view ends the only watch on the handle, and a later
-not-streaming status while the buffer is unseen, such as a model
-change's, raises nothing (OW-dunahe)."
-  (agentpane-test--submitting
-    (let ((global-mode-string global-mode-string))
-      (agentpane-test--show buffer)
-      (funcall submit)
-      (funcall status t)
-      (funcall submit)
-      (funcall status nil)
-      (agentpane-test--show (get-buffer-create "*scratch*"))
-      (funcall status nil)
-      (should-not (agentpane-test--turn-done-p)))))
-
-(defun agentpane-test--attach-to-a-running-turn (late)
-  "Send from a previewed buffer, holding no handle, one prompt whose
-attach finds a turn from elsewhere streaming under the handle \"h1\", its
-snapshot handled before the prompt's reply, as the helper writes them,
-the buffer taking the handle from the snapshot and arming the watch at
-the reply (D30); then end that turn unseen, and
-return whether the indicator is raised.  When LATE, a status the helper
-wrote after the snapshot, the turn still streaming, is handled before
-the reply, as when jsonrpc.el holds the reply back behind a synchronous
-request: the only way the reply is handled out of the helper's order."
-  (agentpane-test--submitting
-    (setq agentpane--attached nil
-          agentpane--handle nil
-          hold '(sessions/prompt))
-    (let ((snapshot (lambda ()
-                      (agentpane--on-notification
-                       agentpane--connection 'session/snapshot
-                       (list :view agentpane--view :session ref :handle "h1" :nodes agentpane-test--nodes
-                             :isStreaming t)))))
-      (funcall submit)
-      (funcall snapshot)
-      (when late (funcall status t))
-      (funcall (cdr (pop held)) t)
-      (should (equal (mapcar #'car sent) '(sessions/prompt)))
-      (funcall status nil)
-      (agentpane-test--turn-done-p))))
-
-(ert-deftest agentpane-test-turn-done-raised-for-a-running-turn-found-by-the-attach ()
-  "A send from a previewed buffer whose attach finds a turn streaming joins
-it, and that turn's end raises the indicator, whether the prompt's reply
-is handled right after its snapshot or after what followed it
-\(OW-lohavi, D30)."
-  (should (agentpane-test--attach-to-a-running-turn nil))
-  (should (agentpane-test--attach-to-a-running-turn t)))
+        (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))))))
 
 (ert-deftest agentpane-test-turn-done-cleared-when-its-buffer-is-killed ()
-  "Killing a buffer whose turn ended unseen drops it from the indicator
-(OW-lohavi)."
+  "Killing a buffer whose watched turn ended unseen drops it from the
+indicator (OW-lohavi)."
   (agentpane-test--submitting
-    (funcall submit)
-    (funcall status t)
-    (funcall status nil)
+    (funcall ended t)
     (should (agentpane-test--turn-done-p))
     (kill-buffer buffer)
     (should-not (agentpane-test--turn-done-p))))
 
 (defmacro agentpane-test--watching (&rest body)
-  "Run BODY with no turn watched or marked done, and the indicator's
+  "Run BODY with no turn marked done, and the indicator's
 `global-mode-string' put back as it was afterwards."
   (declare (indent 0))
   `(let ((agentpane--turns-done nil)
-         (agentpane--turn-watches nil)
          (global-mode-string global-mode-string))
      ,@body))
 
-(ert-deftest agentpane-test-turn-done-not-raised-after-a-detach-before-streaming ()
-  "A `session/detached' that arrives after a prompt went out and before
-its turn was seen streaming ends the watch with the handle, so a turn
-from elsewhere under the handle a re-attach answers raises nothing
-(OW-dunahe)."
-  (agentpane-test--submitting
-    (let ((global-mode-string global-mode-string))
-      (funcall submit)
-      (agentpane--on-notification nil 'session/detached (list :view agentpane--view :session ref :handle "h1"))
-      (setq attached (list :ref ref :handle "h2"))
-      (agentpane-attach)
-      (should (equal agentpane--handle "h2"))
-      (funcall status t)
-      (funcall status nil)
-      (should-not (agentpane-test--turn-done-p)))))
-
-(defun agentpane-test--detached-mid-turn (cause)
-  "Submit a turn from a buffer no window shows, see it stream, then
-deliver a `session/detached' for its handle with CAUSE, as the helper
-sends it.  Return whether the indicator is raised, and whether a watch
-on that handle still stands, as a cons."
-  (agentpane-test--submitting
-    (let ((global-mode-string global-mode-string))
-      (funcall submit)
-      (funcall status t)
-      (agentpane--on-notification nil 'session/detached
-                                  (list :view agentpane--view :session ref :handle "h1" :cause cause))
-      (cons (and (agentpane-test--turn-done-p) t)
-            (and (assoc "h1" agentpane--turn-watches) t)))))
-
-(ert-deftest agentpane-test-turn-done-not-raised-by-a-gap ()
-  "A `session/detached' for a `seq' gap raises nothing, and drops the
-watch on the handle of a turn seen streaming: the handle stays live on
-the server and the turn goes on, unheard here, as at a shutdown (D25
-point 5, OW-kutome, OW-nuzoto, OW-bepudu)."
-  (should (equal (agentpane-test--detached-mid-turn "gapped") '(nil . nil))))
-
-(ert-deftest agentpane-test-turn-done-not-raised-after-a-gap-before-streaming ()
-  "A `session/detached' for a `seq' gap that arrives after a prompt went
-out and before its turn was seen streaming drops the watch, so a turn
-from elsewhere under the same handle a re-attach answers raises nothing
-\(OW-dunahe, OW-nuzoto)."
-  (agentpane-test--submitting
-    (let ((global-mode-string global-mode-string))
-      (funcall submit)
-      (agentpane--on-notification nil 'session/detached
-                                  (list :view agentpane--view :session ref :handle "h1" :cause "gapped"))
-      (should-not (assoc "h1" agentpane--turn-watches))
-      (agentpane-attach)
-      (should (equal agentpane--handle "h1"))
-      (funcall status t)
-      (funcall status nil)
-      (should-not (agentpane-test--turn-done-p)))))
-
-(ert-deftest agentpane-test-turn-done-raised-when-the-server-lets-go ()
-  "A `session/detached' for the server's `ended' under the handle ends a
-turn seen streaming as an aborted one does, raising the indicator, and
-the watch goes with the handle (D26, OW-kutome)."
-  (should (equal (agentpane-test--detached-mid-turn "ended") '(t . nil))))
-
-(ert-deftest agentpane-test-turn-done-not-raised-after-a-gap-and-a-reattach ()
-  "A turn seen streaming whose handle gapped raises nothing when it ends
-after a re-attach under the same handle: the gap dropped its watch, as a
-shutdown does, and no watch stands on the handle from the gap on.  The
-owner gave that turn's indicator up on 2026-09-30 (D25 point 5,
-OW-bepudu); until then the gap kept a `streamed' watch for the re-attach
-to end."
-  (agentpane-test--submitting
-    (let ((global-mode-string global-mode-string))
-      (funcall submit)
-      (funcall status t)
-      (agentpane--on-notification nil 'session/detached
-                                  (list :view agentpane--view :session ref :handle "h1" :cause "gapped"))
-      (should-not agentpane--handle)
-      (should-not (agentpane-test--turn-done-p))
-      (should-not (assoc "h1" agentpane--turn-watches))
-      (setq hold '(sessions/attach))
-      (agentpane-attach)
-      (agentpane--on-notification
-       'connection 'session/snapshot
-       (list :view agentpane--view :session ref :handle "h1" :nodes agentpane-test--nodes :isStreaming t))
-      (funcall (cdr (pop held)) t)
-      (should (equal agentpane--handle "h1"))
-      (should-not (assoc "h1" agentpane--turn-watches))
-      (funcall status nil)
-      (should-not (agentpane-test--turn-done-p))
-      (should-not (assoc "h1" agentpane--turn-watches)))))
-
-(ert-deftest agentpane-test-turn-done-not-raised-by-a-shutdown ()
-  "`agentpane-shutdown' with a watched turn streaming raises nothing and
-leaves no watch on the handle: the server keeps the turn running unheard,
-and a deliberate shutdown is not the server letting go (D25 point 4,
-OW-nuzoto)."
-  (agentpane-test--submitting
-    (let ((global-mode-string global-mode-string))
-      (funcall submit)
-      (funcall status t)
-      (setq agentpane--connection nil)
-      (let ((connection (cl-letf (((symbol-function 'agentpane--start-helper)
-                                   (lambda ()
-                                     (make-process :name "agentpane-test helper"
-                                                   :command '("cat")
-                                                   :connection-type 'pipe
-                                                   :noquery t))))
-                          (agentpane--connection))))
-        (setq agentpane--attached connection)
-        (agentpane-shutdown)
-        (should (agentpane-test--wait-for (lambda () (null agentpane--connection))
-                                          (+ (float-time) 10))))
-      (should-not agentpane--handle)
-      (should-not agentpane--streaming)
-      (should-not (agentpane-test--turn-done-p))
-      (should-not (assoc "h1" agentpane--turn-watches)))))
-
-(defun agentpane-test--reattach-after-helper-death (late)
-  "Submit a turn, see it stream, let the helper exit, which raises the
-indicator for that turn, as a `session/detached' for the server's `ended'
-does, and clear it; then prompt again through a new helper, whose attach
-answers under the same handle and whose snapshot, handled before the
-prompt's reply, as the helper writes them, says the first turn is over,
-the prompt naming no handle and attaching its session (D30).
-When LATE, a status the helper wrote after the snapshot, still idle, is
-handled before the reply, as when jsonrpc.el holds the reply back behind
-a synchronous request.
-Nothing more is raised before the second prompt's turn streams; return
-whether its end, unseen, raises the indicator."
-  (agentpane-test--submitting
-    (let ((global-mode-string global-mode-string)
-          (snapshot (lambda ()
-                      (agentpane--on-notification
-                       agentpane--connection 'session/snapshot
-                       (list :view agentpane--view :session ref :handle "h1" :nodes agentpane-test--nodes
-                             :isStreaming :json-false)))))
-      (funcall submit)
-      (funcall status t)
-      (setq agentpane--connection nil)
-      (let ((connection (cl-letf (((symbol-function 'agentpane--start-helper)
-                                   (lambda ()
-                                     (make-process :name "agentpane-test helper"
-                                                   :command '("cat")
-                                                   :connection-type 'pipe
-                                                   :noquery t))))
-                          (agentpane--connection))))
-        (setq agentpane--attached connection)
-        (kill-process (jsonrpc--process connection))
-        (should (agentpane-test--wait-for (lambda () (null agentpane--connection))
-                                          (+ (float-time) 10))))
-      (should-not agentpane--streaming)
-      (should (agentpane-test--turn-done-p))
-      (setq agentpane--turns-done nil)
-      (setq agentpane--connection 'connection
-            hold '(sessions/prompt))
-      (funcall submit)
-      (funcall snapshot)
-      (when late (funcall status nil))
-      (funcall (cdr (pop held)) t)
-      (should-not (agentpane-test--turn-done-p))
-      (funcall status t)
-      (funcall status nil)
-      (agentpane-test--turn-done-p))))
-
-(ert-deftest agentpane-test-turn-done-watch-ends-with-the-helper ()
-  "A helper that exits ends the watch on every handle it carried as a
-`session/detached' for the server's `ended' does, and each buffer
-attached through it reads as not streaming, so a turn seen streaming ends
-there as an aborted one does (D25): after a crash mid-turn the
-re-attach's snapshot raises nothing more for the turn it finds over,
-whether the next prompt's reply is handled right after that snapshot or
-after what followed it, and that prompt's own turn raises the
-indicator when it ends (OW-dunahe)."
-  (should (agentpane-test--reattach-after-helper-death nil))
-  (should (agentpane-test--reattach-after-helper-death t)))
+(ert-deftest agentpane-test-turn-done-not-raised-by-a-helpers-exit ()
+  "A helper that exits, by `agentpane-shutdown' or killed, with a turn this
+Emacs watched seen streaming, raises nothing in its teardown, which
+leaves the buffer detached and idle: only the helper raises, as
+`session/turnEnded' at its socket's close, and nothing at the end of its
+input or at a crash (D32 point 6, D25 point 4).  Until D32 the teardown
+raised that turn at a death and dropped it after a shutdown, which
+marked the process to say so (OW-nuzoto)."
+  (dolist (exit (list #'agentpane-shutdown
+                      (lambda () (kill-process (jsonrpc--process agentpane--connection)))))
+    (agentpane-test--submitting
+      (let ((global-mode-string global-mode-string))
+        (funcall submit)
+        (funcall status t)
+        (setq agentpane--connection nil)
+        (let ((connection (cl-letf (((symbol-function 'agentpane--start-helper)
+                                     (lambda ()
+                                       (make-process :name "agentpane-test helper"
+                                                     :command '("cat")
+                                                     :connection-type 'pipe
+                                                     :noquery t))))
+                            (agentpane--connection))))
+          (setq agentpane--attached connection)
+          (funcall exit)
+          (should (agentpane-test--wait-for (lambda () (null agentpane--connection))
+                                            (+ (float-time) 10))))
+        (should-not agentpane--handle)
+        (should-not agentpane--streaming)
+        (should-not (agentpane-test--turn-done-p))))))
 
 (ert-deftest agentpane-test-helper-death-detaches-every-buffer-it-served ()
   "A helper that exits leaves each buffer attached through it as a
@@ -6328,10 +5825,9 @@ last one's teardown."
 (ert-deftest agentpane-test-no-re-attach-before-the-teardown ()
   "A buffer whose helper has exited, attached again before that helper's
 sentinel has run, sends nothing, rather than attach through a replacement
-the teardown would then miss, and the teardown lets go of it: the turn
-seen streaming through the dead helper ends there, and the watch on its
-handle ends with it (OW-bukupu, as
-`agentpane-test-turn-done-watch-ends-with-the-helper').  The attach is
+the teardown would then miss, and the teardown lets go of it, reading
+idle the turn seen streaming through the dead helper, and raising
+nothing for it (OW-bukupu, D32 point 6).  The attach is
 answered by the teardown as the death, failing once and signalling
 nothing, since a signal here reaches a callback running in jsonrpc.el's
 timer (OW-hiliti)."
@@ -6342,7 +5838,6 @@ timer (OW-hiliti)."
              (process (jsonrpc--process dead)))
         (setq agentpane--attached dead
               agentpane--handle "h1")
-        (agentpane--watch-submit)
         (agentpane--on-notification
          agentpane--connection 'session/status
          (list :view agentpane--view :session ref :handle "h1" :isStreaming t))
@@ -6355,8 +5850,7 @@ timer (OW-hiliti)."
           (agentpane-test--heard-out dead)
           (should (= failures 1)))
         (should-not agentpane--streaming)
-        (should (agentpane-test--turn-done-p))
-        (should-not agentpane--turn-watches)
+        (should-not (agentpane-test--turn-done-p))
         (should-not agentpane--handle)))))
 
 (defun agentpane-test--late-attach-reply (before-sentinel)
@@ -6399,9 +5893,8 @@ of the buffer, whether the reply is handled before or after its sentinel
 
 (ert-deftest agentpane-test-no-request-before-the-teardown ()
   "A request sent after the helper has exited, before its teardown, sends
-nothing and signals nothing: it runs its UNSENT at once, having reached
-no backend, and the teardown answers it as the death, running its FAILED
-once and no UNSENT again; it leaves the buffer's latest request the one
+nothing and signals nothing, and the teardown answers it as the death,
+running its FAILED once; it leaves the buffer's latest request the one
 sent through the dead helper, whose reply is then the one the callback
 takes: no request goes through a replacement, whose ids would count from
 1 again and could match a late reply's (OW-bukupu).  Until OW-hiliti it
@@ -6409,7 +5902,6 @@ signalled, which from a callback running in jsonrpc.el's timer Emacs
 reported as `Error running timer'."
   (let ((got nil)
         (failures 0)
-        (unsents 0)
         (calls nil)
         (async (symbol-function 'jsonrpc-async-request)))
     (cl-letf (((symbol-function 'jsonrpc-async-request)
@@ -6424,14 +5916,13 @@ reported as `Error running timer'."
           (agentpane-test--dead-unheard process)
           (agentpane--request 'sessions/list nil
                               (lambda (result) (push (cons 'second result) got))
-                              nil (lambda () (cl-incf failures)) nil
-                              (lambda () (cl-incf unsents)))
-          (should (equal (list failures unsents) '(0 1)))
+                              nil (lambda () (cl-incf failures)))
+          (should (= failures 0))
           (should (equal calls '(sessions/preview)))
           (should (eq agentpane--connection dead))
           (should (eql agentpane--latest-request 1))
           (agentpane-test--heard-out dead)
-          (should (equal (list failures unsents) '(1 1)))
+          (should (= failures 1))
           (should (equal got '("the dead helper's"))))))))
 
 (ert-deftest agentpane-test-late-status-leaves-the-buffer-idle ()
@@ -6531,9 +6022,8 @@ order at a drop."
 once for the helper to send once that attach has bound the buffer (D32
 point 4); the helper answers the attach, after its snapshot, which reads
 STREAMING, and then exits with the prompt unanswered.  The teardown must
-answer the prompt as the death, keeping its draft, and no turn-done
-watch may outlive it, the prompt having armed none before its reply;
-return whether the indicator is raised once the teardown has run."
+answer the prompt as the death, keeping its draft; return whether the
+indicator is raised once the teardown has run."
   (let ((calls nil)
         (async (symbol-function 'jsonrpc-async-request)))
     (agentpane-test--watching
@@ -6563,7 +6053,6 @@ return whether the indicator is raised once the teardown has run."
           (should-not agentpane--sending)
           (should-not agentpane--attached)
           (should-not agentpane--handle)
-          (should-not agentpane--turn-watches)
           (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
                          "hello"))
           (and (agentpane-test--turn-done-p) t))))))
@@ -6581,10 +6070,10 @@ the hazard was its going through a replacement helper."
 (ert-deftest agentpane-test-prompt-waiting-as-its-helper-dies-raises-nothing ()
   "A prompt answered as the death as in
 `agentpane-test-prompt-waiting-as-its-helper-dies-is-refused', into a
-session the attach's snapshot read streaming a turn from elsewhere, has
-armed no watch, since a prompt from a buffer not attached when it was
-sent arms one at its reply, so the teardown, which ends that turn,
-raises nothing for it."
+session the attach's snapshot read streaming a turn from elsewhere,
+raises nothing at the teardown, which reads that turn idle: the helper
+alone raises a turn, as `session/turnEnded', and a dead one raises
+nothing (D32 point 6)."
   (should-not (agentpane-test--prompt-waiting-as-its-helper-dies t)))
 
 (ert-deftest agentpane-test-attach-answered-by-an-exited-helper-fails ()
@@ -6592,8 +6081,8 @@ raises nothing for it."
 before its sentinel has run, attaches nothing, and the prompt sent while
 it was in flight, which went out at once for the helper to hold (D32
 point 4) and which that helper never answered, is answered by the
-teardown as the death, keeping its draft; no turn-done watch outlives
-the teardown, and nothing goes out through a replacement (OW-bukupu)."
+teardown as the death, keeping its draft, and nothing goes out through
+a replacement (OW-bukupu)."
   (let ((calls nil)
         (async (symbol-function 'jsonrpc-async-request)))
     (agentpane-test--watching
@@ -6620,7 +6109,6 @@ the teardown, and nothing goes out through a replacement (OW-bukupu)."
             (should-not agentpane--sending)
             (should-not agentpane--connection)
             (should-not agentpane--attached)
-            (should-not agentpane--turn-watches)
             (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
                            "hello"))))))))
 
@@ -6659,15 +6147,14 @@ the two (OW-bukupu)."
 (ert-deftest agentpane-test-late-error-reply-fails-once ()
   "An error reply a dead helper wrote, the server's refusal as `toRpcError' in
 src/emacs/helper.ts builds one, handled once the helper reads as dead,
-is the request's one answer, as one from a live helper is: UNSENT
-runs once, then FAILED once, and the echo area shows the helper's own
+is the request's one answer, as one from a live helper is: FAILED runs
+once, and the echo area shows the helper's own
 message, not its exit; neither jsonrpc.el's \"Server died\" nor the
 teardown answers it again (OW-bukupu, OW-hiliti).  Until OW-hiliti the
 teardown answered it as the death, running FAILED alone, and the
 helper's message was never shown; until OW-mopuyi \"Server died\"
-answered it, read as unsent."
-  (let ((failures 0)
-        (unsents 0))
+answered it."
+  (let ((failures 0))
     (agentpane-test--outliving
         (list (list :jsonrpc "2.0" :id 1
                     :error (list :code -32000 :message "no such session"
@@ -6675,48 +6162,14 @@ answered it, read as unsent."
                                              :detail "no such session"))))
       (agentpane-test--noting
         (agentpane--request 'sessions/preview nil #'ignore nil
-                            (lambda () (cl-incf failures)) nil
-                            (lambda () (cl-incf unsents)))
+                            (lambda () (cl-incf failures)))
         (let* ((dead agentpane--connection)
                (process (jsonrpc--process dead)))
           (agentpane-test--dead-unheard process)
           (agentpane-test--heard-out dead)
           (should (= failures 1))
-          (should (= unsents 1))
           (should (member "agentpane: sessions/preview failed: no such session" said))
           (should-not (agentpane-test--said-p "the helper exited" said)))))))
-
-(ert-deftest agentpane-test-error-reply-before-a-death-abandons-the-watch ()
-  "A prompt the helper refuses with an error reply it writes just before
-it exits, the server's refusal of one as `toRpcError'
-builds it, after a status under the buffer's handle said a turn from
-elsewhere streams, abandons the turn-done watch it armed, as a refusal
-from a live helper does, and the teardown raises nothing for that turn,
-which this Emacs never started (OW-hiliti).  Answered as the death, as
-until OW-hiliti, the watch survived and the teardown ended the turn
-there, raising the indicator."
-  (agentpane-test--watching
-    (agentpane-test--outliving
-        (list (list :jsonrpc "2.0" :method "session/status"
-                    :params (list :view agentpane--view :session ref :handle "h1" :isStreaming t))
-              (list :jsonrpc "2.0" :id 1
-                    :error (list :code -32000 :message "the backend refused the prompt"
-                                 :data (list :error "backend_refused"
-                                             :detail "the backend refused the prompt"))))
-      (let ((dead (agentpane--connection)))
-        (setq agentpane--attached dead
-              agentpane--handle "h1")
-        (goto-char (point-max))
-        (insert "hello")
-        (agentpane-send)
-        (should (assoc "h1" agentpane--turn-watches))
-        (agentpane-test--heard-out dead)
-        (should-not (agentpane-test--turn-done-p))
-        (should-not agentpane--turns-done)
-        (should-not agentpane--turn-watches)
-        (should-not agentpane--sending)
-        (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
-                       "hello"))))))
 
 (ert-deftest agentpane-test-fork-answered-as-its-helper-dies-is-shown ()
   "A fork whose reply is among the last messages a dying helper wrote
@@ -6755,18 +6208,16 @@ the prompt's one answer: the backend admitted the prompt, so its callback
 runs, clearing a draft, and nothing reports it failed, though the
 helper's death reached the request first (OW-bukupu)."
   (let ((answers 0)
-        (failures 0)
-        (unsents 0))
+        (failures 0))
     (agentpane-test--outliving
         (list (list :jsonrpc "2.0" :id 1 :result nil))
       (agentpane--request 'sessions/prompt nil (lambda (_) (cl-incf answers)) t
-                          (lambda () (cl-incf failures)) nil
-                          (lambda () (cl-incf unsents)))
+                          (lambda () (cl-incf failures)))
       (let* ((dead agentpane--connection)
              (process (jsonrpc--process dead)))
         (agentpane-test--dead-unheard process)
         (agentpane-test--heard-out dead)
-        (should (equal (list answers failures unsents) '(1 0 0)))))))
+        (should (equal (list answers failures) '(1 0)))))))
 
 (defun agentpane-test--writes-then-dies (messages)
   "Start a process standing in for a helper that, after 0.3s, writes
@@ -6797,14 +6248,12 @@ the one the teardown answers the helper's requests from (Emacs 31.1,
 jsonrpc.el 1.0.29, measured 2026-09-28; OW-bukupu, OW-mopuyi)."
   (let ((agentpane--connection nil)
         (answers 0)
-        (failures 0)
-        (unsents 0))
+        (failures 0))
     (agentpane-test--with-session '(:backend "codex" :id "t1")
       (cl-letf (((symbol-function 'agentpane--start-helper) #'agentpane-test--answers-then-dies)
                 ((symbol-function 'message) #'ignore))
         (agentpane--request 'sessions/prompt nil (lambda (_) (cl-incf answers)) t
-                            (lambda () (cl-incf failures)) nil
-                            (lambda () (cl-incf unsents)))
+                            (lambda () (cl-incf failures)))
         (let ((dead agentpane--connection))
           (should-error (jsonrpc-request dead 'models/list nil :timeout 5))
           (agentpane-test--heard-out dead)
@@ -6812,7 +6261,7 @@ jsonrpc.el 1.0.29, measured 2026-09-28; OW-bukupu, OW-mopuyi)."
             (should (string-search "anxious continuation to 1 running now" (buffer-string))))
           ;; Let the held answer, handed on from a timer, run.
           (accept-process-output nil 0.1)
-          (should (equal (list answers failures unsents) '(1 0 0))))))))
+          (should (equal (list answers failures) '(1 0))))))))
 
 (defun agentpane-test--behind-a-synchronous-request (send)
   "Call SEND in a transcript buffer for the session `ref', attached under
@@ -6838,7 +6287,6 @@ and Emacs has waited a beat more."
             (agentpane-test--heard-out dead)
             (accept-process-output nil 0.1)
             (should-not agentpane--sending)
-            (should-not agentpane--turn-watches)
             failures))))))
 
 (ert-deftest agentpane-test-death-answers-a-prompt-behind-a-synchronous-request ()
@@ -6860,39 +6308,6 @@ reaches it (OW-laluso, OW-mopuyi)."
   (should (= 1 (agentpane-test--behind-a-synchronous-request
                 (lambda (failed)
                   (agentpane--attach nil failed))))))
-
-(ert-deftest agentpane-test-death-ends-a-turn-seen-streaming ()
-  "A prompt whose reply the helper never writes, after a status under the
-buffer's handle said the turn streams, ends that turn at the helper's
-death and raises the turn-done indicator for the buffer no window shows,
-as an aborted turn does: the teardown decides the watch, and the death
-no longer reads as a prompt that reached no backend, which abandoned the
-watch before the teardown could end it (OW-zedawo, OW-mopuyi)."
-  (agentpane-test--watching
-    (agentpane-test--outliving
-        (list (list :jsonrpc "2.0" :method "session/status"
-                    :params (list :view agentpane--view :session ref :handle "h1" :isStreaming t)))
-      (let ((dead (agentpane--connection)))
-        (setq agentpane--attached dead
-              agentpane--handle "h1")
-        (goto-char (point-max))
-        (insert "hello")
-        (agentpane-send)
-        (should (assoc "h1" agentpane--turn-watches))
-        (agentpane-test--heard-out dead)
-        (should (agentpane-test--turn-done-p))
-        (should (memq (current-buffer) agentpane--turns-done))
-        (should-not agentpane--turn-watches)
-        (should-not agentpane--sending)
-        (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
-                       "hello"))))))
-
-;; OW-kifuhi: the reply to an attach, held back as an anxious continuation
-;; behind a synchronous request still out when the helper died, is handed on
-;; after the helper's teardown.  Taken as binding the buffer, it bound it to
-;; `agentpane--connection' as it then stood: nil, leaving the dead helper's
-;; handle and a prompt waiting on the attach free to start the next helper;
-;; or, with several replies held, the helper the first one's prompt started.
 
 (defun agentpane-test--held-attach-replies (count)
   "Attach each of COUNT unattached transcript buffers, whose attaches the
@@ -6981,7 +6396,7 @@ reply is handed on (OW-tifiva), as in wire order
                   :params (list :view agentpane--view :session ref :handle "h1" :isStreaming :false
                                 :nodes (vector)))
             (list :jsonrpc "2.0" :method "session/detached"
-                  :params (list :view agentpane--view :session ref :handle "h1" :cause "gapped"))
+                  :params (list :view agentpane--view :session ref :handle "h1"))
             (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1"))
             (list :jsonrpc "2.0" :id 2 :result (vector)))
     (setq linger t)
@@ -6994,212 +6409,62 @@ reply is handed on (OW-tifiva), as in wire order
     (should-not (agentpane--attached-p))
     (should-not agentpane--handle)))
 
-(defun agentpane-test--prompt-failing (how)
-  "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
-fail HOW -- `timeout', `reply-exit' (handling its reply signals),
-\(refused CODE) (the helper answers with a refusal whose `data' carries
-CODE, `toRpcError' in src/emacs/helper.ts), `internal' (the helper
-answers with an error of its own, the -32603 of a throw it did not
-expect, which carries no code) or `send-exit' (sending it signals) --
-then run a turn that ends unseen, and return whether the indicator is
-raised."
-  (let ((request (symbol-function 'agentpane--request))
-        (calls nil))
-    (agentpane-test--submitting
-      (let ((global-mode-string global-mode-string))
-        (cl-letf (((symbol-function 'agentpane--request) (agentpane-test--refusing request))
-                  ((symbol-function 'jsonrpc-async-request)
-                   (lambda (_conn method _params &rest args)
-                     (when (eq how 'send-exit) (error "Helper failed to start"))
-                     (push (cons method args) calls)
-                     (list 1 nil)))
-                  ((symbol-function 'agentpane--clear-sent)
-                   (lambda (&rest _) (when (eq how 'reply-exit) (error "Boom")))))
-          (if (eq how 'send-exit)
-              (should-error (funcall submit))
-            (funcall submit)
-            (let ((prompt (cdr (assq 'sessions/prompt calls))))
-              (pcase how
-                ('timeout (funcall (plist-get prompt :timeout-fn)))
-                (`(refused ,code)
-                 (funcall (plist-get prompt :error-fn)
-                          (list :code -32000 :message "Refused"
-                                :data (list :error code :detail "Refused"))))
-                ('internal (funcall (plist-get prompt :error-fn)
-                                    '(:code -32603 :message "x is not a function")))
-                ('reply-exit (should-error (funcall (plist-get prompt :success-fn) nil))))))
-          (should-not agentpane--sending)
-          (funcall status t)
-          (funcall status nil)
-          (agentpane-test--turn-done-p))))))
-
-(ert-deftest agentpane-test-turn-done-kept-for-a-prompt-that-timed-out ()
-  "A prompt whose reply outlasts its timeout, whose reply's handling
-signals, or that the helper answers with an error of its own, carrying no
-server code, may have been admitted, so its watch stands and the turn's
-end raises the indicator; one refused with a code, or one that never went
-out, abandons it, as the browser's `watchAbandon' does (OW-dunahe,
-OW-hiliti).  The helper's own codes for a request it never wrote,
-`unreachable', `unauthorized' and `frame_too_large', take the one branch
-any code takes (`agentpane--request'), so one code stands for them all."
-  (should (agentpane-test--prompt-failing 'timeout))
-  (should (agentpane-test--prompt-failing 'reply-exit))
-  (should (agentpane-test--prompt-failing 'internal))
-  (should-not (agentpane-test--prompt-failing '(refused "backend_refused")))
-  (should-not (agentpane-test--prompt-failing 'send-exit)))
-
-(defun agentpane-test--pi-fork-during-a-turn (order)
-  "Submit a turn on a Pi session shown in the selected window, see it
-stream, and fork the session there, which aborts that turn.  Before the
-fork's reply the parent's window is switched to another buffer, and the
-helper delivers what the server wrote ahead of that reply: the aborted
-turn's not-streaming status when ORDER is `before', none when `never',
-the server's next status for the parent going out under the fork's
-handle, and then the `session/detached' its `ended' brings, since a Pi
-fork moves the parent's process onto the fork before it answers
-\(`#forkOnto' in src/server/http/session-manager.ts).  When ORDER is
-`unstreamed' the turn is not yet seen streaming at the fork, which then
-aborts nothing, and the server's stop inside the fork brings its
-statuses, streaming and then not, ahead of the `session/detached'.
-Then the parent attaches again under a new handle, and a turn from
-elsewhere streams there and ends.  Return whether the indicator is
-raised."
-  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
-        (forked '(:backend "pi" :id "/s/fork.jsonl")))
-    (agentpane-test--watching
-      (agentpane-test--with-helper
-        (agentpane-test--forking
-            [(:id "entry-0" :text "Fix the bug" :index 0)]
-            forked
-          (agentpane-test--with-session ref
-            (let ((status (lambda (streaming)
-                            (agentpane--on-notification
-                             nil 'session/status
-                             (list :view agentpane--view :session ref :handle (buffer-local-value 'agentpane--handle buffer)
-                                   :isStreaming (if streaming t :json-false))))))
-              (setq agentpane--attached agentpane--connection
-                    agentpane--handle "h1"
-                    attached (list :ref forked :handle "h2"))
-              (delete-other-windows)
-              (agentpane-test--show buffer)
-              (goto-char (point-max))
-              (insert "hello")
-              (agentpane-send)
-              (unless (eq order 'unstreamed) (funcall status t))
-              (setq hold '(sessions/fork))
-              (agentpane-test--goto-index 0)
-              (agentpane-fork)
-              (agentpane-test--show (get-buffer-create "*scratch*"))
-              (pcase order
-                ('before (funcall status nil))
-                ('unstreamed (funcall status t) (funcall status nil)))
-              (agentpane--on-notification
-               nil 'session/detached (list :view agentpane--view :session ref :handle "h1" :cause "ended"))
-              (funcall (cdr (pop held)) t)
-              (should-not (eq (window-buffer (selected-window)) buffer))
-              (setq attached (list :ref ref :handle "h3"))
-              (agentpane--attach)
-              (should (equal agentpane--handle "h3"))
-              (funcall status t)
-              (funcall status nil)
-              (agentpane-test--turn-done-p))))))))
-
 (ert-deftest agentpane-test-turn-done-not-raised-by-a-pi-fork ()
-  "A Pi fork ends the parent's watch without raising the indicator: the
-turn it stops is one the user stopped on purpose, and the parent's window
-now shows the fork.  So neither that turn's not-streaming status, which
-lands before the fork's reply, nor the parent's `session/detached' after
-it, nor a later turn from elsewhere on the parent, re-attached, raises
-it, whether or not the turn was seen streaming at the fork (OW-dunahe)."
-  (should-not (agentpane-test--pi-fork-during-a-turn 'before))
-  (should-not (agentpane-test--pi-fork-during-a-turn 'never))
-  (should-not (agentpane-test--pi-fork-during-a-turn 'unstreamed)))
-
-(defun agentpane-test--edit-send-during-a-turn (backend stops)
-  "Submit a turn on a BACKEND session shown in the selected window, see it
-stream, and send an edit of its first message, the fork-points answer
-saying a fork stops a running turn when STOPS, holding the request.  The
-parent's turn then ends unseen, as the server's stop ends it, and on Pi
-its handle ends too; the request answers with the fork's turn streaming,
-and that turn ends unseen.  Return whether the indicator was raised by
-the parent's end, and by the fork's, as a cons."
-  (let ((ref (list :backend backend :id "parent"))
-        (forked (list :backend backend :id "fork")))
-    (agentpane-test--watching
+  "A plain fork of a streaming Pi session sends its abort with `unwatch',
+and every plain Pi fork sends its fork with it too, since the fork stops
+a turn not yet read streaming as well, so the helper drops the parent's
+turn-done watch before the stop, and
+neither that turn's not-streaming status nor the parent's ended handle
+raises the indicator for a turn the user stopped on purpose (OW-dunahe,
+D32 point 6); ark3/agentpane#17 retires both with this fork.  A Codex
+fork aborts nothing and keeps the parent's turn running, and so
+unwatches nothing."
+  (dolist (backend '("pi" "codex"))
+    (let ((ref (list :backend backend :id "parent")))
       (agentpane-test--with-helper
         (agentpane-test--forking
             [(:id "entry-0" :text "Fix the bug" :index 0)]
-            forked
+            (list :backend backend :id "fork")
           (agentpane-test--with-session ref
-            (let ((status (lambda (handle streaming)
-                            (agentpane--on-notification
-                             nil 'session/status
-                             (list :view (agentpane-test--view
-                                          (if (equal handle "h1") buffer (agentpane--buffer-for forked)))
-                                   :session (if (equal handle "h1") ref forked) :handle handle
-                                   :isStreaming (if streaming t :json-false)))))
-                  parent-end)
-              (setq agentpane--attached agentpane--connection
-                    agentpane--handle "h1"
-                    fork-stops stops
-                    fork-streaming t)
-              (delete-other-windows)
-              (agentpane-test--show buffer)
-              (agentpane--draw agentpane-test--image-nodes)
-              (goto-char (point-max))
-              (insert "hello")
-              (agentpane-send)
-              (funcall status "h1" t)
-              (agentpane-test--goto-index 0)
-              (agentpane-edit)
-              (setq hold '(sessions/forkAndPrompt))
-              (agentpane-send)
-              (agentpane-test--show (get-buffer-create "*scratch*"))
-              (funcall status "h1" nil)
-              (when (equal backend "pi")
-                (agentpane--on-notification
-                 nil 'session/detached (list :view (agentpane-test--view buffer) :session ref :handle "h1" :cause "ended")))
-              (setq parent-end (and (agentpane-test--turn-done-p) t))
-              (funcall (cdr (pop held)) t)
-              (agentpane-test--show (get-buffer-create "*scratch*"))
-              (funcall status "h-fork" nil)
-              (cons parent-end
-                    (and (memq (agentpane--buffer-for forked) agentpane--turns-done) t)))))))))
+            (setq agentpane--attached agentpane--connection
+                  agentpane--handle "h1")
+            (agentpane--on-notification
+             nil 'session/status (list :view agentpane--view :session ref :handle "h1" :isStreaming t))
+            (agentpane-test--goto-index 0)
+            (agentpane-fork)
+            (should (equal (alist-get 'sessions/abort sent)
+                           (and (equal backend "pi")
+                                (list :session ref :view agentpane--view :unwatch t))))
+            (should (eq (plist-get (alist-get 'sessions/fork sent) :unwatch)
+                        (equal backend "pi")))))))))
 
 (ert-deftest agentpane-test-turn-done-across-an-edit-send ()
-  "An edit sent where the fork stops the parent's running turn ends the
-parent's watch as it goes out, so the stop's not-streaming status and a
-Pi parent's ended handle raise nothing, as `f' raises nothing for the
-turn it stops (OW-dunahe); where the fork leaves it running, its end
-still raises the indicator.  The fork's turn, already streaming at the
-reply, raises it at its end either way, its watch armed at the reply
-from the level the fork's snapshot left (D30)."
-  (should (equal (agentpane-test--edit-send-during-a-turn "pi" t) '(nil . t)))
-  (should (equal (agentpane-test--edit-send-during-a-turn "codex" nil) '(t . t))))
-
-(ert-deftest agentpane-test-turn-done-watch-ends-with-a-killed-buffer ()
-  "Killing a buffer whose turn is still running ends the watch on its
-handle, so a buffer reopened on the session, whose attach answers under
-that same handle, raises nothing when a turn from elsewhere ends unseen
-\(OW-dunahe)."
-  (agentpane-test--submitting
-    (let* ((global-mode-string global-mode-string)
-           (reopened nil)
-           (status (lambda (streaming)
-                     (agentpane--on-notification
-                      nil 'session/status
-                      (list :view (agentpane-test--view (or reopened buffer))
-                            :session ref :handle "h1" :isStreaming (if streaming t :json-false))))))
-      (funcall submit)
-      (funcall status t)
-      (kill-buffer buffer)
-      (setq reopened (agentpane--transcript-buffer (list :ref ref)))
-      (with-current-buffer reopened
-        (agentpane--attach)
-        (should (equal agentpane--handle "h1")))
-      (funcall status t)
-      (funcall status nil)
-      (should-not (agentpane-test--turn-done-p)))))
+  "An edit sent where the fork stops the parent's running turn carries
+`stops', so the helper drops the parent's turn-done watch as it goes
+out, and the stop's not-streaming status and a Pi parent's ended handle
+raise nothing, as `f' raises nothing for the turn it stops (OW-dunahe,
+D32 point 6); where the fork leaves the turn running, or none runs, it
+carries none, and the turn's end still raises the indicator.  The helper
+arms the fork's own watch at the reply (D30)."
+  (pcase-dolist (`(,backend ,stops ,streaming ,carried)
+                 '(("pi" t t t) ("codex" nil t nil) ("pi" t nil nil)))
+    (let ((ref (list :backend backend :id "parent")))
+      (agentpane-test--with-helper
+        (agentpane-test--forking
+            [(:id "entry-0" :text "Fix the bug" :index 0)]
+            (list :backend backend :id "fork")
+          (agentpane-test--with-session ref
+            (setq agentpane--attached agentpane--connection
+                  agentpane--handle "h1"
+                  fork-stops stops)
+            (agentpane--draw agentpane-test--image-nodes)
+            (agentpane--on-notification
+             nil 'session/status (list :view agentpane--view :session ref :handle "h1"
+                                       :isStreaming (if streaming t :json-false)))
+            (agentpane-test--goto-index 0)
+            (agentpane-edit)
+            (agentpane-send)
+            (should (eq (plist-get (alist-get 'sessions/forkAndPrompt sent) :stops) carried))))))))
 
 ;;;; A new session whose create does not attach, against a stub jsonrpc
 
