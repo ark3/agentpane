@@ -1456,6 +1456,40 @@ it nothing for."
             (should (equal (mapcar #'car sent) '(sessions/preview))))
           (should (seq-some (lambda (line) (string-search "did not attach" line)) said)))))))
 
+(ert-deftest agentpane-test-attach-refused-at-capacity-says-why ()
+  "An attach the server refuses `at_capacity', D12's cap reached with
+every live session busy, says the server's text in the echo area and
+leaves the buffer the preview it was, attaching nothing, so it can
+attach again once one is detached (ark3/agentpane#31).  Through
+`agentpane--request' over a stub jsonrpc, the refusal built as
+`toRpcError' in src/emacs/helper.ts builds one."
+  (let ((ref '(:backend "pi" :id "/s/a.jsonl"))
+        (detail (concat "at capacity: all 16 live sessions are busy (streaming, "
+                        "starting, or not yet prompted); detach one and try again"))
+        (calls nil)
+        (buffer nil))
+    (agentpane-test--with-helper
+      (agentpane-test--noting
+        (cl-letf (((symbol-function 'jsonrpc-async-request)
+                   (lambda (_conn method _params &rest args)
+                     (push (cons method args) calls)
+                     (list 1 nil))))
+          (unwind-protect
+              (progn
+                (setq buffer (agentpane--transcript-buffer (list :ref ref)))
+                (with-current-buffer buffer
+                  (agentpane--draw [])
+                  (agentpane-attach))
+                (funcall (plist-get (cdr (assq 'sessions/attach calls)) :error-fn)
+                         `(:code -32000 :message ,detail
+                           :data (:error "at_capacity" :detail ,detail)))
+                (should (member (format "agentpane: sessions/attach failed: %s" detail) said))
+                (with-current-buffer buffer
+                  (should-not (agentpane--attached-p))
+                  (should-not agentpane--handle)
+                  (should-not agentpane--attaching)))
+            (when (buffer-live-p buffer) (kill-buffer buffer))))))))
+
 (ert-deftest agentpane-test-attach-onto-a-held-handle-under-the-same-ref-leaves-one-buffer ()
   "An attach from a buffer previewing the ref another buffer's session was
 renamed onto, answered under the handle that buffer holds, merges that
