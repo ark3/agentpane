@@ -1263,24 +1263,22 @@ transcript drawn by a snapshot under that handle, streaming on the model
 \"luna\", as the node at index 3, a tool call running \"sleep 60\",
 after the helper has said `session/detached' for that handle: the
 server's `ended' under it said it let go of it (D26).  Every request is
-answered as `agentpane-test--forking' answers it, and the model's
-`models/list' is never answered."
+answered as `agentpane-test--forking' answers it."
   (declare (indent 0))
   `(let ((ref '(:backend "claude" :id "real-1")))
      (agentpane-test--with-helper
        (agentpane-test--forking nil nil
-         (cl-letf (((symbol-function 'jsonrpc-async-request) #'ignore))
-           (setq attached (list :ref ref :handle "h1"))
-           (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
-             (with-current-buffer buffer (agentpane--attach))
-             (agentpane--on-notification
-              agentpane--connection 'session/snapshot
-              (list :session ref :handle "h1" :isStreaming t :model "luna"
-                    :nodes (vector (agentpane-test--running-tool 3 "sleep 60"))))
-             (agentpane--on-notification nil 'session/detached
-                                         (list :session ref :handle "h1"))
-             (setq sent nil)
-             ,@body))))))
+         (setq attached (list :ref ref :handle "h1"))
+         (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
+           (with-current-buffer buffer (agentpane--attach))
+           (agentpane--on-notification
+            agentpane--connection 'session/snapshot
+            (list :session ref :handle "h1" :isStreaming t :model "luna"
+                  :nodes (vector (agentpane-test--running-tool 3 "sleep 60"))))
+           (agentpane--on-notification nil 'session/detached
+                                       (list :session ref :handle "h1"))
+           (setq sent nil)
+           ,@body)))))
 
 (ert-deftest agentpane-test-detached-lets-go-of-the-handle-and-g-previews ()
   "A `session/detached' for the handle a buffer holds leaves it holding no
@@ -2267,8 +2265,6 @@ collections offered, then the user error signalled, if any."
                     (agentpane-test--attach-snapshot ref :isStreaming :json-false :model model)
                     (list :ref ref))
                    ('models/list agentpane-test--models))))
-              ;; The mode line's own listing, which these tests do not measure.
-              ((symbol-function 'jsonrpc-async-request) #'ignore)
               ((symbol-function 'completing-read)
                (lambda (_prompt collection &rest _)
                  (push collection offered)
@@ -2309,8 +2305,7 @@ whose model is not known, prompts for nothing, sends no
 (ert-deftest agentpane-test-mode-line-names-the-reported-effort ()
   "A status that reports an effort names it in the mode line right after the
 model, so a choice made with `agentpane-set-effort' shows before the first
-turn; one whose effort is null names none while no `models/list' has
-answered."
+turn; one whose effort and `defaultEffort' are both null names none."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-session ref
       (agentpane--draw [])
@@ -2339,34 +2334,25 @@ force that the recorded one was not restored, before any turn; one whose
       (should (equal mode-line-process " [deepseek-v4.1-flash · high]")))))
 
 (ert-deftest agentpane-test-mode-line-falls-back-to-the-default-effort ()
-  "A status whose effort is null names the model's `defaultEffort' from
-`models/list' in the mode line once the listing answers, as the browser's
-effort select does, and one that reports an effort names that instead.
-The listing is asked for once per model named, not once per status."
-  (let ((ref '(:backend "codex" :id "t1"))
-        (agentpane--connection 'connection)
-        (sent nil))
-    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t))
-              ((symbol-function 'jsonrpc-async-request)
-               (lambda (_connection method params &rest args)
-                 (push (list method params (plist-get args :success-fn)) sent))))
-      (agentpane-test--with-session ref
-        (agentpane--draw [])
-        (agentpane--set-status
-         (list :session ref :isStreaming :json-false :model "gpt-5.6-luna" :effort nil))
-        (should (equal mode-line-process " [gpt-5.6-luna]"))
-        (let ((listed (assq 'models/list sent)))
-          (should listed)
-          (should (equal (nth 1 listed) '(:backend "codex")))
-          (funcall (nth 2 listed) agentpane-test--models))
-        (should (equal mode-line-process " [gpt-5.6-luna · low]"))
-        (agentpane--set-status
-         (list :session ref :isStreaming :json-false :model "gpt-5.6-luna" :effort "high"))
-        (should (equal mode-line-process " [gpt-5.6-luna · high]"))
-        (agentpane--set-status
-         (list :session ref :isStreaming t :model "gpt-5.6-luna" :effort nil))
-        (should (equal mode-line-process " [streaming · gpt-5.6-luna · low]"))
-        (should (= (seq-count (lambda (request) (eq (car request) 'models/list)) sent) 1))))))
+  "A status whose effort is null names its `defaultEffort', the model's
+from the helper's `models/list', in the mode line, as the browser's
+effort select does, and one that reports an effort names that instead
+\(D32 point 8)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (agentpane--draw [])
+      (agentpane--set-status
+       (list :session ref :isStreaming :json-false :model "gpt-5.6-luna"
+             :effort nil :defaultEffort "low"))
+      (should (equal mode-line-process " [gpt-5.6-luna · low]"))
+      (agentpane--set-status
+       (list :session ref :isStreaming :json-false :model "gpt-5.6-luna"
+             :effort "high" :defaultEffort "low"))
+      (should (equal mode-line-process " [gpt-5.6-luna · high]"))
+      (agentpane--set-status
+       (list :session ref :isStreaming t :model "gpt-5.6-luna"
+             :effort nil :defaultEffort "low"))
+      (should (equal mode-line-process " [streaming · gpt-5.6-luna · low]")))))
 
 (ert-deftest agentpane-test-undo-in-prompt-leaves-nodes-alone ()
   "Undo in the prompt region undoes the draft, never a node redraw that
@@ -4837,16 +4823,15 @@ on the model \"luna\".  Every request is answered as
          (agentpane--turn-watches nil))
      (agentpane-test--with-helper
        (agentpane-test--forking nil nil
-         (cl-letf (((symbol-function 'jsonrpc-async-request) #'ignore))
-           (setq attached (list :ref ref :handle "h1"))
-           (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
-             (with-current-buffer buffer (agentpane--attach))
-             (agentpane--on-notification
-              agentpane--connection 'session/snapshot
-              (list :session ref :handle "h1" :isStreaming :json-false :model "luna"
-                    :nodes (vector (agentpane-test--assistant 5 "<p>Live.</p>"))))
-             (setq sent nil)
-             ,@body))))))
+         (setq attached (list :ref ref :handle "h1"))
+         (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
+           (with-current-buffer buffer (agentpane--attach))
+           (agentpane--on-notification
+            agentpane--connection 'session/snapshot
+            (list :session ref :handle "h1" :isStreaming :json-false :model "luna"
+                  :nodes (vector (agentpane-test--assistant 5 "<p>Live.</p>"))))
+           (setq sent nil)
+           ,@body)))))
 
 (ert-deftest agentpane-test-close-session-closes-it-onto-its-preview ()
   "`agentpane-close-session' on an idle attached session sends
@@ -6921,8 +6906,7 @@ does for a buffer told its handle is gone (D26)."
                    (make-process :name "agentpane-test helper"
                                  :command '("cat")
                                  :connection-type 'pipe
-                                 :noquery t)))
-                ((symbol-function 'jsonrpc-async-request) #'ignore))
+                                 :noquery t))))
         (let* ((connection (agentpane--connection))
                (buffers
                 (seq-map-indexed
@@ -8107,8 +8091,6 @@ its answer waits until `agentpane-new-session' has returned, and the symbol
                            (and current (list :isStreaming :json-false :model current)))
                     (list :ref ref :handle "h1"))
                    ('models/list agentpane-test--models))))
-              ;; The mode line's own listing, which these tests do not measure.
-              ((symbol-function 'jsonrpc-async-request) #'ignore)
               ((symbol-function 'completing-read)
                (lambda (prompt collection &rest _)
                  (unless (equal prompt "Backend: ")

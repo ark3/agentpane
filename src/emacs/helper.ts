@@ -111,7 +111,7 @@
 import { ApiClientError, ConnectionLostError, createAgentpaneApi, type ApiOptions, type EventHandlers } from "$client/api.ts";
 import { previewMessages } from "$client/preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
-import type { ServerEvent, SessionRef } from "$shared/protocol.ts";
+import type { BackendId, ModelInfo, ServerEvent, SessionRef } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { locateUpsert, projectTarget, projectTranscript, type Render, type UpsertTarget } from "./nodes.ts";
 import type { HelperNotification, HelperRequests, TranscriptNode } from "./protocol.ts";
@@ -242,6 +242,44 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		write(encodeFrame({ jsonrpc: "2.0", ...notification }));
 	};
 
+	/**
+	 * Each backend's `models/list`, asked once, the first time a status or
+	 * snapshot names a model on it, and held for the helper's life; `null`
+	 * while it is out. A failed listing is forgotten, so the next status on
+	 * the backend asks again.
+	 */
+	const listings = new Map<BackendId, ModelInfo[] | null>();
+
+	/**
+	 * The `defaultEffort` of `view`'s model, from its backend's listing (D32
+	 * point 8), as the browser's effort select reads `ModelInfo.defaultEffort`;
+	 * `null` until the listing has answered, and then each attached session
+	 * on the backend whose model names one is sent a status carrying it.
+	 */
+	const defaultEffortOf = (view: SessionView): string | null => {
+		if (view.model === null) return null;
+		const { backend } = view.ref;
+		if (!listings.has(backend) && !stopped) listModels(backend);
+		return listings.get(backend)?.find((info) => info.id === view.model)?.defaultEffort ?? null;
+	};
+
+	const listModels = (backend: BackendId): void => {
+		listings.set(backend, null);
+		api.listModels(backend).then(
+			(models) => {
+				listings.set(backend, models);
+				if (stopped) return;
+				for (const handle of attached.keys()) {
+					const view = state.sessions[handle];
+					if (view?.ref.backend === backend && defaultEffortOf(view) !== null) {
+						notify({ method: "session/status", params: statusOf(view, handle) });
+					}
+				}
+			},
+			() => listings.delete(backend),
+		);
+	};
+
 	const statusOf = (view: SessionView, handle: string) => ({
 		session: view.ref,
 		handle,
@@ -249,6 +287,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		compaction: view.compaction ?? null,
 		model: view.model,
 		effort: view.effort,
+		defaultEffort: defaultEffortOf(view),
 		unrestoredModel: view.unrestoredModel ?? null,
 	});
 

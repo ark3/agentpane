@@ -615,7 +615,7 @@ describe("notifications", () => {
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
 		await io.until(2);
 		expect(io.notifications()).toEqual([
-			{ jsonrpc: "2.0", method: "session/snapshot", params: { session: pi, handle: h(pi), token: 1, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] } },
+			{ jsonrpc: "2.0", method: "session/snapshot", params: { session: pi, handle: h(pi), token: 1, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, defaultEffort: null, unrestoredModel: null, error: null, errorId: null, notices: [] } },
 		]);
 
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi, handle: h(pi), tokens: [1] } });
@@ -797,7 +797,7 @@ describe("notifications", () => {
 		server.emit({ type: "error", session: pi, handle: h(pi), seq: 3, message: "boom", errorId: "e1" });
 		await io.until(4);
 		const [, statusOut, error] = io.notifications();
-		expect(statusOut).toEqual({ jsonrpc: "2.0", method: "session/status", params: { session: pi, handle: h(pi), isStreaming: true, compaction: "running", model: "m", effort: "low", unrestoredModel: null } });
+		expect(statusOut).toEqual({ jsonrpc: "2.0", method: "session/status", params: { session: pi, handle: h(pi), isStreaming: true, compaction: "running", model: "m", effort: "low", defaultEffort: null, unrestoredModel: null } });
 		// With the id Emacs names it by when it dismisses it or prompts over it (OW-jokoto).
 		expect(error).toEqual({ jsonrpc: "2.0", method: "session/error", params: { session: pi, handle: h(pi), message: "boom", errorId: "e1" } });
 	});
@@ -852,7 +852,7 @@ describe("notifications", () => {
 		expect(io.notifications()[0]).toEqual({
 			jsonrpc: "2.0",
 			method: "session/snapshot",
-			params: { session: pi, handle: h(pi), token: 1, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: "turn failed", errorId: "e1", notices: [notice] },
+			params: { session: pi, handle: h(pi), token: 1, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, defaultEffort: null, unrestoredModel: null, error: "turn failed", errorId: "e1", notices: [notice] },
 		});
 	});
 
@@ -871,13 +871,37 @@ describe("notifications", () => {
 		expect(snapshotOut).toEqual({
 			jsonrpc: "2.0",
 			method: "session/snapshot",
-			params: { session: pi, handle: h(pi), token: 1, nodes: [], isStreaming: false, compaction: null, model: "p/fallback", effort: null, unrestoredModel: "p/recorded", error: null, errorId: null, notices: [] },
+			params: { session: pi, handle: h(pi), token: 1, nodes: [], isStreaming: false, compaction: null, model: "p/fallback", effort: null, defaultEffort: null, unrestoredModel: "p/recorded", error: null, errorId: null, notices: [] },
 		});
 		expect(statusOut).toEqual({
 			jsonrpc: "2.0",
 			method: "session/status",
-			params: { session: pi, handle: h(pi), isStreaming: false, compaction: null, model: "p/fallback", effort: null, unrestoredModel: null },
+			params: { session: pi, handle: h(pi), isStreaming: false, compaction: null, model: "p/fallback", effort: null, defaultEffort: null, unrestoredModel: null },
 		});
+	});
+
+	it("carries its model's default effort on session/status, from one models/list per backend that it holds (D32 point 8)", async () => {
+		const models = [
+			{ id: "m", label: "M", efforts: [{ id: "low", description: "" }], defaultEffort: "low" },
+			{ id: "n", label: "N", efforts: [{ id: "high", description: "" }], defaultEffort: "high" },
+		];
+		const { io, server } = start({
+			"sessions/attach": (_params, server) => {
+				server.emit(snapshot(codex, h(codex), { model: "m" }));
+				return { session: summary(codex) };
+			},
+			"models/list": () => ({ models }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: codex, token: 1 } });
+		// The snapshot goes out before the listing answers, and a status follows it once it has.
+		await io.until(3);
+		const [snapshotOut, listed] = io.notifications();
+		expect(snapshotOut).toMatchObject({ method: "session/snapshot", params: { model: "m", effort: null, defaultEffort: null } });
+		expect(listed).toMatchObject({ method: "session/status", params: { handle: h(codex), model: "m", effort: null, defaultEffort: "low" } });
+		server.emit({ type: "status", session: codex, handle: h(codex), seq: 2, isStreaming: false, compaction: null, model: "n", effort: null, unrestoredModel: null });
+		await io.until(4);
+		expect(io.notifications()[2]).toMatchObject({ method: "session/status", params: { model: "n", effort: null, defaultEffort: "high" } });
+		expect(sent(server).filter(([cmd]) => cmd === "models/list")).toEqual([["models/list", { backend: "codex" }]]);
 	});
 });
 

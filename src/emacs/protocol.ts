@@ -213,7 +213,11 @@
  * its own to the server, which refuses one that has ended (D31 point 9); `sessions/detach`
  * and `sessions/close` accept one and send it nowhere (OW-nowihu); `compaction` is `"requesting"`, `"running"` or `null`;
  * `model` is a string or `null`; so is `effort`, the reasoning effort the
- * session's next turn runs at, `null` when the backend reports none; and so
+ * session's next turn runs at, `null` when the backend reports none; so is
+ * `defaultEffort`, the `defaultEffort` of `model`'s `models/list` entry,
+ * which the helper asks for once per backend and holds (D32 point 8), `null`
+ * until that listing has answered, when a status follows carrying it, or
+ * when the entry names none; and so
  * is `unrestoredModel`, the model the session's store last recorded when the
  * backend did not restore it on a resume or a fork and `model` is another in
  * its place (D23, OW-jitoni), `null` otherwise. Only Pi reports one. It
@@ -420,7 +424,7 @@
  * that attaches it:
  *
  * - `session/snapshot` -- `{ session, handle, nodes, isStreaming, compaction,
- *   model, effort, unrestoredModel, error, errorId, notices }`.
+ *   model, effort, defaultEffort, unrestoredModel, error, errorId, notices }`.
  *   Replaces everything the buffer holds; also how a session first appears
  *   after `sessions/attach`, and how a missed event is healed. `error` and
  *   `notices` are what the server holds for the session, and what
@@ -452,7 +456,7 @@
  * - `session/node` -- `{ session, handle, node }`. One node to replace by
  *   `index`.
  * - `session/status` -- `{ session, handle, isStreaming, compaction, model,
- *   effort, unrestoredModel }`.
+ *   effort, defaultEffort, unrestoredModel }`.
  * - `session/error` -- `{ session, handle, message, errorId }`. A turn error.
  *   `errorId` (string, opaque) names this raise: two with the same
  *   `message` are two errors, and `sessions/dismissError` and
@@ -566,6 +570,7 @@ export interface SessionStatusParams {
 	compaction: "requesting" | "running" | null;
 	model: string | null;
 	effort: string | null;
+	defaultEffort: string | null;
 	unrestoredModel: string | null;
 }
 
