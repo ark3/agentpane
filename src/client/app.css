@@ -278,9 +278,9 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
    would vanish on the selected row -- the one row you are most likely looking
    at. Its own token, because colour on the badge is backend identity
    (OW-pizene), and --ap-accent is already selection and streaming. Width and
-   colour are a first cut, deliberately modest: D12's reclamation is unbuilt
-   (OW-33, OW-34), so attached is unbounded and this marker is on a growing
-   share of rows. It can get louder once attached is capped. */
+   colour are a first cut, deliberately modest, chosen while attached was
+   unbounded and this marker was on a growing share of rows. Since
+   ark3/agentpane#31 D12 caps attached at 16, so it can get louder. */
 .session-attached { box-shadow: inset 3px 0 0 0 var(--ap-attached); }
 /* `overflow-anchor: none` because follow mode does this job itself, against a
    message it chose (App.svelte's anchorIndex/anchorTop). CSS scroll anchoring

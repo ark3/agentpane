@@ -45,7 +45,7 @@ One server process (Bun)
    │      • metadata only (id, cwd, timestamp, preview) — no process
    ├── SessionManager:  {backend, id} → { child: sbox subprocess, adapter }
    │      • spawn on attach (cwd = that session's workspace), not on list
-   │      • subprocess outlives the connection; reaped on shutdown (idle / LRU per D12 is decided, not built)
+   │      • subprocess outlives the connection; closed after 15 idle minutes or past 16 live (D12), and at shutdown
    │      • never killed by a dropped browser connection
    ├── Backend adapter (per session):  Pi | Codex | Claude Code
    │      • owns the child's stdio
@@ -64,7 +64,7 @@ A subprocess's lifetime is decoupled from any connection: the server, not the cl
 Because the server owns the transcript (D3), reconnect is a *repaint*, not a lifecycle event — the client re-subscribes and receives a fresh snapshot.
 
 The subprocess is *not*, however, meant to be tied to the server's whole lifetime: D12 bounds it by idleness and by a count cap, reclaimed automatically, and supersedes the original "lives as long as the server" rule.
-D12 is decided but not yet built (OW-33, OW-34, OW-35); today only shutdown reaps.
+Since ark3/agentpane#31 a session idle for 15 minutes is closed, and a start past 16 live sessions closes the least recently attached one or is refused `at_capacity`, each a visible close as Detach is (D25).
 
 ### Code map
 
