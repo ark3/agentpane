@@ -179,6 +179,7 @@ The reasoning matters more than the conclusion: if a premise turns out to be wro
 - [D29](decisions/D29.md). The socket's first frame carries a bearer token, and every request must name a loopback host
 - [D30](decisions/D30.md). A chain of requests that must all complete is one server operation
 - [D31](decisions/D31.md). One WebSocket carries commands, replies and events
+- [D32](decisions/D32.md). agentpane-mode's buffers are views the Emacs helper routes by, and the helper holds what a view has in flight
 
 ## The backend adapter contract
 

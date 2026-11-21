@@ -3,7 +3,7 @@
 This file holds rules and pointers; everything else is read on demand.
 
 - `docs/DESIGN.md`: goals, architecture, the code map, the adapter contract, and the index of decisions.
-- `docs/decisions/`: one file per decision, D1–D31, named by its number.
+- `docs/decisions/`: one file per decision, D1–D32, named by its number.
 - `docs/BACKENDS.md`: what each backend CLI was measured to do, and on which version.
 - `docs/ENVIRONMENT.md`: the machines agentpane runs and is developed on, and their gotchas.
 - `docs/MANUAL_TESTING.md`: the evidence behind live runs, searched rather than read; "HANDOFF finding N" names a row at its end.
