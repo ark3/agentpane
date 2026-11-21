@@ -10,8 +10,9 @@
  *    opened or prompted.
  *  - **The subprocess outlives the connection.** Its lifetime is tied to the
  *    server, not to a client's socket. A browser refresh drops the socket and
- *    the agent keeps working; reconnect is a repaint. Only an explicit close (or
- *    server shutdown) disposes an adapter.
+ *    the agent keeps working; reconnect is a repaint. A close disposes an
+ *    adapter, whether a client asked for it or D12's idle reaper made it, and
+ *    so does server shutdown.
  */
 
 import type {
@@ -35,6 +36,9 @@ import type {
 } from "../adapters/types.ts";
 import type { Broadcaster } from "./broadcaster.ts";
 import type { AppDeps, SessionIndex } from "./deps.ts";
+
+/** D12's idle timeout: a session with no attach, prompt or turn end for this long is closed (`#active`). */
+export const idleTimeoutMs = 15 * 60 * 1000;
 
 export class UnknownBackendError extends Error {
 	constructor(readonly backend: string) {
@@ -235,6 +239,11 @@ interface ManagedSession {
 	 * caller's, not the next verb's.
 	 */
 	queue: Promise<void>;
+	/**
+	 * Cancels D12's idle timer, which `#active` arms at each attach, prompt
+	 * and turn end; cancelled as the container leaves the table (`#remove`).
+	 */
+	idle?: () => void;
 }
 
 /**
@@ -351,6 +360,7 @@ export class SessionManager {
 	readonly #adapters: Partial<Record<BackendId, { create(ref: SessionRef): BackendAdapter }>>;
 	readonly #newId: () => string;
 	readonly #now: () => string;
+	readonly #setTimer: NonNullable<AppDeps["setTimer"]>;
 	/** The last handle minted; see `#container`. */
 	#minted = 0;
 	/** How many error ids have been minted; see `ManagedSession.errorId`. */
@@ -393,13 +403,19 @@ export class SessionManager {
 	#shuttingDown = false;
 
 	constructor(
-		deps: Pick<AppDeps, "index" | "adapters" | "newId" | "now">,
+		deps: Pick<AppDeps, "index" | "adapters" | "newId" | "now" | "setTimer">,
 		private readonly broadcaster: Broadcaster,
 	) {
 		this.#index = deps.index;
 		this.#adapters = deps.adapters;
 		this.#newId = deps.newId ?? (() => crypto.randomUUID());
 		this.#now = deps.now ?? (() => new Date().toISOString());
+		this.#setTimer =
+			deps.setTimer ??
+			((run, ms) => {
+				const timer = setTimeout(run, ms);
+				return () => clearTimeout(timer);
+			});
 		broadcaster.setSnapshotSource((handle) => {
 			const session = this.#sessions.get(handle);
 			if (!session?.adapter) return null;
@@ -469,6 +485,8 @@ export class SessionManager {
 	 */
 	#remove(session: ManagedSession): string[] {
 		if (this.#sessions.get(session.handle) === session) this.#sessions.delete(session.handle);
+		session.idle?.();
+		session.idle = undefined;
 		const removed: string[] = [];
 		for (const name of session.names) {
 			if (this.#names.get(name) !== session.handle) continue;
@@ -581,6 +599,7 @@ export class SessionManager {
 		const effectiveRef = disposing?.ref ?? ref;
 		const existing = disposing ? undefined : this.#lookup(effectiveRef);
 		if (existing?.adapter) {
+			this.#active(existing);
 			this.broadcaster.broadcastSnapshot(existing.handle);
 			return existing.adapter;
 		}
@@ -596,7 +615,9 @@ export class SessionManager {
 		const inFlight = existing ? existing.starting : earliest;
 		if (inFlight) {
 			this.#hold(inFlight, requested);
-			return (await inFlight.promise).adapter as BackendAdapter;
+			const joined = await inFlight.promise;
+			this.#active(joined);
+			return joined.adapter as BackendAdapter;
 		}
 
 		const pending: PendingStart = {
@@ -619,9 +640,36 @@ export class SessionManager {
 		this.#hold(pending, requested);
 		if (existing) this.#bind(pending, existing);
 		const session = await pending.promise;
+		this.#active(session);
 		this.broadcaster.sessionsChanged();
 		this.broadcaster.broadcastSnapshot(session.handle);
 		return session.adapter as BackendAdapter;
+	}
+
+	/**
+	 * Restart D12's idle clock, at activity of any kind: an attach, a prompt,
+	 * a turn's end. When it runs out the session is closed, as Detach closes
+	 * it (D25), unless the exemption predicate spares it then
+	 * (`#evictable`); a spared session's clock starts again at what ends its
+	 * exemption, its turn's end or its first prompt. Only for a container in
+	 * the table, which the timer checks again when it fires.
+	 */
+	#active(session: ManagedSession): void {
+		if (this.#sessions.get(session.handle) !== session) return;
+		session.idle?.();
+		session.idle = this.#setTimer(() => {
+			session.idle = undefined;
+			if (this.#sessions.get(session.handle) === session && this.#evictable(session)) void this.close(session.ref);
+		}, idleTimeoutMs);
+	}
+
+	/**
+	 * Whether D12's reaper may close `session`: it is live, and neither
+	 * streaming, whose turn a close would kill, nor `virtual`, which has
+	 * nothing on disk to resume from.
+	 */
+	#evictable(session: ManagedSession): boolean {
+		return session.adapter !== undefined && !session.virtual && !session.adapter.getState().isStreaming;
 	}
 
 	/**
@@ -820,6 +868,7 @@ export class SessionManager {
 		handle?: string,
 	): Promise<PromptDisposition> {
 		return this.#serially(ref, async (session, adapter) => {
+			this.#active(session);
 			this.markPrompted(session.ref);
 			// The session's error goes once the next prompt is admitted and has
 			// started or joined a turn, unless a newer one landed meanwhile
@@ -1147,6 +1196,7 @@ export class SessionManager {
 		this.#remove(parent);
 		parent.adapter = undefined;
 		this.#add(fork);
+		this.#active(fork);
 		this.broadcaster.forget(parent.handle);
 		this.broadcaster.ended(parent);
 		this.broadcaster.sessionsChanged();
@@ -1409,6 +1459,7 @@ export class SessionManager {
 		const settingsChanged =
 			state.model !== session.lastModel || state.effort !== session.lastEffort || unrestoredModel !== session.lastUnrestoredModel;
 		session.lastStreaming = state.isStreaming;
+		if (streamingChanged && !state.isStreaming) this.#active(session);
 		session.lastCompaction = state.compaction;
 		session.lastModel = state.model;
 		session.lastEffort = state.effort;
@@ -1499,14 +1550,14 @@ export class SessionManager {
 	}
 
 	/**
-	 * Explicit close: this and shutdown are the two things that let go of an
-	 * agent. Letting go is not always killing -- a Codex fork shares the parent's
+	 * Close: this and shutdown are the two things that let go of an agent.
+	 * Letting go is not always killing -- a Codex fork shares the parent's
 	 * app-server (OW-lajehi), so closing either of them releases a share and only
 	 * the last one out kills the child.
 	 *
-	 * D12's reaper (OW-33) inherits this path, including the disposal guard that
-	 * prevents a re-attach from sharing a session file with the adapter being
-	 * evicted.
+	 * A client's close comes here, and so does D12's idle reaper (`#active`),
+	 * a visible close as Detach is (D25), with the disposal guard that keeps a
+	 * re-attach from sharing a session file with the adapter being evicted.
 	 */
 	async close(ref: SessionRef): Promise<void> {
 		// Everything up to the first await below is one synchronous run, so an
@@ -1653,6 +1704,7 @@ export class SessionManager {
 				// still moving cannot name one or fork out of one
 				// (`ManagedSession.subscriptions`).
 				for (const off of session.subscriptions.splice(0)) off();
+				session.idle?.();
 				// No `ended`, unlike `close()`: `app.close()` closes every socket
 				// before this runs, and a client reads the drop as every session
 				// detached (D25 point 3, D26).

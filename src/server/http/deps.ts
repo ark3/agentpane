@@ -80,6 +80,12 @@ export interface AppDeps {
 	newId?: () => string;
 	/** ISO clock, injectable for the same reason. */
 	now?: () => string;
+	/**
+	 * A one-shot timer, answering its cancel: D12's idle clock runs on it, so a
+	 * test fires the reaper without waiting fifteen minutes. `setTimeout` in
+	 * production.
+	 */
+	setTimer?: (run: () => void, ms: number) => () => void;
 	/** Unexpected command failures. Defaults to stderr in production. */
 	logError?: (message: string) => void;
 	/**

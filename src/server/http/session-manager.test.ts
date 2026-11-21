@@ -23,6 +23,7 @@ import {
 	SessionManager,
 	UnknownBackendError,
 	UnknownSessionError,
+	idleTimeoutMs,
 } from "./session-manager.ts";
 import type { SessionIndex } from "./deps.ts";
 import {
@@ -32,6 +33,7 @@ import {
 	type FakeAdapterOptions,
 	FakeSessionIndex,
 	FakeSharedChild,
+	FakeTimers,
 	storedSession,
 	userMessage,
 } from "./testing/fakes.ts";
@@ -3813,5 +3815,111 @@ describe("a session's mutations run one at a time (D24, OW-sewewe)", () => {
 
 		gates[1]?.resolve();
 		await expect(two).resolves.toBeUndefined();
+	});
+});
+
+describe("the idle reaper (D12)", () => {
+	let timers: FakeTimers;
+
+	beforeEach(() => {
+		timers = new FakeTimers();
+		sessions = new SessionManager({ index, adapters: { pi }, newId: () => "created", setTimer: timers.set }, broadcaster);
+	});
+
+	it("closes an idle session, as a close does: ended, then sessions-changed", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF) as FakeAdapter;
+		const handle = sessions.summaryOf(REF)?.handle;
+		expect(timers.pending).toEqual([idleTimeoutMs]);
+		const events = broadcastEvents();
+
+		timers.runOut();
+		await settle();
+
+		expect(sessions.isAttached(REF)).toBe(false);
+		expect(adapter.disposals).toBe(1);
+		expect(events).toEqual([{ type: "ended", session: REF, handle }, { type: "sessions-changed" }]);
+		expect(timers.pending).toEqual([]);
+	});
+
+	it("spares a streaming session, and counts its idleness from the turn's end", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF) as FakeAdapter;
+		adapter.setStreaming(true);
+
+		timers.runOut();
+		await settle();
+		expect(sessions.isAttached(REF)).toBe(true);
+		expect(adapter.disposed).toBe(false);
+		expect(timers.pending).toEqual([]);
+
+		adapter.setStreaming(false);
+		expect(timers.pending).toEqual([idleTimeoutMs]);
+		timers.runOut();
+		await settle();
+		expect(sessions.isAttached(REF)).toBe(false);
+	});
+
+	it("spares a virtual session, and counts its idleness from its first prompt", async () => {
+		await sessions.create(WORKSPACE, "pi");
+
+		timers.runOut();
+		await settle();
+		expect(sessions.isAttached(CREATED)).toBe(true);
+
+		const handle = sessions.summaryOf(CREATED)?.handle as string;
+		await sessions.submit(CREATED, "hello", undefined, null, handle);
+		expect(timers.pending).toEqual([idleTimeoutMs]);
+		timers.runOut();
+		await settle();
+		expect(sessions.isAttached(CREATED)).toBe(false);
+	});
+
+	it("restarts the clock at an attach and a prompt, keeping one timer per session", async () => {
+		await sessions.attach(REF);
+		await sessions.attach(REF);
+		expect(timers.pending).toEqual([idleTimeoutMs]);
+		const handle = sessions.summaryOf(REF)?.handle as string;
+		await sessions.submit(REF, "hello", undefined, null, handle);
+		expect(timers.pending).toEqual([idleTimeoutMs]);
+	});
+
+	it("moves the clock onto a Pi fork's container, and reaps the fork by it", async () => {
+		await sessions.attach(REF);
+		const forked = await sessions.fork(REF, "e1");
+		expect(timers.pending).toEqual([idleTimeoutMs]);
+
+		timers.runOut();
+		await settle();
+		expect(sessions.isAttached(forked)).toBe(false);
+		expect((pi.forRef(REF) as FakeAdapter).disposals).toBe(1);
+	});
+
+	it("spawns exactly once for a reaped session attached again by hand, once the reaped agent is gone", async () => {
+		await sessions.attach(REF);
+		const reaped = pi.forRef(REF) as FakeAdapter;
+		const release = holdDispose(reaped);
+		timers.runOut();
+
+		const attaches = Promise.all([sessions.attach(REF), sessions.attach(REF)]);
+		await settle();
+		expect(pi.created).toHaveLength(1);
+
+		release();
+		const [a, b] = await attaches;
+		expect(a).toBe(b);
+		expect(pi.created).toHaveLength(2);
+		expect(reaped.disposals).toBe(1);
+		expect(sessions.isAttached(REF)).toBe(true);
+	});
+
+	it("leaves no timer behind a close or a shutdown", async () => {
+		await sessions.attach(REF);
+		await sessions.close(REF);
+		expect(timers.pending).toEqual([]);
+
+		await sessions.attach(REF);
+		await sessions.disposeAll();
+		expect(timers.pending).toEqual([]);
 	});
 });

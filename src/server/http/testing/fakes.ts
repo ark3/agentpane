@@ -177,6 +177,29 @@ export function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T)
 	return { promise, resolve };
 }
 
+/** One-shot timers a test runs out by hand (`AppDeps.setTimer`), so nothing waits on a clock. */
+export class FakeTimers {
+	readonly #pending = new Set<{ run: () => void; ms: number }>();
+
+	readonly set = (run: () => void, ms: number): (() => void) => {
+		const timer = { run, ms };
+		this.#pending.add(timer);
+		return () => this.#pending.delete(timer);
+	};
+
+	/** The interval of each timer set and not yet run out or cancelled. */
+	get pending(): number[] {
+		return [...this.#pending].map((timer) => timer.ms);
+	}
+
+	/** Run out every timer set now, as if each one's interval had passed. */
+	runOut(): void {
+		const due = [...this.#pending];
+		this.#pending.clear();
+		for (const timer of due) timer.run();
+	}
+}
+
 export class FakeAdapter implements BackendAdapter {
 	// -- observable by tests -------------------------------------------------
 	started = false;
