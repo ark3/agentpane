@@ -1465,7 +1465,7 @@ attach again once one is detached (ark3/agentpane#31).  Through
 `toRpcError' in src/emacs/helper.ts builds one."
   (let ((ref '(:backend "pi" :id "/s/a.jsonl"))
         (detail (concat "at capacity: all 16 live sessions are busy (streaming, "
-                        "starting, or not yet prompted); detach one and try again"))
+                        "compacting, starting, or not yet prompted); detach one and try again"))
         (calls nil)
         (buffer nil))
     (agentpane-test--with-helper

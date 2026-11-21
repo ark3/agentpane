@@ -43,7 +43,7 @@ import type { AppDeps, SessionIndex } from "./deps.ts";
  * session the exemption predicate allows, or is refused (`#makeRoom`).
  */
 export const maxSessions = 16;
-/** D12's idle timeout: a session with no attach, prompt or turn end for this long is closed (`#active`). */
+/** D12's idle timeout: a session with no attach, prompt, turn end or compaction end for this long is closed (`#active`). */
 export const idleTimeoutMs = 15 * 60 * 1000;
 
 export class UnknownBackendError extends Error {
@@ -124,13 +124,13 @@ export class AttachedNotPromptedError extends Error {
 
 /**
  * A startup found `maxSessions` agents live or starting and none it may
- * close: each streaming, still starting, or created and not yet prompted
- * (D12). Refused at once rather than waiting for one to free.
+ * close: each streaming, compacting, still starting, or created and not yet
+ * prompted (D12). Refused at once rather than waiting for one to free.
  */
 export class AtCapacityError extends Error {
 	constructor() {
 		super(
-			`at capacity: all ${maxSessions} live sessions are busy (streaming, starting, or not yet prompted); detach one and try again`,
+			`at capacity: all ${maxSessions} live sessions are busy (streaming, compacting, starting, or not yet prompted); detach one and try again`,
 		);
 		this.name = "AtCapacityError";
 	}
@@ -268,8 +268,9 @@ interface ManagedSession {
 	 */
 	attachedAt: number;
 	/**
-	 * Cancels D12's idle timer, which `#active` arms at each attach, prompt
-	 * and turn end; cancelled as the container leaves the table (`#remove`).
+	 * Cancels D12's idle timer, which `#active` arms at each attach, prompt,
+	 * turn end and compaction end; cancelled as the container leaves the
+	 * table (`#remove`).
 	 */
 	idle?: () => void;
 }
@@ -685,11 +686,13 @@ export class SessionManager {
 
 	/**
 	 * Restart D12's idle clock, at activity of any kind: an attach, a prompt,
-	 * a turn's end. When it runs out the session is closed, as Detach closes
-	 * it (D25), unless the exemption predicate spares it then
-	 * (`#evictable`); a spared session's clock starts again at what ends its
-	 * exemption, its turn's end or its first prompt. Only for a container in
-	 * the table, which the timer checks again when it fires.
+	 * a turn's end, a compaction's end. When it runs out the session is
+	 * closed, as Detach closes it (D25), unless the exemption predicate spares
+	 * it then (`#evictable`); a spared session's clock starts again at what
+	 * ends its exemption, its turn's end, its compaction's end or its first
+	 * prompt. A compaction's start does not restart it: the session is exempt
+	 * until the end, which does. Only for a container in the table, which the
+	 * timer checks again when it fires.
 	 */
 	#active(session: ManagedSession): void {
 		if (this.#sessions.get(session.handle) !== session) return;
@@ -702,11 +705,13 @@ export class SessionManager {
 
 	/**
 	 * Whether D12's reaper or cap may close `session`: it is live, and neither
-	 * streaming, whose turn a close would kill, nor `virtual`, which has
-	 * nothing on disk to resume from.
+	 * streaming nor compacting, whose turn or compaction a close would kill,
+	 * nor `virtual`, which has nothing on disk to resume from.
 	 */
 	#evictable(session: ManagedSession): boolean {
-		return session.adapter !== undefined && !session.virtual && !session.adapter.getState().isStreaming;
+		if (session.adapter === undefined || session.virtual) return false;
+		const state = session.adapter.getState();
+		return !state.isStreaming && state.compaction === null;
 	}
 
 	/**
@@ -1522,6 +1527,7 @@ export class SessionManager {
 			state.model !== session.lastModel || state.effort !== session.lastEffort || unrestoredModel !== session.lastUnrestoredModel;
 		session.lastStreaming = state.isStreaming;
 		if (streamingChanged && !state.isStreaming) this.#active(session);
+		if (compactionChanged && state.compaction === null) this.#active(session);
 		session.lastCompaction = state.compaction;
 		session.lastModel = state.model;
 		session.lastEffort = state.effort;

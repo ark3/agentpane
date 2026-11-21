@@ -3862,6 +3862,25 @@ describe("the idle reaper (D12)", () => {
 		expect(sessions.isAttached(REF)).toBe(false);
 	});
 
+	it("spares a compacting session, and counts its idleness from the compaction's end", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF) as FakeAdapter;
+		adapter.setCompaction("requesting");
+
+		timers.runOut();
+		await settle();
+		expect(sessions.isAttached(REF)).toBe(true);
+		expect(adapter.disposed).toBe(false);
+		adapter.setCompaction("running");
+		expect(timers.pending).toEqual([]);
+
+		adapter.setCompaction(null);
+		expect(timers.pending).toEqual([idleTimeoutMs]);
+		timers.runOut();
+		await settle();
+		expect(sessions.isAttached(REF)).toBe(false);
+	});
+
 	it("spares a virtual session, and counts its idleness from its first prompt", async () => {
 		await sessions.create(WORKSPACE, "pi");
 
@@ -3979,6 +3998,31 @@ describe("the subprocess cap (D12)", () => {
 		expect(pi.created.every((adapter) => !adapter.disposed)).toBe(true);
 		expect(sessions.isAttached(OVER)).toBe(false);
 		expect(sessions.holds(OVER)).toBe(false);
+	});
+
+	it("passes over a compacting session for the next eligible one", async () => {
+		await fill();
+		const [compacting, next] = STORED as [SessionRef, SessionRef];
+		(pi.forRef(compacting) as FakeAdapter).setCompaction("running");
+
+		await sessions.attach(OVER);
+
+		expect(sessions.isAttached(compacting)).toBe(true);
+		expect((pi.forRef(compacting) as FakeAdapter).disposed).toBe(false);
+		expect(sessions.isAttached(next)).toBe(false);
+		expect(sessions.isAttached(OVER)).toBe(true);
+	});
+
+	it("refuses at once when the one session not streaming is compacting", async () => {
+		await fill();
+		const [compacting, ...rest] = STORED.slice(0, maxSessions) as [SessionRef, ...SessionRef[]];
+		(pi.forRef(compacting) as FakeAdapter).setCompaction("requesting");
+		for (const ref of rest) (pi.forRef(ref) as FakeAdapter).setStreaming(true);
+
+		await expect(sessions.attach(OVER)).rejects.toThrow(AtCapacityError);
+
+		expect(pi.created).toHaveLength(maxSessions);
+		expect(pi.created.every((adapter) => !adapter.disposed)).toBe(true);
 	});
 
 	it("counts a startup still in flight, which it cannot close", async () => {

@@ -378,7 +378,7 @@ describe("client controller", () => {
 	// D12's cap: the refusal's text is what the error slot shows, and the pane
 	// stays on the preview it was attached from (ark3/agentpane#31).
 	it("shows an attach and a create refused at_capacity in the error slot, keeping the preview", async () => {
-		const detail = "at capacity: all 16 live sessions are busy (streaming, starting, or not yet prompted); detach one and try again";
+		const detail = "at capacity: all 16 live sessions are busy (streaming, compacting, starting, or not yet prompted); detach one and try again";
 		const server = fakeServer();
 		server.on["sessions/preview"].mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });
 		server.on["sessions/attach"].mockRejectedValue(new ApiClientError("at_capacity", detail));
