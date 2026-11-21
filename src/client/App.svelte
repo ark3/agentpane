@@ -561,7 +561,10 @@
 	 * `keyOf`, through `viewHandles` rather than a scan per row; else the handle
 	 * the listing gave the row, which a drop leaves on it (`onDisconnect`), so a
 	 * finished mark filed under the gone view's handle stays until the row is
-	 * selected (`selectionKey`); else its ref.
+	 * selected (`selectionKey`); else its ref. A restarted server's listing
+	 * carries none of the old handles, so a mark filed under one is drawn on
+	 * no row: the owner accepted on 2026-11-20 that a restart drops it
+	 * (ark3/agentpane#64).
 	 */
 	function rowKey(summary: SessionSummary): string {
 		return viewHandles.get(sessionKey(summary.ref)) ?? summary.handle ?? sessionKey(summary.ref);

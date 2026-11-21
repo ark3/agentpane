@@ -5106,7 +5106,11 @@ listing is never filtered, as `agentpane--refetch-sessions', the one
 caller, asks for every session, and the server lists every session it
 holds under its handle (`list' in src/server/http/session-manager.ts),
 so such a handle is one the server has let go, and it never mints one
-again (`#handlePrefix' there).  Its mark is drawn on no row, and kept,
+again (`#handlePrefix' there).  So a mark outlives a helper's death,
+whose next listing carries the same handles, until its session is
+shown, and not a close or the server's restart: the owner accepted on
+2026-11-20 that a restart drops it (ark3/agentpane#64).  Its mark is
+drawn on no row, and kept,
 would be re-checked by `agentpane--clear-seen-turns' at every window
 change for the life of Emacs, never to be seen: at 5 such marks among
 124 buffers a call cost about 310 microseconds, and at 10 among 504
