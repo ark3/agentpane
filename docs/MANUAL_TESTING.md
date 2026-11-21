@@ -5088,6 +5088,52 @@ A 31 MB `sessions/list` frame was answered; a 33 MB one closed the socket, 1006,
 On a bare `Bun.serve` with the same `websocket` options, one 40 MB frame from the server returned -1 from `send()` and arrived.
 Six 20 MB frames sent in one synchronous run returned -1 four times and then 0 twice, and the client received none of them: the socket was closed, 1006, rather than left open with frames dropped.
 
+## Live transcripts past 64 MB at a hello (ark3/agentpane#62)
+
+Run on the home server on 2026-11-20, on its system `bun 1.4.0`.
+A `hello` writes every live session's snapshot and then its reply in one synchronous run, so the question was what a client receives once that run is large (D31 point 8).
+
+**There are two ceilings, measured on a bare `Bun.serve`.**
+Inline throwaway scripts, kept nowhere, ran a bare `Bun.serve` with `maxPayloadLength` 32 MB and `closeOnBackpressureLimit`, which wrote the frames below and then one small frame from its `open` handler, to Bun's own `WebSocket` client; no agentpane code took part.
+The first ceiling is the total buffered for one socket, which is `backpressureLimit`.
+At the 64 MB agentpane then set:
+
+| Written in one run, then a small frame | The client received |
+|---|---|
+| 40 × 1 MB | all 40 and the small frame; the socket stayed open |
+| 100 × 1 MB | 2 frames, no small frame; close 1006 |
+| 12 × 6 MB | nothing; close 1006 |
+| 1 × 70 MB | nothing; close 1006 |
+
+The second is one frame, which the receiving client caps.
+With `backpressureLimit` raised to 1 GB, so the first ceiling is out of the way:
+
+| Written in one run, then a small frame | The client received |
+|---|---|
+| 300 × 1 MB | all 300 and the small frame, in 973 ms |
+| 4 × 100 MB | all 4 and the small frame, in 1541 ms |
+| 1 × 70 MB | the frame and the small frame |
+| 1 × 100 MB | the frame and the small frame |
+| 1 × 130 MB | nothing; Bun's client closed 1009 "Message too big" |
+| 1 × 200 MB | nothing; the same |
+
+So Bun's client, which is the Emacs helper's, took one frame of 100 MB and refused one of 130 MB; Chromium's cap is not measured.
+ark3/agentpane#50's record had left open which end refused its 130 MB frame; here it was the client.
+A second throwaway script on the same bare server, writing from the `message` handler as agentpane does as well as from `open`, read 2 × 40 MB then a small frame as `send()` returning -1, -1 and 0 with 81 MB buffered, and the client received nothing, close 1006.
+
+**Through agentpane's binding, a client busy through the run was refused its hello at 64 MB, and is answered at 1 GB.**
+The test "live transcripts past 64 MB" in `src/server/index.test.ts` starts `bun src/server/index.ts` against a throwaway home, with Node 26.8.1's `WebSocket` as the client.
+Two Claude Code store files of 40 exchanges, each answered by 1 MB of text, were attached through the real Claude adapter, with `direnv` on the server's `PATH` replaced by a shell script that answers control requests, so no backend took part.
+Each attach's snapshot was 41,959,231 characters, and each attach was answered under 64 MB.
+A fresh socket then said hello while the test thread blocked for 500 ms, reading nothing through the run.
+Against 64 MB the socket closed 1006 having received nothing, no snapshot and no reply, in 3 runs of the file alone and 1 inside the full suite; at 1 GB it received both snapshots, 83,918,515 characters, and then the reply.
+
+**A client that kept reading got through 84 MB under 64 MB.**
+With the test's stall removed and the limit at 64 MB, the reply arrived after both snapshots in 3 of 3 runs.
+The client drained while the server stringified the next snapshot: Bun's buffered amount, read after each send through a temporary log in `src/server/index.ts`, was 39.2 MB after the first snapshot, 60.4 MB after the second, and 43.7 MB after the reply.
+The second bare script's client shared the server's process, so it too read nothing through the run; whether the first scripts' did is not recorded.
+So the total that refuses a hello depends on how fast the client reads through the run, while one snapshot past the limit refuses it however fast the client reads: the bare server's single 70 MB frame left 70.8 MB buffered after its own `send()`.
+
 ## Both clients over the socket (ark3/agentpane#53)
 
 Run on the home server on 2026-11-19, on its system `bun 1.4.0`, Emacs 31.1 with jsonrpc.el 1.0.29, and Playwright's Chromium 151.0.7922.34, against this checkout once both clients spoke D31's socket.
