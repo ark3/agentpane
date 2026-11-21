@@ -9,7 +9,8 @@
 ;; before the event stream's drop reached the helper, which wrote it back
 ;; as a -32603 error reply carrying no `data', which must not read as a
 ;; refusal; over the one socket the close settles the prompt as the
-;; connection lost, and the helper writes no reply for it.
+;; connection lost, which the helper answers with its own -32001 and no
+;; `data' before it exits (D32 point 7).
 ;;
 ;; Run from the repository root; PROBE_RUNS sets the runs (8):
 ;;

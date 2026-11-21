@@ -596,7 +596,7 @@ What it showed is `docs/MANUAL_TESTING.md`, "A request the helper's teardown abo
 ## `emacs_helper_server_death_probe.el`
 
 Proves: **a prompt in flight when the agentpane server is killed keeps its turn-done watch for the helper's teardown** (OW-hiliti).
-Until D31 the helper, `bun run src/emacs/main.ts`, could answer the prompt first with its HTTP request's error, a `-32603` carrying no `data`; over the socket it writes no reply for it.
+Until D31 the helper, `bun run src/emacs/main.ts`, could answer the prompt first with its HTTP request's error, a `-32603` carrying no `data`; over the socket it writes no reply for it until ark3/agentpane#73, and since then answers it with its own `-32001`, again carrying no `data` (D32 point 7).
 The server is `emacs_helper_server_death_server.ts`, a stand-in socket on a free loopback port that answers the `hello` and every listing, holds the prompt unanswered, and is SIGKILLed 0.3 s after the prompt goes out.
 
 ```bash
@@ -623,7 +623,8 @@ Proves: **with no server listening, the Emacs helper answers each `sessions/list
 Until D31 the replies carried no `data`, and the requests waited on an event stream's open.
 It runs the real helper, `bun run src/emacs/main.ts`, against `http://127.0.0.1:1` with its stdin held open, as Emacs holds it.
 The vitest case in `src/emacs/helper.test.ts` holds the helper's rejection but not its race with the input's cancel: under node the replies win that race, and under Bun they once lost it to the teardown's abort.
-Since OW-nuzoto they are written anyway, the helper being silent only for the connection lost, and the input is cancelled at once; this probe is the only check that they are still written under Bun.
+Since OW-nuzoto they are written anyway, and the input is cancelled at once; this probe is the only check that they are still written under Bun.
+Until ark3/agentpane#73 the helper was silent for the connection lost; since then it answers that too, and resolves only once every answer is written (D32 point 7).
 
 ```bash
 python3 resources/probes/emacs_helper_no_server_probe.py
@@ -633,7 +634,7 @@ Run from the repository root; `PROBE_RUNS` sets the runs (3).
 Each run prints the helper's exit and its replies, and the probe prints `ANSWERED k of n` and passes only when every run answered both.
 No live model calls, no network beyond loopback.
 
-Verified with: `bun 1.4.0` on the home server, 2026-09-29; again without the timer, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19.
+Verified with: `bun 1.4.0` on the home server, 2026-09-29; again without the timer, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19; again with the answers at the close (ark3/agentpane#73), 2026-11-21, answering 3 of 3.
 What it showed is the `docs/MANUAL_TESTING.md` sections on OW-pezelo and OW-nuzoto, and "Both clients over the socket (ark3/agentpane#53)".
 
 ## `pi_store_survey.ts`

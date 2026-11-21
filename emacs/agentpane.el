@@ -320,26 +320,6 @@ stylesheet.  Roughly the browser's theme, by role rather than by colour.")
 (defvar agentpane--connection nil
   "The `jsonrpc-process-connection' to the helper, once started.")
 
-(defvar agentpane--requests-out nil
-  "Every request `agentpane--request' has sent, or made through a helper
-that has exited and so not sent, and not yet answered, newest first,
-each a cons (CONNECTION . DEATH): the connection it went out on, or
-would have, and a function that answers it as that helper's death, which
-runs FAILED (`agentpane--request').  A request leaves at its one answer, and
-the helper's teardown answers every one still here for its connection
-\(`agentpane--helper-gone').
-Agentpane's own record rather than jsonrpc.el's, since jsonrpc.el at a
-death answers only some of them: its sentinel calls each pending
-request's error handler newest first, and a synchronous request's throws
-out of that walk, so an older one gets no answer at all and whatever it
-set stays set -- `agentpane--sending' refused every later send until the
-buffer was killed (Emacs 31.1, jsonrpc.el 1.0.29, measured 2026-09-28;
-OW-laluso).  Nor does the walk reach a reply it holds back behind a
-synchronous request, as an \"anxious continuation\", which it hands on
-only after the teardown's timer; the teardown answers from a timer of
-its own one tick later, so that reply is still the answer (Emacs 31.1,
-jsonrpc.el 1.0.29, measured 2026-09-28); see `agentpane--request'.")
-
 (defun agentpane--start-helper ()
   "Start the helper process in `agentpane-project-directory'.
 The stderr buffer is named as `jsonrpc-process-connection' expects for a
@@ -363,13 +343,13 @@ only once Emacs next waits (Emacs 31.1, measured 2026-09-28; OW-toyupa),
 so this is met only by code running in the same command or timer pass
 as the death, or by a handler of what the helper wrote last, which runs
 before the teardown; see `agentpane--helper-exited'.
-`agentpane--request' passes DEAD, and leaves a request it makes then for
-the teardown to answer: those handlers run in jsonrpc.el's timers, and a
-request one chained signalled out of it, which Emacs reported as `Error
-running timer' (OW-hiliti).  The error stays for the synchronous
-`jsonrpc-request's of `agentpane--attach-now', `agentpane-new-session'
-and the model and effort readers, each run by a command, where it names
-why input typed ahead of the teardown did nothing.
+`agentpane--request' passes DEAD, and sends nothing through it: those
+handlers run in jsonrpc.el's timers, and a request one chained signalled
+out of it, which Emacs reported as `Error running timer' (OW-hiliti).
+The error stays for the synchronous `jsonrpc-request's of
+`agentpane--attach-now', `agentpane-new-session' and the model and
+effort readers, each run by a command, where it names why input typed
+ahead of the teardown did nothing.
 Started there instead, a replacement stood beside a connection buffers
 were still attached through, and the teardown missed a buffer re-attached
 through it, a late attach reply bound a buffer to it, and a late reply
@@ -403,6 +383,9 @@ handle to it again."
   (run-at-time 0 nil #'agentpane--helper-gone connection))
 
 (defvar agentpane--handle)
+(defvar agentpane--sending)
+(defvar agentpane--forking)
+(defvar agentpane--fork-sent)
 
 (defun agentpane--helper-gone (connection)
   "Tear down CONNECTION, the helper's, which has exited: forget it, and
@@ -424,46 +407,33 @@ and CONNECTION is still `agentpane--connection' here.
 The helper exits when its socket closes or its first open fails, so
 this is also how a server that went away reaches the buffers (D25).
 
-It then answers, as the helper's death, oldest first, every request
-`agentpane--request' sent through CONNECTION, or made through it once it
-had exited, and no reply or timeout has answered
-\(`agentpane--requests-out'), running each one's FAILED, which
-clears the flag that request set in its buffer: `agentpane--sending',
-`agentpane--forking', the plain fork's, and an edit's fork buffer not
-yet filled (`agentpane--fork-sent').  jsonrpc.el's sentinel skips
-some of them and its error is ignored; see `agentpane--request'.
-The answers run from a zero-delay timer of their own, one tick after
-the buffers are let go of, so those flags stay set that tick longer:
-a reply jsonrpc.el held back behind a synchronous request, as an
-\"anxious continuation\", is handed on from a timer queued as that
-request unwinds, after this teardown's timer and before this one, and
-is still the answer (Emacs 31.1, jsonrpc.el 1.0.29, measured
-2026-09-28).
-Requests sent some other way are not in that record, and set no flag
-for it to clear: the synchronous `jsonrpc-request's of
-`agentpane--attach-now', `agentpane-new-session' and the model and
-effort readers, each of which ends, by jsonrpc.el's error or its
-timeout, in the command that sent it and is still waiting on it."
+It also resets, in every transcript buffer, what a request in flight
+holds there, since a request the helper did not answer before it exited,
+as a crash leaves one, will never be answered (D32 point 7):
+`agentpane--sending', with the text it held back released
+\(`agentpane--release-queued'), the plain fork's `agentpane--forking',
+and `agentpane--fork-sent'.  A request the helper
+answered at its socket's close has run its FAILED already, among what
+the helper wrote last.  Until D32 agentpane-mode recorded every request
+it sent and answered those still out here, as the death, one tick later
+\(OW-mopuyi)."
   (setq agentpane--connection nil)
   (dolist (buffer (buffer-list))
     (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
       (with-current-buffer buffer
         (agentpane--let-go)))
+    (when (buffer-local-value 'agentpane--session buffer)
+      (with-current-buffer buffer
+        (setq agentpane--sending nil
+              agentpane--forking nil
+              agentpane--fork-sent nil)
+        (agentpane--release-queued)))
     ;; Made for a create or a fork that no snapshot has filled, it
     ;; never will be now (D32 point 3).
     (when (and (buffer-live-p buffer)
                (buffer-local-value 'agentpane--session buffer)
                (not (with-current-buffer buffer (agentpane--made-p))))
-      (kill-buffer buffer)))
-  (run-at-time 0 nil #'agentpane--answer-deaths connection))
-
-(defun agentpane--answer-deaths (connection)
-  "Answer, as its helper's death, oldest first, every request still out
-through CONNECTION in `agentpane--requests-out'; see
-`agentpane--helper-gone', which runs this from a zero-delay timer."
-  (dolist (entry (reverse (seq-filter (lambda (entry) (eq (car entry) connection))
-                                      agentpane--requests-out)))
-    (funcall (cdr entry))))
+      (kill-buffer buffer))))
 
 (defun agentpane-shutdown ()
   "Stop the helper, if one is running.
@@ -562,69 +532,31 @@ request since.  That `data' is the
 server's refusal, its `error' code and `detail' (`toRpcError' in
 src/emacs/helper.ts), nil for an error the
 helper raised itself, so a caller can tell one error code from another,
-as `agentpane-refetch' tells a preview's `gone' (D26); a timeout, the
-helper's death and a non-local exit carry none and run no ERRED.
+as `agentpane-refetch' tells a preview's `gone' (D26); a timeout and a
+non-local exit carry none and run no ERRED.
 Nothing here tells a request that reached no backend from one that may
 have: the turn-done watch a prompt arms is the helper's, which only the
-server's refusal disarms (D32 point 6).  Until then UNSENT and REPLIED
-ran for a refusal and a reply whatever became of the buffer, for the
-watch agentpane-mode kept itself (OW-hiliti, OW-kejire).
+server's refusal disarms (D32 point 6).
 
-Each request has one answer, the first of its reply, its timeout and its
-helper's death; whatever comes after is dropped.  The death is the
-helper's teardown's answer, which it gives every request its connection
-still has in `agentpane--requests-out', whether or not jsonrpc.el
-answered it (`agentpane--helper-gone', OW-mopuyi).  The \"Server died\"
-jsonrpc.el's sentinel calls every pending request's error handler with
-is no reply and answers nothing: it carries the code -1, which the
-helper never writes, its errors carrying the server's code, -32601 or
--32603 (`toRpcError' and `respond' in src/emacs/helper.ts; jsonrpc.el
-1.0.29's `jsonrpc--process-sentinel', read 2026-09-29).  That error was
-once the death's answer, and failed three ways: the sentinel does not
-forget the request, so a reply read after it still reached the success
-handler, and an error reply ran the error handler a second time (Emacs
-31.1, jsonrpc.el 1.0.29, measured 2026-09-28; OW-bukupu); it calls the
-error handlers newest first, and a synchronous request's throws out of
-that walk, so an older request got no answer at all and its buffer
-refused every later send (OW-laluso); and, read as reaching no backend,
-it abandoned the watch agentpane-mode then kept for a prompt whose turn
-had been seen streaming, so the turn-done indicator was never raised
-\(OW-zedawo).
-The teardown runs from a zero-delay timer behind the messages the helper
-wrote before it died, which the sentinel finds queued (see
-`agentpane--helper-exited'), and answers from another one tick later, so
-a reply among them is the answer: a prompt the backend admitted clears
-its draft.  So is an error reply among them, as from a live helper,
-running FAILED and ERRED, and showing the helper's own message
-\(OW-hiliti).  Until OW-hiliti the error handler answered
-nothing once the helper read as dead, so such a request failed as the
-death, running FAILED alone, and the reason the helper gave was never
-shown.  The helper writes no reply at all for a request
-its own teardown aborts (`runHelper'), so the echo area names the
-helper's exit rather than the abort.
-A reply jsonrpc.el held back, as an \"anxious continuation\", behind a
-synchronous request still out when the helper died, is no pending
-request to the sentinel, and is handed on from a timer queued as the
-synchronous request unwinds: after the teardown's timer, and before the
-one the teardown answers the helper's requests from, so it is still the
-answer (Emacs 31.1, jsonrpc.el 1.0.29, measured 2026-09-28).  A prompt
-the backend admitted clears its draft; an attach so answered binds
-nothing, since no attach reply does (`agentpane--attach'): the buffer the
-teardown let go of stays so, and nothing waits on it to go out through
-the next helper, which would forward nothing under that handle
-\(OW-kifuhi, OW-rebawa): a prompt sent while it was out went out at once,
-for the helper to hold (`agentpane--send-prompt').
-A request made through a helper that has exited, before its teardown has
-run -- from a handler of what that helper wrote last, most often, which
-runs in jsonrpc.el's timer -- is sent nowhere and signals nothing.
-It waits in `agentpane--requests-out' under that helper's connection for
-the teardown to answer as the death, running FAILED and saying so once
-\(`agentpane--connection').  It supersedes no earlier
-request, whose reply may still come among those messages and is then the
-one CALLBACK takes.  Refused with an error, as until OW-hiliti, it
-signalled out of the handler that chained it, and Emacs reported `Error
-running timer': a fork's attach so refused left the fork's buffer made
-and never shown.
+Each request has one answer, the first of its reply and its timeout;
+whatever comes after is dropped.  A request still out when the helper's
+socket closes is answered by the helper before it exits, with an error
+of its own carrying no `data', the outcome unknown (D32 point 7); that
+reply is among what the helper wrote last, which jsonrpc.el hands on
+after its sentinel and before the teardown (`agentpane--helper-exited').
+The \"Server died\" jsonrpc.el's sentinel calls every pending request's
+error handler with carries the code -1, which the helper never writes,
+and answers nothing: it reaches only some requests, and a reply read
+after it still reaches its request (jsonrpc.el 1.0.29; OW-bukupu,
+OW-laluso).  A helper that crashes leaves its requests unanswered, and
+nothing here records them: the teardown resets what a request in flight
+holds in a buffer (`agentpane--helper-gone').  Until D32 every request
+was recorded, and the teardown answered those still out (OW-mopuyi).
+A request made through a helper that has exited, before its teardown
+-- from a handler of what that helper wrote last, which runs in
+jsonrpc.el's timer -- is sent nowhere and signals nothing, which from
+that timer Emacs would report as `Error running timer' (OW-hiliti): it
+says so once and runs FAILED at once.
 
 With ALWAYS non-nil, CALLBACK runs even when a later request has been sent
 since: for a command -- attach, prompt, abort -- whose reply is not a view
@@ -642,37 +574,20 @@ returned only at its own timeout's deadline, 10s later (OW-bonode; the
 ert tests `agentpane-test-nested-refetch-*' provoke it)."
   (let* ((buffer (current-buffer))
          (answered nil)
-         entry
          id
-         (answer (lambda ()
-                   (unless answered
-                     (setq answered t
-                           agentpane--requests-out (delq entry agentpane--requests-out))
-                     t)))
-         (fail (lambda (error)
-                 (when (funcall answer)
-                   (message "agentpane: %s failed: %s" method (plist-get error :message))
-                   (agentpane--failed buffer failed)
-                   (when (and erred (buffer-live-p buffer))
-                     (with-current-buffer buffer
-                       (when (or always (eql id agentpane--latest-request))
-                         (funcall erred (plist-get error :data))))))))
-         connection)
-    (setq id (car (agentpane--failing
-                   (lambda ()
-                     (when (funcall answer)
-                       (when failed (funcall failed))))
-                   (lambda ()
-                     (setq connection (agentpane--connection t)
-                           entry (cons connection
-                                       (lambda ()
-                                         (when (funcall answer)
-                                           (message "agentpane: %s failed: the helper exited" method)
-                                           (agentpane--failed buffer failed)))))
-                     (push entry agentpane--requests-out)
-                     ;; Through a helper that has exited, nothing: the
-                     ;; teardown answers.
-                     (when (jsonrpc-running-p connection)
+         (answer (lambda () (unless answered (setq answered t))))
+         (connection
+          (agentpane--failing (lambda () (when failed (funcall failed)))
+                              (lambda () (agentpane--connection t)))))
+    (if (not (jsonrpc-running-p connection))
+        (progn
+          (message "agentpane: %s failed: the helper exited" method)
+          (when failed (funcall failed)))
+      (setq id (car (agentpane--failing
+                     (lambda ()
+                       (when (funcall answer)
+                         (when failed (funcall failed))))
+                     (lambda ()
                        (jsonrpc-async-request
                         connection method (or params :jsonrpc-omit)
                         ;; An explicit nil would mean no timeout at all.
@@ -686,16 +601,20 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                                   (agentpane--failing failed (lambda () (funcall callback result))))))))
                         :error-fn
                         (lambda (error)
-                          ;; jsonrpc.el's "Server died" is no reply: the
-                          ;; teardown answers.
-                          (unless (eql (plist-get error :code) -1)
-                            (funcall fail error)))
+                          ;; jsonrpc.el's "Server died" is no reply.
+                          (when (and (not (eql (plist-get error :code) -1))
+                                     (funcall answer))
+                            (message "agentpane: %s failed: %s" method (plist-get error :message))
+                            (agentpane--failed buffer failed)
+                            (when (and erred (buffer-live-p buffer))
+                              (with-current-buffer buffer
+                                (when (or always (eql id agentpane--latest-request))
+                                  (funcall erred (plist-get error :data)))))))
                         :timeout-fn
                         (lambda ()
                           (when (funcall answer)
                             (message "agentpane: %s timed out" method)
-                            (agentpane--failed buffer failed)))))))))
-    (when id
+                            (agentpane--failed buffer failed))))))))
       (setq agentpane--latest-request id))))
 
 (defun agentpane--failing (failed fn)
@@ -2702,7 +2621,7 @@ second send here, so a `busy' from the helper never reaches the second
 send's FAILED, which would clear the first's state, as the browser keeps
 `submit''s guard beside its own; and it holds the release of queued text
 \(`agentpane--release-queued'), an edit's opening, a rename and a close.
-A teardown answers it through FAILED (`agentpane--helper-gone').")
+A teardown resets it (`agentpane--helper-gone').")
 
 (defvar-local agentpane--editing nil
   "While the prompt region holds an earlier user message taken back to edit

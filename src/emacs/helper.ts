@@ -186,6 +186,14 @@ const NODE_INTERVAL_MS = 250;
  */
 const REFUSED = -32000;
 
+/**
+ * The JSON-RPC code of the helper's answer to a request still out when its
+ * socket closed (D32 point 7): the outcome unknown, the server having gone
+ * with or without acting on it. It carries no `data`, so agentpane-mode
+ * never reads it as a refusal.
+ */
+const LOST = -32001;
+
 /** The integer agentpane-mode names a transcript buffer by (D32 point 1). */
 type View = number;
 
@@ -241,15 +249,19 @@ interface HeldNode {
  * the input's end, each turn-done watch that has seen streaming is raised
  * first (D31 point 6; see the head of this file).
  *
- * A request still out when the socket closes gets no reply (OW-hiliti): the
- * api client settles it as the connection lost, which says nothing of
- * whether it reached the backend (D31 point 6), so agentpane-mode answers it
- * as the helper's death, and the echo area says the helper exited. That
- * holds whichever end closed it, the server going away or this helper
- * closing it as `input` ended. Nor does it abandon a turn-done watch its
+ * A request still out when the socket closes is answered before the
+ * helper resolves, whichever end closed it, the server going away or this
+ * helper closing it as `input` ended (D32 point 7): the api client settles
+ * it as the connection lost, which says nothing of whether it reached the
+ * backend (D31 point 6), so the answer is an error with the helper's own
+ * code `LOST` and no `data`, which agentpane-mode reads as an outcome
+ * unknown. At a socket close it goes after the turn-done raises, which
+ * `onDisconnect` writes first. Nor does it abandon a turn-done watch its
  * prompt armed: only a refusal carrying the server's `error` code says a
  * request reached no backend (OW-zedawo), and the helper's own -32603 is
- * an outcome unknown too.
+ * an outcome unknown too. Until D32 the helper wrote no reply for it, and
+ * agentpane-mode's teardown answered it as the helper's death (OW-hiliti,
+ * OW-mopuyi).
  *
  * A request that was never written is refused with a code of the api
  * client's own: `unreachable` for one read before a first open that failed,
@@ -258,7 +270,7 @@ interface HeldNode {
  * each, with the token file named (`token.ts`), since the server ran
  * nothing. Those replies are chains of microtasks from the rejections, which
  * the api client settles before it reports the close, and are written
- * whenever they land: nothing silences a failure but the connection lost.
+ * whenever they land, as the connection lost's are since D32 point 7.
  * Until D31 a failed first open answered -32603, an outcome unknown, where
  * it is now the refusal it is (OW-pezelo).
  */
@@ -725,13 +737,14 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		// (bun 1.4.0, measured 2026-09-28). A node the throttle holds goes out
 		// first, since no timer will send it after the exit. The api client has
 		// settled every request still out before it reports this, and their
-		// replies, for those that get one, are written as they land: under Bun
-		// the input's end once outran such replies to a teardown that silenced
-		// them, and they are written because nothing is silent but the
-		// connection lost, whenever it lands (bun 1.4.0, measured 2026-09-30;
-		// OW-nuzoto). Under node they win anyway, and the vitest case passes
-		// either way: only `resources/probes/emacs_helper_no_server_probe.py`
-		// sees it.
+		// replies, the connection lost's among them (D32 point 7), are chains
+		// of microtasks that land after these raises; the read loop's end
+		// waits for every one before the helper resolves, which at an input's
+		// end it otherwise did ahead of them (bun 1.4.0 and node, 2026-11-21).
+		// Under Bun the input's end once outran such replies to a teardown
+		// that silenced them (bun 1.4.0, measured 2026-09-30; OW-nuzoto);
+		// `resources/probes/emacs_helper_no_server_probe.py` checks the
+		// refusals among them under Bun.
 		// Each turn-done watch that has seen streaming is raised before the
 		// exit, the server having gone and its turns with it (D31 point 6),
 		// as the browser's `watchClose` badges. The input's end closes the
@@ -954,8 +967,11 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			const result = await handler(request.params);
 			write(encodeFrame({ jsonrpc: "2.0", id, result }));
 		} catch (error: unknown) {
-			// Lost with the socket: no reply; see `runHelper`.
-			if (error instanceof ConnectionLostError) return;
+			// Lost with the socket: the outcome unknown; see `runHelper`.
+			if (error instanceof ConnectionLostError) {
+				write(encodeFrame({ jsonrpc: "2.0", id, error: { code: LOST, message: "the connection to the agentpane server closed before it answered" } }));
+				return;
+			}
 			const [cause, holder] = error instanceof HeldElsewhere ? [error.refusal, error.view] : [error, undefined];
 			const named =
 				cause instanceof ApiClientError && cause.code === "unauthorized"
@@ -966,16 +982,22 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	};
 
 	const decoder = new FrameDecoder();
+	/** Every request read and not yet answered, each answered before the helper resolves (D32 point 7). */
+	const responding = new Set<Promise<void>>();
 	for (;;) {
 		const { done, value: chunk } = await reader.read();
 		if (done) break;
-		for (const message of decoder.push(chunk)) void respond(message as JsonRpcRequest);
+		for (const message of decoder.push(chunk)) {
+			const response = respond(message as JsonRpcRequest).finally(() => responding.delete(response));
+			responding.add(response);
+		}
 	}
 
 	stopped = true;
 	clearTimeout(flushTimer);
 	waiting.clear();
 	disconnect();
+	await Promise.allSettled(responding);
 }
 
 /** `holder`, where given, is the view holding the session the refusal's `attached` or `fork` names (D32 point 2). */

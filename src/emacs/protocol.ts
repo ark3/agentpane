@@ -112,6 +112,10 @@
  * carries `stops`; `sessions/abort` and `sessions/fork` carry `unwatch`; and
  * `session/detached` loses OW-kutome's `cause`, its only reader the watch
  * agentpane-mode no longer keeps.
+ * D32 raised it a twenty-seventh, under point 7 (ark3/agentpane#73): a
+ * request still out when the socket closes is answered `-32001` before
+ * the helper exits, where it got no reply and agentpane-mode's teardown
+ * answered it as the helper's death.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -492,9 +496,12 @@
  * a fork and prompt still out forks. A prompt that waited on its view's
  * attach is refused with that attach's refusal, or `not_attached`.
  * A request still out when the socket closes, at the
- * end of the helper's input or the server's going, gets no reply at all
- * (`runHelper` in helper.ts): Emacs answers it as the helper's death
- * (OW-hiliti).
+ * end of the helper's input or the server's going, is answered before the
+ * helper exits with `-32001`, its message saying the connection closed,
+ * and no `data` (`runHelper` in helper.ts, D32 point 7): like `-32603`, it
+ * says nothing of whether the server acted on the request, and is never a
+ * refusal. At a socket close it follows the `session/turnEnded` the close
+ * raises.
  *
  * Notifications, by `method`, with `params`; each names the session it is
  * about and the view it is for, and none arrives for a session no view is

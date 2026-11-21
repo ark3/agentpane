@@ -1691,7 +1691,11 @@ describe("turn ends (D32 point 6)", () => {
 		stop = null;
 		// The codex watch never saw its turn stream, and raises nothing.
 		expect(ended(io)).toEqual([[h(pi), true, 1]]);
-		expect(io.response(2)).toBeUndefined();
+		// The prompt still out is answered after the raise, its outcome unknown (D32 point 7).
+		const raised = io.out.findIndex((message) => message["method"] === "session/turnEnded");
+		const answered = io.out.findIndex((message) => message["id"] === 2);
+		expect(io.response(2)).toMatchObject({ error: { code: -32001 } });
+		expect(raised).toBeLessThan(answered);
 	});
 
 	it("sends nothing when its input ends, a watch that has seen streaming standing (D25 point 4)", async () => {
@@ -1959,19 +1963,29 @@ describe("shutdown", () => {
 	});
 
 	// The connection lost says nothing of whether the request reached a
-	// backend, so agentpane-mode answers it as the helper's death (OW-hiliti).
+	// backend, so the answer carries the helper's own code and no `data`,
+	// never a refusal, and goes out before the helper resolves (D32 point 7).
 	it.each([
 		["the input ends", (_server: SocketServer, io: ReturnType<typeof stdio>) => io.end()],
 		["the socket closes", (server: SocketServer) => server.drop(1006)],
-	])("writes no reply for a request still out when %s (OW-hiliti, D31 point 6)", async (_, ending) => {
-		const { io, server, done } = start({ "sessions/list": () => new Promise<never>(() => {}) });
+	])("answers each request still out when %s with the helper's code, before it resolves (D32 point 7)", async (_, ending) => {
+		const { io, server, done } = start({
+			"sessions/list": () => new Promise<never>(() => {}),
+			"models/list": () => new Promise<never>(() => {}),
+		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
-		await vi.waitFor(() => expect(server.calls).toHaveLength(1));
+		io.send({ jsonrpc: "2.0", id: 2, method: "models/list", params: { backend: "pi" } });
+		await vi.waitFor(() => expect(server.calls).toHaveLength(2));
+		// Read as the helper resolves, before anything queued behind it runs.
+		const answers = done.then(() => [1, 2].map((id) => io.response(id)));
 		ending(server, io);
 		expect(await settled(done)).toBe("resolved");
 		stop = null;
-		await tick();
-		expect(io.response(1)).toBeUndefined();
+		for (const answer of await answers) {
+			const { error } = answer as { error: Record<string, unknown> };
+			expect(error["code"]).toBe(-32001);
+			expect(error).not.toHaveProperty("data");
+		}
 	});
 
 	// A chunk the input delivered before the teardown cancelled it is still
