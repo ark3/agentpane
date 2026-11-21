@@ -111,6 +111,13 @@ function attaching(...replies: { summary: LiveSessionSummary; hold?: Promise<voi
 
 const attachScript = (ref: SessionRef, handle = h(ref)): Script => ({ "sessions/attach": attaching({ summary: summary(ref, handle) }) });
 
+/** Attach `ref` as `view` (D32 point 1), and wait for the snapshot that binds it and the reply. */
+async function bindView(io: ReturnType<typeof stdio>, ref: SessionRef, view: number, id = 100 + view): Promise<void> {
+	const before = io.out.length;
+	io.send({ jsonrpc: "2.0", id, method: "sessions/attach", params: { session: ref, view } });
+	await io.until(before + 2);
+}
+
 let stop: (() => Promise<void>) | null = null;
 afterEach(async () => {
 	vi.useRealTimers();
@@ -202,7 +209,7 @@ describe("the socket", () => {
 		const socket = new FakeSocket(SOCKET_PATH);
 		const done = runHelper({ input: io.input, write: io.write, openSocket: () => socket, token: () => ({ value: null, refusal: "" }), render });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, token: 2 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 2 } });
 		await tick();
 		socket.drop(1006);
 		expect(await settled(done)).toBe("resolved");
@@ -253,9 +260,10 @@ describe("requests", () => {
 		expect(sent(server)).toEqual([["sessions/preview", { ref: codex }]]);
 	});
 
-	it("forwards each verb as its command, a live session's by its handle alone, and answers null where the command returns nothing (D31 point 9)", async () => {
+	it("forwards each verb as its command, a live session's by the handle its view is bound to, and answers null where the command returns nothing (D31 point 9, D32 point 1)", async () => {
 		const model = { id: "m", label: "M", efforts: [{ id: "low", description: "Fast" }], defaultEffort: "low" };
 		const { io, server } = start({
+			...attachScript(pi),
 			"models/list": () => ({ models: [model] }),
 			"sessions/prompt": () => ({ disposition: "started" }),
 			"sessions/abort": () => ({ queued: ["first steer", "second steer"] }),
@@ -268,75 +276,98 @@ describe("requests", () => {
 			"sessions/fork": () => ({ ref: codex }),
 			"sessions/dismissError": () => null,
 		});
+		await bindView(io, pi, 1);
 		const handle = h(pi);
+		const view = 1;
 		const requests = [
 			["models/list", { backend: "pi" }, [model], ["models/list", { backend: "pi" }]],
 			// The error the buffer held at the send goes with the prompt, so admitting
 			// it clears only that one (OW-jokoto).
-			["sessions/prompt", { session: pi, handle, text: "hello", priorErrorId: "e4" }, null, ["sessions/prompt", { handle, text: "hello", priorErrorId: "e4" }]],
+			["sessions/prompt", { session: pi, view, live: true, text: "hello", priorErrorId: "e4" }, null, ["sessions/prompt", { handle, text: "hello", priorErrorId: "e4" }]],
 			// The prompts the stop took out of Pi's queue come back to the caller (OW-wisifo).
-			["sessions/abort", { session: pi, handle }, { queued: ["first steer", "second steer"] }, ["sessions/abort", { handle }]],
-			["sessions/compact", { session: pi, handle }, null, ["sessions/compact", { handle }]],
+			["sessions/abort", { session: pi, view }, { queued: ["first steer", "second steer"] }, ["sessions/abort", { handle }]],
+			["sessions/compact", { session: pi, view }, null, ["sessions/compact", { handle }]],
 			// A close names the ref (ark3/agentpane#27).
-			["sessions/close", { session: pi, handle }, null, ["sessions/close", { ref: pi }]],
-			["sessions/setModel", { session: pi, handle, model: "m" }, null, ["sessions/setModel", { handle, model: "m" }]],
-			["sessions/setEffort", { session: pi, handle, effort: "low" }, null, ["sessions/setEffort", { handle, effort: "low" }]],
-			["sessions/setName", { session: pi, handle, name: "probe name" }, null, ["sessions/setName", { handle, name: "probe name" }]],
+			["sessions/close", { session: pi, view }, null, ["sessions/close", { ref: pi }]],
+			["sessions/setModel", { session: pi, view, model: "m" }, null, ["sessions/setModel", { handle, model: "m" }]],
+			["sessions/setEffort", { session: pi, view, effort: "low" }, null, ["sessions/setEffort", { handle, effort: "low" }]],
+			["sessions/setName", { session: pi, view, name: "probe name" }, null, ["sessions/setName", { handle, name: "probe name" }]],
 			// The whole answer, so agentpane-mode can label a fork from it (D30).
-			["sessions/forkPoints", { session: pi, handle }, { points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }, ["sessions/forkPoints", { handle }]],
-			["sessions/fork", { session: pi, handle, entryId: "e1" }, codex, ["sessions/fork", { handle, entryId: "e1" }]],
+			["sessions/forkPoints", { session: pi, view }, { points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }, ["sessions/forkPoints", { handle }]],
+			["sessions/fork", { session: pi, view, entryId: "e1" }, codex, ["sessions/fork", { handle, entryId: "e1" }]],
 			// Named by id, so the server clears it only while it is still the one held (OW-desufa, OW-jokoto).
-			["sessions/dismissError", { session: pi, handle, errorId: "e4" }, null, ["sessions/dismissError", { handle, errorId: "e4" }]],
+			["sessions/dismissError", { session: pi, view, errorId: "e4" }, null, ["sessions/dismissError", { handle, errorId: "e4" }]],
 		] as const;
 		for (const [index, [method, params]] of requests.entries()) io.send({ jsonrpc: "2.0", id: index + 10, method, params });
-		await io.until(requests.length);
+		await io.until(2 + requests.length);
 		for (const [index, [, , result, command]] of requests.entries()) {
 			expect(io.response(index + 10)).toEqual({ jsonrpc: "2.0", id: index + 10, result });
 			expect(sent(server)).toContainEqual(command);
 		}
 	});
 
+	it("refuses each request on a live session from a view bound to nothing not_attached, sending the server nothing (D32 point 1)", async () => {
+		const { io, server } = start({ "sessions/list": () => ({ sessions: [] }) });
+		const view = 3;
+		const requests = [
+			["sessions/abort", { session: pi, view }],
+			["sessions/compact", { session: pi, view }],
+			["sessions/setModel", { session: pi, view, model: "m" }],
+			["sessions/setEffort", { session: pi, view, effort: "low" }],
+			["sessions/setName", { session: pi, view, name: "n" }],
+			["sessions/forkPoints", { session: pi, view }],
+			["sessions/fork", { session: pi, view, entryId: "e1" }],
+			["sessions/dismissError", { session: pi, view, errorId: "e4" }],
+			["sessions/forkAndPrompt", { session: pi, view, forkView: 4, index: 0, text: "again" }],
+		] as const;
+		for (const [index, [method, params]] of requests.entries()) io.send({ jsonrpc: "2.0", id: index + 10, method, params });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		await io.until(requests.length + 1);
+		for (const index of requests.keys()) expect(io.response(index + 10)!["error"]).toMatchObject({ code: -32000, data: { error: "not_attached" } });
+		expect(sent(server)).toEqual([["sessions/list", {}]]);
+	});
+
 	it("answers sessions/prompt with the disposition for a prompt handled without a turn, and null for a started one (OW-dulipe)", async () => {
 		const { io } = start({ "sessions/prompt": (params) => ({ disposition: params.text === "/mcp" ? "handled" : "started" }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "/mcp" } });
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "hello" } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/prompt", params: { session: pi, view: 1, text: "/mcp" } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 1, text: "hello" } });
 		await io.until(2);
 		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: { disposition: "handled" } });
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
 	});
 
 	/**
-	 * A prompt naming no handle attaches its session for the buffer that sent
-	 * the token (D30): the snapshot carrying it binds that buffer as an
-	 * attach's does (D25), and goes out before the reply, the disposition alone.
+	 * A prompt from an unbound view attaches its session for that view (D30):
+	 * the snapshot under it binds the view as an attach's does (D25), and goes
+	 * out before the reply, the disposition alone.
 	 */
-	it("names the ref of a prompt naming no handle, and sends the snapshot that attaches its session, carrying its token, before the reply (D30)", async () => {
+	it("names the ref of a prompt from an unbound view, and sends the snapshot that binds the view before the reply (D30)", async () => {
 		const { io, server } = start({
 			"sessions/prompt": (_params, server) => {
 				server.emit(snapshot(pi, "h9"));
 				return { disposition: "started", session: summary(pi, "h9") };
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, text: "hello", priorErrorId: null, token: 7 } });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, view: 7, text: "hello", priorErrorId: null } });
 		await io.until(2);
-		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { session: pi, handle: "h9", token: 7 } });
+		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { session: pi, view: 7, handle: "h9" } });
 		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 4, result: null });
 		expect(sent(server)).toEqual([["sessions/prompt", { ref: pi, text: "hello", priorErrorId: null }]]);
 	});
 
-	it("answers a handled prompt naming no handle with the disposition alone (D30)", async () => {
+	it("answers a handled prompt from an unbound view with the disposition alone (D30)", async () => {
 		const { io } = start({
 			"sessions/prompt": (_params, server) => {
 				server.emit(snapshot(pi, "h9"));
 				return { disposition: "handled", session: summary(pi, "h9") };
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, text: "/mcp", token: 7 } });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, view: 7, text: "/mcp" } });
 		await io.until(2);
 		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 4, result: { disposition: "handled" } });
 	});
 
-	it("carries the session a refused prompt naming no handle attached in the error's data, after its snapshot (D30)", async () => {
+	it("carries the session a refused prompt from an unbound view attached in the error's data, after its snapshot (D30)", async () => {
 		const attached = { ref: pi, handle: "h9" };
 		const { io } = start({
 			"sessions/prompt": (_params, server) => {
@@ -344,9 +375,9 @@ describe("requests", () => {
 				throw new ApiClientError("backend_refused", "not now", undefined, attached);
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, text: "hello", token: 7 } });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/prompt", params: { session: pi, view: 7, text: "hello" } });
 		await io.until(2);
-		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { handle: "h9", token: 7 } });
+		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { view: 7, handle: "h9" } });
 		expect(io.out[1]).toEqual({
 			jsonrpc: "2.0",
 			id: 4,
@@ -360,7 +391,7 @@ describe("requests", () => {
 				throw new ApiClientError("backend_refused", "the backend refused the prompt");
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "again" } });
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/prompt", params: { session: pi, view: 1, text: "again" } });
 		await io.until(1);
 		expect(io.response(3)).toEqual({
 			jsonrpc: "2.0",
@@ -370,11 +401,11 @@ describe("requests", () => {
 	});
 
 	/**
-	 * A create starts the session and attaches it (D30): its snapshot, carrying
-	 * the token, binds the new buffer as an attach's does (D25), and goes out
-	 * before the reply. The token goes nowhere but back.
+	 * A create starts the session and attaches it (D30): its snapshot, under
+	 * the view agentpane-mode made for it, binds that view as an attach's does
+	 * (D25), and goes out before the reply. The view goes nowhere but back.
 	 */
-	it("sends the snapshot that attaches a created session, carrying its token, before the reply (D30)", async () => {
+	it("sends the snapshot that binds a created session's view before the reply (D30, D32 point 3)", async () => {
 		const created = summary(pi, "h9");
 		const { io, server } = start({
 			"sessions/create": (_params, server) => {
@@ -382,9 +413,9 @@ describe("requests", () => {
 				return { session: created };
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/create", params: { cwd: "/work", backend: "pi", token: 7 } });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/create", params: { cwd: "/work", backend: "pi", view: 7 } });
 		await io.until(2);
-		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { session: pi, handle: "h9", token: 7 } });
+		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { session: pi, view: 7, handle: "h9" } });
 		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 4, result: created });
 		expect(sent(server)).toEqual([["sessions/create", { cwd: "/work", backend: "pi" }]]);
 	});
@@ -395,43 +426,47 @@ describe("requests", () => {
 				throw new ApiClientError("internal_error", "sbox: no git root");
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/create", params: { cwd: "/work", backend: "pi", token: 7 } });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/create", params: { cwd: "/work", backend: "pi", view: 7 } });
 		await io.until(1);
 		expect(io.notifications()).toEqual([]);
 		expect(io.response(4)!["error"]).toMatchObject({ data: { error: "internal_error", detail: "sbox: no git root" } });
 	});
 
-	it("sends the snapshot that attaches a fork, carrying its token, before the fork-and-prompt's reply, and feeds the fork after (D30)", async () => {
+	it("sends the snapshot that binds the fork's view before the fork-and-prompt's reply, and feeds the fork after (D30, D32 point 3)", async () => {
 		const reply = { session: summary(codex, "h9"), disposition: "started" as const };
 		const { io, server } = start({
+			...attachScript(pi),
 			"sessions/forkAndPrompt": (_params, server) => {
 				server.emit(snapshot(codex, "h9", { isStreaming: true }));
 				return reply;
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, handle: h(pi), index: 2, text: "again", token: 7 } });
-		await io.until(2);
-		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { session: codex, handle: "h9", token: 7, isStreaming: true } });
-		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 4, result: reply });
-		expect(sent(server)).toEqual([["sessions/forkAndPrompt", { handle: h(pi), index: 2, text: "again" }]]);
+		await bindView(io, pi, 1);
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, view: 1, forkView: 7, index: 2, text: "again" } });
+		await io.until(4);
+		expect(io.out[2]).toMatchObject({ method: "session/snapshot", params: { session: codex, view: 7, handle: "h9", isStreaming: true } });
+		expect(io.out[3]).toEqual({ jsonrpc: "2.0", id: 4, result: reply });
+		expect(sent(server)).toContainEqual(["sessions/forkAndPrompt", { handle: h(pi), index: 2, text: "again" }]);
 		server.emit(status(codex, "h9", 2, false));
-		await io.until(3);
-		expect(io.out[2]).toMatchObject({ method: "session/status", params: { handle: "h9", isStreaming: false } });
+		await io.until(5);
+		expect(io.out[4]).toMatchObject({ method: "session/status", params: { view: 7, handle: "h9", isStreaming: false } });
 	});
 
 	/** A fork attached and then not prompted is bound before its refusal goes out, so Emacs can move to it (D30). */
-	it("carries the fork a refused fork-and-prompt names in the error's data, after the snapshot that attaches it (D30)", async () => {
+	it("carries the fork a refused fork-and-prompt names in the error's data, after the snapshot that binds its view (D30)", async () => {
 		const fork = { ref: codex, handle: "h9" };
 		const { io } = start({
+			...attachScript(pi),
 			"sessions/forkAndPrompt": (_params, server) => {
 				server.emit(snapshot(codex, "h9"));
 				throw new ApiClientError("backend_refused", "not now", fork);
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, handle: h(pi), index: 0, text: "again", token: 7 } });
-		await io.until(2);
-		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { handle: "h9", token: 7 } });
-		expect(io.out[1]).toEqual({
+		await bindView(io, pi, 1);
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, view: 1, forkView: 7, index: 0, text: "again" } });
+		await io.until(4);
+		expect(io.out[2]).toMatchObject({ method: "session/snapshot", params: { view: 7, handle: "h9" } });
+		expect(io.out[3]).toEqual({
 			jsonrpc: "2.0",
 			id: 4,
 			error: { code: -32000, message: "not now", data: { error: "backend_refused", detail: "not now", fork } },
@@ -444,14 +479,16 @@ describe("requests", () => {
 			new ApiClientError("not_a_fork_point", "no point"),
 		];
 		const { io } = start({
+			...attachScript(pi),
 			"sessions/forkAndPrompt": () => {
 				throw refusals.shift()!;
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, handle: h(pi), index: 0, text: "again", token: 7 } });
-		io.send({ jsonrpc: "2.0", id: 5, method: "sessions/forkAndPrompt", params: { session: pi, handle: h(pi), index: 3, text: "again", token: 8 } });
-		await io.until(2);
-		expect(io.notifications()).toEqual([]);
+		await bindView(io, pi, 1);
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/forkAndPrompt", params: { session: pi, view: 1, forkView: 7, index: 0, text: "again" } });
+		io.send({ jsonrpc: "2.0", id: 5, method: "sessions/forkAndPrompt", params: { session: pi, view: 1, forkView: 8, index: 3, text: "again" } });
+		await io.until(4);
+		expect(io.notifications()).toHaveLength(1);
 		expect(io.response(4)!["error"]).toMatchObject({ data: { error: "internal_error", fork: { ref: codex, handle: null } } });
 		expect(io.response(5)!["error"]).toMatchObject({ data: { error: "not_a_fork_point" } });
 	});
@@ -479,7 +516,7 @@ describe("requests", () => {
 });
 
 describe("notifications", () => {
-	it("sends the attach's snapshot, tagged with its token, before its reply, and when the interval ends one node carrying the last upsert", async () => {
+	it("sends the attach's snapshot, under its view, before its reply, and when the interval ends one node carrying the last upsert", async () => {
 		const messages = fixtureMessages();
 		const tail = messages.length - 1;
 		const final = messages[tail] as AssistantMessage;
@@ -489,9 +526,9 @@ describe("notifications", () => {
 				return { session: summary(codex) };
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: codex, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: codex, view: 1 } });
 		await io.until(2);
-		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { session: codex, token: 1, isStreaming: true, compaction: null, model: "m" } });
+		expect(io.out[0]).toMatchObject({ method: "session/snapshot", params: { session: codex, view: 1, isStreaming: true, compaction: null, model: "m" } });
 		expect((io.out[0]!["params"] as { nodes: TranscriptNode[] }).nodes.map((node) => node.index)).toEqual(messages.slice(0, tail).map((_, index) => index));
 		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 1, result: summary(codex) });
 
@@ -502,7 +539,7 @@ describe("notifications", () => {
 		expect(io.notifications()).toHaveLength(1);
 		vi.advanceTimersByTime(250);
 		const [, node] = io.notifications();
-		expect(node).toMatchObject({ method: "session/node", params: { session: codex, node: { index: tail, role: "assistant" } } });
+		expect(node).toMatchObject({ method: "session/node", params: { session: codex, view: 1, node: { index: tail, role: "assistant" } } });
 		const texts = (node!["params"] as { node: TranscriptNode }).node.parts.flatMap((part) => (part.type === "text" ? [part.text] : []));
 		expect(texts).toEqual(final.content.flatMap((block) => (block.type === "text" ? [block.text] : [])));
 		expect(io.notifications()).toHaveLength(2);
@@ -510,25 +547,25 @@ describe("notifications", () => {
 
 	// A session already live: the opening snapshot formed its view, and the
 	// attach broadcasts one more before it answers.
-	it("answers an attach of a session already live from the view the reducer holds, tagged with its token", async () => {
+	it("answers an attach of a session already live from the view the reducer holds, under the attaching view", async () => {
 		const { io, server } = start(attachScript(pi));
 		server.opening = [snapshot(pi, h(pi), { isStreaming: true })];
 		await tick();
 		expect(io.out).toEqual([]);
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
-		expect(io.out[0]).toMatchObject({ params: { handle: h(pi), token: 1 } });
+		expect(io.out[0]).toMatchObject({ params: { view: 1, handle: h(pi) } });
 	});
 
 	it("detaches a session whose seq gaps, attaching nothing, and says nothing more under it until Emacs attaches it again (OW-filuge)", async () => {
 		const { io, server } = start(attachScript(pi));
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 
 		server.emit(status(pi, h(pi), 3));
 		await io.until(3);
-		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: h(pi), cause: "gapped" } });
+		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, view: 1, handle: h(pi), cause: "gapped" } });
 		// A later event under the handle finds no view to gap against again.
 		server.emit(status(pi, h(pi), 4, false));
 		// A gap in a view Emacs never attached is told nothing.
@@ -539,9 +576,9 @@ describe("notifications", () => {
 		expect(io.notifications()).toHaveLength(2);
 
 		// `a` or a send: the attach broadcasts a snapshot, which forms the view again.
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, token: 2 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(5);
-		expect(io.notifications()[2]).toMatchObject({ method: "session/snapshot", params: { session: pi, handle: h(pi), token: 2 } });
+		expect(io.notifications()[2]).toMatchObject({ method: "session/snapshot", params: { session: pi, view: 1, handle: h(pi) } });
 		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach", "sessions/attach"]);
 	});
 
@@ -550,16 +587,16 @@ describe("notifications", () => {
 		const { io, server } = start({
 			"sessions/attach": attaching({ summary: summary(pi, h(pi)) }, { summary: summary(renamed, h(pi)) }),
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		server.emit(status(renamed, h(pi), 3));
 		await io.until(3);
 
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, token: 2 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(5);
 		await tick();
 		expect(io.out.slice(2).map((message) => message["method"] ?? message["id"])).toEqual(["session/detached", "session/snapshot", 2]);
-		expect(io.out[3]).toMatchObject({ params: { session: renamed, handle: h(pi), token: 2 } });
+		expect(io.out[3]).toMatchObject({ params: { session: renamed, view: 1, handle: h(pi) } });
 	});
 
 	// The reply is handled after the events ahead of it, and under Bun 1.4.0
@@ -568,7 +605,7 @@ describe("notifications", () => {
 	it.each([
 		["ended", (server: SocketServer) => server.emit({ type: "ended", session: pi, handle: h(pi) })],
 		["gapped", (server: SocketServer) => server.emit(status(pi, h(pi), 5))],
-	])("records no attachment for an attach whose handle %s between its snapshot and its reply", async (_, between) => {
+	])("binds no view for an attach whose handle %s between its snapshot and its reply", async (_, between) => {
 		const { io, server } = start({
 			"sessions/attach": (_params, server) => {
 				server.emit(snapshot(pi));
@@ -576,7 +613,7 @@ describe("notifications", () => {
 				return { session: summary(pi) };
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(1);
 		server.emit(snapshot(pi, h(pi), { seq: 6 }));
 		server.emit(status(pi, h(pi), 7));
@@ -584,25 +621,25 @@ describe("notifications", () => {
 		expect(io.out).toEqual([{ jsonrpc: "2.0", id: 1, result: summary(pi) }]);
 	});
 
-	it("tags the snapshot that answers each attach on one handle with that attach's token (OW-rebawa, OW-wukako)", async () => {
-		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+	// A `g` on an attached buffer: the second attach's snapshot reaches the
+	// view as it arrives, and the reply sends it again (D32 point 2).
+	it("sends the snapshot again to a view that attaches the handle it already holds", async () => {
 		const { io } = start({ "sessions/attach": attaching({ summary: summary(pi) }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: alias, token: 2 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(5);
-		// The second attach's snapshot goes to the attachment under the handle
-		// as it arrives, untagged; the reply then answers the attach, tagged.
-		expect(io.out.map((message) => [message["method"] ?? message["id"], (message["params"] as { token?: number } | undefined)?.token])).toEqual([
+		expect(io.out.map((message) => [message["method"] ?? message["id"], (message["params"] as { view?: number } | undefined)?.view])).toEqual([
 			["session/snapshot", 1],
 			[1, undefined],
-			["session/snapshot", undefined],
-			["session/snapshot", 2],
+			["session/snapshot", 1],
+			["session/snapshot", 1],
 			[2, undefined],
 		]);
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: summary(pi) });
 	});
 
-	it("says nothing for a session Emacs never attached, and nothing more after sessions/close", async () => {
+	it("says nothing for a session Emacs never attached, and nothing more after the ended a sessions/close brings", async () => {
 		const { io, server } = start({
 			"sessions/attach": (_params, server) => {
 				server.emit(snapshot(codex));
@@ -610,27 +647,30 @@ describe("notifications", () => {
 				server.emit(snapshot(pi));
 				return { session: summary(pi) };
 			},
-			"sessions/close": () => null,
+			"sessions/close": (_params, server) => {
+				server.emit({ type: "ended", session: pi, handle: h(pi) });
+				return null;
+			},
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		expect(io.notifications()).toEqual([
-			{ jsonrpc: "2.0", method: "session/snapshot", params: { session: pi, handle: h(pi), token: 1, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, defaultEffort: null, unrestoredModel: null, error: null, errorId: null, notices: [] } },
+			{ jsonrpc: "2.0", method: "session/snapshot", params: { session: pi, view: 1, handle: h(pi), nodes: [], isStreaming: false, compaction: null, model: null, effort: null, defaultEffort: null, unrestoredModel: null, error: null, errorId: null, notices: [] } },
 		]);
 
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi, handle: h(pi), tokens: [1] } });
-		await io.until(3);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi, view: 1 } });
+		await io.until(4);
 		server.emit(status(pi, h(pi), 2));
 		await tick();
-		expect(io.notifications()).toHaveLength(1);
+		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/detached"]);
 	});
 
 	it("says nothing more after sessions/detach, which sends nothing, nor for an attach in flight across it", async () => {
 		const attach = held();
 		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi), hold: attach.hold }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await tick();
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, tokens: [1] } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, view: 1 } });
 		await io.until(1);
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
 
@@ -643,12 +683,13 @@ describe("notifications", () => {
 		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
 	});
 
-	// Each attaches for the buffer that sent its token, as an attach does (D30),
-	// so a detach carrying that token gives it up the same way (`forget`).
+	// Each attaches for the view it names, as an attach does (D30), so the
+	// view's detach gives it up the same way. A fork-and-prompt names the
+	// parent's view, bound first, and attaches for the fork's.
 	it.each([
 		{
 			method: "sessions/create",
-			params: { cwd: "/work", backend: "pi" },
+			params: { cwd: "/work", backend: "pi", view: 1 },
 			script: (hold: Promise<void>): Script => ({
 				"sessions/create": async (_params, server) => {
 					await hold;
@@ -659,7 +700,7 @@ describe("notifications", () => {
 		},
 		{
 			method: "sessions/prompt",
-			params: { session: pi, text: "hello", priorErrorId: null },
+			params: { session: pi, view: 1, text: "hello", priorErrorId: null },
 			script: (hold: Promise<void>): Script => ({
 				"sessions/prompt": async (_params, server) => {
 					await hold;
@@ -670,8 +711,9 @@ describe("notifications", () => {
 		},
 		{
 			method: "sessions/forkAndPrompt",
-			params: { session: codex, handle: h(codex), index: 2, text: "again" },
+			params: { session: codex, view: 5, forkView: 1, index: 2, text: "again" },
 			script: (hold: Promise<void>): Script => ({
+				...attachScript(codex),
 				"sessions/forkAndPrompt": async (_params, server) => {
 					await hold;
 					server.emit(snapshot(pi, "h9"));
@@ -679,63 +721,49 @@ describe("notifications", () => {
 				},
 			}),
 		},
-	])("binds nothing for a $method in flight across a sessions/detach carrying its token, nor feeds what it started", async ({ method, params, script }) => {
+	])("binds nothing for a $method in flight across its view's sessions/detach, nor feeds what it started", async ({ method, params, script }) => {
 		const request = held();
 		const { io, server } = start(script(request.hold));
-		io.send({ jsonrpc: "2.0", id: 1, method, params: { ...params, token: 1 } });
-		await vi.waitFor(() => expect(server.calls).toHaveLength(1));
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, tokens: [1] } });
-		await io.until(1);
+		if (method === "sessions/forkAndPrompt") await bindView(io, codex, 5);
+		const before = io.out.length;
+		io.send({ jsonrpc: "2.0", id: 1, method, params });
+		await vi.waitFor(() => expect(server.calls.map((call) => call.cmd)).toContain(method));
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, view: 1 } });
+		await io.until(before + 1);
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
 
 		request.release();
-		await io.until(2);
+		await io.until(before + 2);
 		server.emit(status(pi, "h9", 2));
 		await tick();
-		expect(io.notifications()).toEqual([]);
+		expect(io.notifications().filter((message) => (message["params"] as { view?: number }).view === 1)).toEqual([]);
 		expect(io.response(1)).toHaveProperty("result");
 	});
 
 	it("forwards the snapshot under the handle that names a rename, and nothing beside it", async () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, server } = start(attachScript(virtual));
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual, view: 1 } });
 		await io.until(2);
 		server.emit(snapshot(pi, h(virtual), { seq: 0, isStreaming: true }));
 		await io.until(3);
 		await tick();
 		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/snapshot"]);
-		expect(io.notifications()[1]).toMatchObject({ params: { session: pi, handle: h(virtual), isStreaming: true } });
-		expect(io.notifications()[1]!["params"]).not.toHaveProperty("token");
+		expect(io.notifications()[1]).toMatchObject({ params: { session: pi, view: 1, handle: h(virtual), isStreaming: true } });
 	});
 
-	it("stops on a sessions/detach carrying the token of the attach a snapshot answered, whatever ref it names (OW-linowe)", async () => {
+	it("stops at its view's sessions/detach, whatever ref the snapshot that bound it names (OW-linowe)", async () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, server } = start(attachScript(virtual));
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual, view: 1 } });
 		await io.until(2);
 		server.emit(snapshot(pi, h(virtual), { seq: 0 }));
 		await io.until(3);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: virtual, tokens: [1] } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: virtual, view: 1 } });
 		await io.until(4);
 		server.emit(status(pi, h(virtual), 1));
 		await tick();
 		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/snapshot"]);
-	});
-
-	// OW-wedeli: resolved by the ref alone, a detach naming the ref from
-	// before a rename matched nothing and the session went on being forwarded;
-	// from then until OW-nowihu the handle stopped it, silencing a buffer whose
-	// attach was answered under it after the detaching buffer's.
-	it("stops nothing on a sessions/detach carrying the handle and no token (OW-nowihu)", async () => {
-		const { io, server } = start(attachScript(pi));
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
-		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, handle: h(pi) } });
-		await io.until(3);
-		server.emit(status(pi, h(pi), 2, false));
-		await io.until(4);
-		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/status"]);
 	});
 
 	it("keeps forwarding a session Emacs attached when a second attach of its ref fails", async () => {
@@ -747,9 +775,9 @@ describe("notifications", () => {
 				return { session: summary(pi) };
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, token: 2 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(3);
 		expect(io.response(2)!["error"]).toBeDefined();
 		server.emit(status(pi, h(pi), 2));
@@ -757,20 +785,20 @@ describe("notifications", () => {
 		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/status"]);
 	});
 
-	it("answers an attach through an alias under the ref its reply names, tagged with the attach's token, and tags nothing after it", async () => {
+	it("answers an attach through an alias under the ref its reply names, and goes on sending under the view", async () => {
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi) }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias, view: 1 } });
 		await io.until(2);
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
-		expect(io.out[0]).toMatchObject({ params: { session: pi, handle: h(pi), token: 1 } });
-		expect(io.out[1]).toMatchObject({ id: 1, result: { ref: pi, handle: h(pi) } });
+		expect(io.out[0]).toMatchObject({ params: { session: pi, view: 1, handle: h(pi) } });
+		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 1, result: summary(pi) });
 
 		server.emit(status(pi, h(pi), 2, false));
 		server.emit(snapshot(pi, h(pi), { seq: 0 }));
 		await io.until(4);
-		expect(io.out[2]).toMatchObject({ method: "session/status", params: { session: pi, handle: h(pi), isStreaming: false } });
-		expect(io.out.slice(2).filter((message) => "token" in (message["params"] as object))).toEqual([]);
+		expect(io.out[2]).toMatchObject({ method: "session/status", params: { session: pi, view: 1, handle: h(pi), isStreaming: false } });
+		expect(io.out[3]).toMatchObject({ method: "session/snapshot", params: { view: 1 } });
 	});
 
 	it("sends one snapshot, of the view as the reply finds it, for an attach whose handle a rename moved before the reply (OW-wukako)", async () => {
@@ -782,51 +810,51 @@ describe("notifications", () => {
 				return { session: summary(pi, h(virtual)) };
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual, view: 1 } });
 		await io.until(2);
 		await tick();
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
-		expect(io.out[0]).toMatchObject({ params: { session: pi, handle: h(virtual), token: 1 } });
+		expect(io.out[0]).toMatchObject({ params: { session: pi, view: 1, handle: h(virtual) } });
 	});
 
 	it("passes status and error through", async () => {
 		const { io, server } = start(attachScript(pi));
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		server.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: true, compaction: "running", model: "m", effort: "low", unrestoredModel: null });
 		server.emit({ type: "error", session: pi, handle: h(pi), seq: 3, message: "boom", errorId: "e1" });
 		await io.until(4);
 		const [, statusOut, error] = io.notifications();
-		expect(statusOut).toEqual({ jsonrpc: "2.0", method: "session/status", params: { session: pi, handle: h(pi), isStreaming: true, compaction: "running", model: "m", effort: "low", defaultEffort: null, unrestoredModel: null } });
+		expect(statusOut).toEqual({ jsonrpc: "2.0", method: "session/status", params: { session: pi, view: 1, handle: h(pi), isStreaming: true, compaction: "running", model: "m", effort: "low", defaultEffort: null, unrestoredModel: null } });
 		// With the id Emacs names it by when it dismisses it or prompts over it (OW-jokoto).
-		expect(error).toEqual({ jsonrpc: "2.0", method: "session/error", params: { session: pi, handle: h(pi), message: "boom", errorId: "e1" } });
+		expect(error).toEqual({ jsonrpc: "2.0", method: "session/error", params: { session: pi, view: 1, handle: h(pi), message: "boom", errorId: "e1" } });
 	});
 
 	it("passes the server's clear of the turn error through as session/errorCleared (OW-jopifu)", async () => {
 		const { io, server } = start(attachScript(pi));
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		server.emit({ type: "error", session: pi, handle: h(pi), seq: 2, message: "boom", errorId: "e1" });
 		server.emit({ type: "error-cleared", session: pi, handle: h(pi), seq: 3 });
 		await io.until(4);
 		const [, , cleared] = io.notifications();
-		expect(cleared).toEqual({ jsonrpc: "2.0", method: "session/errorCleared", params: { session: pi, handle: h(pi) } });
+		expect(cleared).toEqual({ jsonrpc: "2.0", method: "session/errorCleared", params: { session: pi, view: 1, handle: h(pi) } });
 	});
 
 	it("passes a notice through as session/notice, not session/error (OW-tujiya)", async () => {
 		const { io, server } = start(attachScript(pi));
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		const notice = { kind: "configWarning", message: "unknown key", details: "see the docs", path: "/c.toml:3:5" };
 		server.emit({ type: "notice", session: pi, handle: h(pi), seq: 2, notice });
 		await io.until(3);
 		const [, noticed] = io.notifications();
-		expect(noticed).toEqual({ jsonrpc: "2.0", method: "session/notice", params: { session: pi, handle: h(pi), notice } });
+		expect(noticed).toEqual({ jsonrpc: "2.0", method: "session/notice", params: { session: pi, view: 1, handle: h(pi), notice } });
 	});
 
 	it("carries the notices the server's snapshot holds on every later session/snapshot (OW-tujiya, OW-bipume)", async () => {
 		const { io, server } = start(attachScript(pi));
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		const notice = { kind: "warning", message: "fallback metadata", details: null, path: null };
 		server.emit({ type: "notice", session: pi, handle: h(pi), seq: 2, notice });
@@ -847,12 +875,12 @@ describe("notifications", () => {
 				return { session: summary(pi) };
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		expect(io.notifications()[0]).toEqual({
 			jsonrpc: "2.0",
 			method: "session/snapshot",
-			params: { session: pi, handle: h(pi), token: 1, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, defaultEffort: null, unrestoredModel: null, error: "turn failed", errorId: "e1", notices: [notice] },
+			params: { session: pi, view: 1, handle: h(pi), nodes: [], isStreaming: false, compaction: null, model: null, effort: null, defaultEffort: null, unrestoredModel: null, error: "turn failed", errorId: "e1", notices: [notice] },
 		});
 	});
 
@@ -863,7 +891,7 @@ describe("notifications", () => {
 				return { session: summary(pi) };
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		server.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: false, compaction: null, model: "p/fallback", effort: null, unrestoredModel: null });
 		await io.until(3);
@@ -871,12 +899,12 @@ describe("notifications", () => {
 		expect(snapshotOut).toEqual({
 			jsonrpc: "2.0",
 			method: "session/snapshot",
-			params: { session: pi, handle: h(pi), token: 1, nodes: [], isStreaming: false, compaction: null, model: "p/fallback", effort: null, defaultEffort: null, unrestoredModel: "p/recorded", error: null, errorId: null, notices: [] },
+			params: { session: pi, view: 1, handle: h(pi), nodes: [], isStreaming: false, compaction: null, model: "p/fallback", effort: null, defaultEffort: null, unrestoredModel: "p/recorded", error: null, errorId: null, notices: [] },
 		});
 		expect(statusOut).toEqual({
 			jsonrpc: "2.0",
 			method: "session/status",
-			params: { session: pi, handle: h(pi), isStreaming: false, compaction: null, model: "p/fallback", effort: null, defaultEffort: null, unrestoredModel: null },
+			params: { session: pi, view: 1, handle: h(pi), isStreaming: false, compaction: null, model: "p/fallback", effort: null, defaultEffort: null, unrestoredModel: null },
 		});
 	});
 
@@ -892,12 +920,12 @@ describe("notifications", () => {
 			},
 			"models/list": () => ({ models }),
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: codex, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: codex, view: 1 } });
 		// The snapshot goes out before the listing answers, and a status follows it once it has.
 		await io.until(3);
 		const [snapshotOut, listed] = io.notifications();
 		expect(snapshotOut).toMatchObject({ method: "session/snapshot", params: { model: "m", effort: null, defaultEffort: null } });
-		expect(listed).toMatchObject({ method: "session/status", params: { handle: h(codex), model: "m", effort: null, defaultEffort: "low" } });
+		expect(listed).toMatchObject({ method: "session/status", params: { view: 1, handle: h(codex), model: "m", effort: null, defaultEffort: "low" } });
 		server.emit({ type: "status", session: codex, handle: h(codex), seq: 2, isStreaming: false, compaction: null, model: "n", effort: null, unrestoredModel: null });
 		await io.until(4);
 		expect(io.notifications()[2]).toMatchObject({ method: "session/status", params: { model: "n", effort: null, defaultEffort: "high" } });
@@ -915,7 +943,7 @@ describe("a handle's end (D26, OW-likopo)", () => {
 	// a prompt from it names the ended handle, and the server refuses it.
 	it("tells Emacs an attachment whose handle ended is detached, and says nothing more under it", async () => {
 		const { io, server } = start(attachScript(pi, "h1"));
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 
 		server.emit({ type: "ended", session: pi, handle: "h1" });
@@ -928,14 +956,14 @@ describe("a handle's end (D26, OW-likopo)", () => {
 			["session/detached", "h1"],
 			["sessions/changed", undefined],
 		]);
-		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: "h1", cause: "ended" } });
+		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, view: 1, handle: "h1", cause: "ended" } });
 		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
 	});
 
 	it("sends no session/detached for an attachment whose handle a listing lacks, with no ended, and goes on forwarding it", async () => {
 		const renamed: SessionRef = { backend: "pi", id: "/tmp/renamed.jsonl" };
 		const { io, server } = start({ ...attachScript(pi, "h1"), "sessions/list": () => ({ sessions: [summary(renamed, "h2")] }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 
 		server.emit({ type: "sessions-changed" });
@@ -951,27 +979,88 @@ describe("a handle's end (D26, OW-likopo)", () => {
 	});
 });
 
-// Emacs mints a token for each attach, and the helper tags the snapshot that
-// answers it, and gives it up at a detach or close, by that token alone: by
-// the ref asked for, another buffer's attach of the same ref, or a snapshot
-// under a handle the server had let go of, was taken for it.
-describe("the attach token (OW-wukako)", () => {
-	/** Each notification's method, handle and token, in order. */
+// Each buffer is a view, and the helper holds each view's binding, one view
+// to a handle (D32 points 1 and 2): a snapshot goes to the view that sent
+// the attach, a detach gives up that view's attaches alone, and an attach
+// landing on a handle another view holds binds nothing. Until D32 a token
+// per attach did this, and a claim per token on each handle (OW-wukako,
+// OW-nowihu).
+describe("views (D32)", () => {
+	/** Each notification's method, handle and view, in order. */
 	const told = (io: ReturnType<typeof stdio>) =>
 		io.notifications().map((message) => {
-			const params = message["params"] as { handle?: string; token?: number };
-			return [message["method"], params.handle, params.token];
+			const params = message["params"] as { handle?: string; view?: number };
+			return [message["method"], params.handle, params.view];
 		});
 
+	// A holds h1; B, previewing an alias of that session, attaches it and is
+	// answered under h1 too. B gets no snapshot, and the reply names A, for
+	// agentpane-mode to show A in B's window; B's detach then stops nothing
+	// of A's (D32 point 2).
+	it("binds nothing for an attach from one view landing on the handle another holds, names the holder, and leaves it bound when the first detaches", async () => {
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1") }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
+		await io.until(2);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: alias, view: 2 } });
+		await io.until(4);
+		await tick();
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: { ...summary(pi, "h1"), view: 1 } });
+		// The second attach's own broadcast reaches A as any snapshot under h1 does.
+		expect(told(io)).toEqual([
+			["session/snapshot", "h1", 1],
+			["session/snapshot", "h1", 1],
+		]);
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: alias, view: 2 } });
+		await io.until(5);
+		server.emit(status(pi, "h1", 2));
+		await io.until(6);
+		expect(told(io).slice(2)).toEqual([["session/status", "h1", 1]]);
+	});
+
+	// The same for a prompt from an unbound view, and its refusal (D30).
+	it("names the view holding the handle a prompt from an unbound view attached, in its reply and its refusal, and binds nothing", async () => {
+		const attached = { ref: pi, handle: "h1" };
+		let prompts = 0;
+		const { io } = start({
+			...attachScript(pi, "h1"),
+			"sessions/prompt": (_params, server) => {
+				server.emit(snapshot(pi, "h1"));
+				if (++prompts > 1) throw new ApiClientError("backend_refused", "not now", undefined, attached);
+				return { disposition: "started", session: summary(pi, "h1") };
+			},
+		});
+		await bindView(io, pi, 1);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 2, text: "hello" } });
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/prompt", params: { session: pi, view: 2, text: "again" } });
+		await io.until(6);
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: { view: 1 } });
+		expect(io.response(3)!["error"]).toMatchObject({ data: { error: "backend_refused", attached: { ...attached, view: 1 } } });
+		expect(told(io).every(([, , view]) => view === 1)).toBe(true);
+	});
+
+	// A prompt sent while the buffer held h1, crossing the `ended` another
+	// client's close brought: by ref it would resume what was closed (D30).
+	it("refuses a live prompt from a view the helper unbound at an ended not_attached, and sends the server nothing", async () => {
+		const { io, server } = start({ ...attachScript(pi, "h1"), "sessions/prompt": () => ({ disposition: "started" }) });
+		await bindView(io, pi, 1);
+		server.emit({ type: "ended", session: pi, handle: "h1" });
+		await io.until(3);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 1, live: true, text: "hello" } });
+		await io.until(4);
+		expect(io.response(2)!["error"]).toMatchObject({ code: -32000, data: { error: "not_attached" } });
+		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
+	});
+
 	// X holds h1; Y's attach of the same ref is in flight when X is killed.
-	it("keeps the attach another buffer has in flight when a buffer holding the handle detaches carrying its token (OW-jofodu)", async () => {
+	it("binds the attach another view has in flight when the view holding the handle detaches (OW-jofodu)", async () => {
 		const second = held();
 		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1") }, { summary: summary(pi, "h1"), hold: second.hold }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, token: 2 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 2 } });
 		await tick();
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, handle: "h1", tokens: [1] } });
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, view: 1 } });
 		await io.until(3);
 
 		second.release();
@@ -982,18 +1071,18 @@ describe("the attach token (OW-wukako)", () => {
 		expect(told(io)).toEqual([
 			["session/snapshot", "h1", 1],
 			["session/snapshot", "h1", 2],
-			["session/status", "h1", undefined],
+			["session/status", "h1", 2],
 		]);
 	});
 
-	it("keeps the attachment another buffer holds when a buffer whose attach is in flight detaches carrying that attach's token and no handle", async () => {
+	it("keeps the view holding a handle bound when a view whose attach is in flight detaches", async () => {
 		const second = held();
 		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1") }, { summary: summary(pi, "h1"), hold: second.hold }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, token: 2 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 2 } });
 		await tick();
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, tokens: [2] } });
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, view: 2 } });
 		await io.until(3);
 		server.emit(status(pi, "h1", 2));
 		await io.until(4);
@@ -1001,135 +1090,62 @@ describe("the attach token (OW-wukako)", () => {
 		second.release();
 		await io.until(6);
 		await tick();
-		// The given-up attach's snapshot reaches the buffer holding the handle,
+		// The given-up attach's snapshot reaches the view holding the handle,
 		// as any snapshot under it does, and the reply binds nothing.
 		expect(told(io)).toEqual([
 			["session/snapshot", "h1", 1],
-			["session/status", "h1", undefined],
-			["session/snapshot", "h1", undefined],
+			["session/status", "h1", 1],
+			["session/snapshot", "h1", 1],
 		]);
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: summary(pi, "h1") });
 	});
 
-	// X attached h1 and was let go of it, keeping its last token; Y attaches
-	// the same ref, under h1 again after a gap, which leaves the handle live on
-	// the server, or under h2 after an `ended`; then X is killed. Until
-	// OW-linowe a detach whose token gave up nothing dropped by the ref, and
-	// Y heard nothing more.
+	// X attached h1 and was let go of it; Y attaches the same ref, under h1
+	// again after a gap, which leaves the handle live on the server, or under
+	// h2 after an `ended`; then X is killed. Until OW-linowe a detach whose
+	// token gave up nothing dropped by the ref, and Y heard nothing more.
 	it.each([
 		["gapped", "h1"],
 		["ended", "h2"],
-	])("keeps the attachment another buffer holds when a buffer %s off its handle detaches carrying its last token and no handle (OW-linowe)", async (cause, next) => {
+	])("keeps the view another buffer holds bound when a view %s off its handle detaches (OW-linowe)", async (cause, next) => {
 		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1") }, { summary: summary(pi, next) }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		if (cause === "gapped") server.emit(status(pi, "h1", 3));
 		else server.emit({ type: "ended", session: pi, handle: "h1" });
 		await io.until(3);
 
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, token: 2 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 2 } });
 		await io.until(5);
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, tokens: [1] } });
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, view: 1 } });
 		await io.until(6);
 		server.emit(status(pi, next, 2));
 		await io.until(7);
 		expect(told(io)).toEqual([
 			["session/snapshot", "h1", 1],
-			["session/detached", "h1", undefined],
+			["session/detached", "h1", 1],
 			["session/snapshot", next, 2],
-			["session/status", next, undefined],
+			["session/status", next, 2],
 		]);
 	});
 
-	// Y holds h1; X, previewing an alias of that session, attaches it and is
-	// answered under h1 too, then is killed before handling that snapshot.
-	// X's token releases X's claim on h1 alone, and Y's still stands, so Y
-	// goes on hearing h1 (OW-nowihu).
-	it("keeps the attachment another buffer holds when a buffer whose attach was answered under that handle detaches carrying its token and no handle (OW-linowe)", async () => {
-		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
-		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1") }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
-		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: alias, token: 2 } });
-		await io.until(5);
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: alias, tokens: [2] } });
-		await io.until(6);
-		server.emit(status(pi, "h1", 2));
-		await io.until(7);
-		expect(told(io)).toEqual([
-			["session/snapshot", "h1", 1],
-			["session/snapshot", "h1", undefined],
-			["session/snapshot", "h1", 2],
-			["session/status", "h1", undefined],
-		]);
-	});
-
-	// The converse: Y, holding h1 all along, then detaches, and the attachment
-	// goes with it, though the last answer under h1 was X's.
-	it("drops the attachment when the buffer holding it detaches after one answered under it detached unhandled (OW-nowihu)", async () => {
-		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
-		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1") }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
-		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: alias, token: 2 } });
-		await io.until(5);
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: alias, tokens: [2] } });
-		await io.until(6);
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/detach", params: { session: pi, handle: "h1", tokens: [1] } });
-		await io.until(7);
-		server.emit(status(pi, "h1", 2));
-		await tick();
-		expect(told(io)).toEqual([
-			["session/snapshot", "h1", 1],
-			["session/snapshot", "h1", undefined],
-			["session/snapshot", "h1", 2],
-		]);
-	});
-
-	// X's attach is answered under h1, creating the attachment, and Y's after
-	// it, both snapshots out. X then detaches: killed before handling its own,
-	// by its token alone, or holding h1, by the handle too, reaching the helper
-	// after Y's snapshot went out, which Y then binds. Until OW-nowihu either
-	// dropped h1, and Y, holding it, heard nothing.
-	it.each([
-		["killed before handling its snapshot", undefined],
-		["holding the handle", "h1"],
-	])("keeps the attachment when the buffer whose answer created it detaches %s after another's answer under it went out (OW-nowihu)", async (_, handle) => {
-		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
-		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1") }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 2 } });
-		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: alias, token: 3 } });
-		await io.until(5);
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, handle, tokens: [2] } });
-		await io.until(6);
-		server.emit(status(pi, "h1", 2));
-		await io.until(7);
-		expect(told(io)).toEqual([
-			["session/snapshot", "h1", 2],
-			["session/snapshot", "h1", undefined],
-			["session/snapshot", "h1", 3],
-			["session/status", "h1", undefined],
-		]);
-	});
-
-	// X's attach (token 1) timed out in Emacs and X sent another (token 2);
-	// the helper answers the first under h1, which no buffer binds, and X is
-	// killed while the second still waits. Until OW-nowihu nothing X could
-	// send named the first, and h1 stayed attached with no buffer.
-	it("drops the attachment a superseded attach's answer created when the buffer that sent both detaches (OW-nowihu)", async () => {
+	// X's attach timed out in Emacs and X sent another; the helper answers the
+	// first under h1, binding X, and X is killed while the second still waits.
+	// Until OW-nowihu nothing X could send named the first, and h1 stayed
+	// attached with no buffer.
+	it("unbinds a view and gives up its attach still out at its detach (OW-nowihu)", async () => {
 		const first = held();
 		const second = held();
 		const { io, server } = start({
 			"sessions/attach": attaching({ summary: summary(pi, "h1"), hold: first.hold }, { summary: summary(pi, "h1"), hold: second.hold }),
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await tick();
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, token: 2 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await tick();
 		first.release();
 		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, tokens: [2, 1] } });
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, view: 1 } });
 		await io.until(3);
 		second.release();
 		await io.until(4);
@@ -1139,33 +1155,8 @@ describe("the attach token (OW-wukako)", () => {
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: summary(pi, "h1") });
 	});
 
-	// A merge and a `g`: B's attach of an alias is answered under the h1 A
-	// holds, and B absorbs A, which never detaches; B's refetch is answered
-	// under h1 again. B's detach carries every token either sent.
-	it("drops the attachment when the buffer holding it detaches after a merge and a refetch (OW-nowihu)", async () => {
-		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
-		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1") }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
-		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: alias, token: 2 } });
-		await io.until(5);
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/attach", params: { session: alias, token: 3 } });
-		await io.until(8);
-		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/detach", params: { session: pi, handle: "h1", tokens: [3, 2, 1] } });
-		await io.until(9);
-		server.emit(status(pi, "h1", 2));
-		await tick();
-		expect(told(io)).toEqual([
-			["session/snapshot", "h1", 1],
-			["session/snapshot", "h1", undefined],
-			["session/snapshot", "h1", 2],
-			["session/snapshot", "h1", undefined],
-			["session/snapshot", "h1", 3],
-		]);
-	});
-
 	// The server's attach waits out the close's disposal and spawns afresh.
-	it("keeps an attach sent while a close of its ref is out, answered under the handle the server minted after it (OW-jofodu)", async () => {
+	it("binds an attach sent while a close of its ref is out, answered under the handle the server minted after it (OW-jofodu)", async () => {
 		const close = held();
 		const attach = held();
 		const { io, server } = start({
@@ -1176,11 +1167,11 @@ describe("the attach token (OW-wukako)", () => {
 				return null;
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi, handle: "h1", tokens: [1] } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi, view: 1 } });
 		await tick();
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/attach", params: { session: pi, token: 3 } });
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await tick();
 		close.release();
 		await io.until(4);
@@ -1193,9 +1184,9 @@ describe("the attach token (OW-wukako)", () => {
 		await io.until(7);
 		expect(told(io)).toEqual([
 			["session/snapshot", "h1", 1],
-			["session/detached", "h1", undefined],
-			["session/snapshot", "h2", 3],
-			["session/status", "h2", undefined],
+			["session/detached", "h1", 1],
+			["session/snapshot", "h2", 1],
+			["session/status", "h2", 1],
 		]);
 	});
 
@@ -1204,7 +1195,7 @@ describe("the attach token (OW-wukako)", () => {
 	it("answers an attach under the handle its reply names, not a handle a snapshot of its ref came under first (OW-savafi)", async () => {
 		const attach = held();
 		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h2"), hold: attach.hold }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await tick();
 		server.emit(snapshot(pi, "h1"));
 		attach.release();
@@ -1216,7 +1207,7 @@ describe("the attach token (OW-wukako)", () => {
 		await tick();
 		expect(told(io)).toEqual([
 			["session/snapshot", "h2", 1],
-			["session/status", "h2", undefined],
+			["session/status", "h2", 1],
 		]);
 	});
 });
@@ -1249,7 +1240,7 @@ describe("the node throttle (OW-jeruye)", () => {
 			},
 		);
 		const { io, server } = started;
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
 		await io.until(2);
 		rendered.length = 0;
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -1327,7 +1318,7 @@ describe("the node throttle (OW-jeruye)", () => {
 		const { io, upsert, since } = await streaming({ "sessions/prompt": () => ({ disposition: "started" }) });
 		upsert(1, said("a"));
 		upsert(1, said("ab"));
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "more" } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 1, live: true, text: "more" } });
 		await settle();
 		expect(since()).toEqual(["session/node", 2]);
 		expect(textOf(io.out[2]!)).toEqual(["ab"]);
@@ -1346,7 +1337,7 @@ describe("the node throttle (OW-jeruye)", () => {
 	it("never sends a node held for a session detached before the interval ends", async () => {
 		const { io, upsert, since } = await streaming();
 		upsert(1, said("a"));
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, handle: h(pi), tokens: [1] } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, view: 1 } });
 		await settle();
 		vi.advanceTimersByTime(250);
 		expect(since()).toEqual([2]);
@@ -1359,8 +1350,8 @@ describe("the node throttle (OW-jeruye)", () => {
 				return { session: summary(ref) };
 			},
 		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: codex, token: 2 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: codex, view: 2 } });
 		await io.until(4);
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		server.emit({ type: "upsert", session: pi, handle: h(pi), seq: 2, index: 1, message: said("a") });
@@ -1371,13 +1362,18 @@ describe("the node throttle (OW-jeruye)", () => {
 		]);
 	});
 
-	it("never sends a node held for a session closed by its attach's token, only the reply", async () => {
-		const { io, upsert, since } = await streaming({ "sessions/close": () => null });
+	it("never sends a node held for a session whose handle its close ended, only the detached and the reply", async () => {
+		const { io, upsert, since } = await streaming({
+			"sessions/close": (_params, server) => {
+				server.emit({ type: "ended", session: pi, handle: h(pi) });
+				return null;
+			},
+		});
 		upsert(1, said("a"));
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi, tokens: [1] } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi, view: 1 } });
 		await settle();
 		vi.advanceTimersByTime(250);
-		expect(since()).toEqual([2]);
+		expect(since()).toEqual(["session/detached", 2]);
 	});
 
 	it("skips a held node whose rendering throws when the interval ends, and sends the nodes held around it (OW-vejeka)", async () => {
@@ -1394,7 +1390,7 @@ describe("the node throttle (OW-jeruye)", () => {
 		const { io, upsert, since } = await streaming({ "sessions/prompt": () => ({ disposition: "started" }) });
 		upsert(1, said(unrenderable));
 		upsert(2, { role: "user", content: [{ type: "text", text: "next" }], timestamp: 2 });
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "more" } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 1, live: true, text: "more" } });
 		await settle();
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
 		expect(since()).toEqual(["session/node", 2]);
@@ -1416,10 +1412,10 @@ describe("the node throttle (OW-jeruye)", () => {
 describe("the handle (D24, OW-suyinu)", () => {
 	const handle = "h1";
 
-	it("rides every per-session notification, taken from the event it answers", async () => {
+	it("rides every per-session notification, taken from the event it answers, beside the view (D32 point 1)", async () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(virtual, handle) }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual, view: 1 } });
 		await io.until(2);
 		server.emit(snapshot(pi, handle, { seq: 0 }));
 		server.emit({ type: "upsert", session: pi, handle, seq: 1, index: 0, message: { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 0 } });
@@ -1440,16 +1436,16 @@ describe("the handle (D24, OW-suyinu)", () => {
 			"session/notice",
 			"session/errorCleared",
 		]);
-		for (const message of perSession) expect(message["params"]).toMatchObject({ handle });
+		for (const message of perSession) expect(message["params"]).toMatchObject({ view: 1, handle });
 	});
 
 	it("rides the summary sessions/attach answers, and the snapshot it sends before the reply", async () => {
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io } = start({ "sessions/attach": attaching({ summary: summary(pi, handle) }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias, view: 1 } });
 		await io.until(2);
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
-		expect(io.out[0]).toMatchObject({ params: { session: pi, handle, token: 1 } });
+		expect(io.out[0]).toMatchObject({ params: { session: pi, view: 1, handle } });
 		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: summary(pi, handle) });
 	});
 });
@@ -1489,7 +1485,7 @@ describe("shutdown", () => {
 		await vi.waitFor(() => expect(server.calls).toHaveLength(1));
 
 		// In one synchronous run: the chunk is delivered, then the socket closes.
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "hello" } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, view: 1, text: "hello" } });
 		server.drop(1006);
 		expect(await settled(done)).toBe("resolved");
 		stop = null;

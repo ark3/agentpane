@@ -608,7 +608,7 @@ emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 Run from the repository root; `PROBE_RUNS` sets the runs (8).
 It prints `RAISED k of n`, with each run's result and the prompt's failure message, and passes only when every run raised.
 
-Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19.
+Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19; again under views (ark3/agentpane#70), 2026-11-20, raising 8 of 8.
 What it showed is in the same `docs/MANUAL_TESTING.md` sections.
 
 ## Why these live here

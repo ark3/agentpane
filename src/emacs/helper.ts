@@ -17,8 +17,8 @@
  * `{ state, recover, refreshSessions }` and nothing more, so
  * the loop dispatches on the raw event's `type` beside that result. A `seq`
  * gap detaches that one session, as the browser's does (D25 point 5): its
- * view goes, and Emacs is told `session/detached` under its handle where it
- * attached it, and nothing is attached on its behalf (`detachGapped` below).
+ * view goes, and Emacs is told `session/detached` under its handle where a
+ * view was bound to it, and nothing is attached on its behalf (`detachGapped` below).
  *
  * One socket, filtered. It opens as the first request for a known method is
  * read, and stays open until the helper exits; a request read before it has opened goes out
@@ -31,48 +31,33 @@
  * is ordered against the `sessions-changed` around it (OW-nufafi). The
  * server sends an opening snapshot for every live session and broadcasts
  * every event to every client, so views Emacs never attached form in the
- * reducer too; notifications go out only for sessions Emacs attached through this
- * helper and has not detached or closed since. That set is kept here by
- * handle, like the reducer's views (OW-kimaya), so a rename moves nothing in
- * it. An attachment is recorded when the snapshot that introduces it goes
- * out to Emacs, and at nothing else (OW-rebawa): that snapshot is what
- * attaches the buffer that asked, and the attach's reply only ends its
- * request (`agentpane--attach` in emacs/agentpane.el), so the helper feeds
- * exactly the buffers it has told they are attached. The snapshot that
- * answers an attach goes out as its reply is handled, from the view the
- * reducer holds under the handle the reply names, which the attach's own
- * snapshot formed before the reply arrived; so it goes out before the
- * reply, and the buffer reads at the reply whether it is attached
- * (`bind` below). An attachment never moves to another handle: one whose
- * handle the server let go of is dropped at the `ended` the server sends
- * under it, and Emacs told (`end` below, D26); a listing drops nothing.
- * `sessions/changed` is unfiltered.
+ * reducer too; notifications go out only for a handle a view of Emacs's is
+ * bound to. `sessions/changed` is unfiltered.
  *
- * Every per-session notification carries the session's `handle` (D24,
- * OW-suyinu), taken from the raw event being answered, or from the attach
- * reply's summary for what `sessions/attach` says itself. A request on a live
- * session sends its own to the server (D31 point 9). `sessions/detach` and
- * `sessions/close` send none: those stop an attachment by the `tokens` they
- * carry, and the attachment under a handle goes once every token answered
- * under it is released (`forget` below, OW-nowihu). No notification says a
- * rename: agentpane-mode keys its buffers by the handle (OW-danifa) and
- * takes the ref from any notification under it, as the reducer does, so the
- * snapshot under the handle that follows a rename on the server is all it
- * needs (OW-mofuho). What that is not enough for is the snapshot that
- * answers an attach, which must reach the buffer that asked: that buffer
- * holds no handle yet, and may hold another ref than the snapshot names,
- * or the ref of a session another buffer holds under that handle, and the
- * reply binds nothing. So agentpane-mode mints a token for each attach it
- * sends, and each snapshot that answers an attach carries that attach's
- * `token`, one such snapshot for each attach it answers, and agentpane-mode
- * binds it to the buffer that sent it, which takes the handle from it and
- * absorbs a buffer already holding the handle (`bind` below,
- * `agentpane--notified-buffer` and `agentpane--attach-by` in
- * emacs/agentpane.el). The helper keeps each attach it waits on by that
- * token, and a detach or close gives up only the attaches whose tokens it
- * carries: until OW-wukako both went by the ref asked for, which another
- * buffer's attach, or a snapshot under a handle the server had since let
- * go of, could share (OW-jofodu, OW-savafi). The helper does not
+ * Views (D32 points 1 and 2). Each transcript buffer is a view, named by an
+ * integer agentpane-mode mints when it makes the buffer and never changes,
+ * and every per-session request names its view. The helper holds each
+ * view's binding, the handle it is attached under, in `views`, with at most
+ * one view per handle, and sends every per-session notification under the
+ * view bound to its handle, carrying `view` beside `handle` (D24,
+ * OW-suyinu). It stores no ref: requests carry `session`, and a fresh
+ * helper knows no views. A binding is made when the snapshot that answers
+ * an attach goes out to the view that sent it, and at nothing else
+ * (OW-rebawa): the reply only ends the request (`bind` below). It goes at
+ * the view's `sessions/detach`, at the server's `ended` under the handle
+ * (`end`), and at a `seq` gap (`detachGapped`), each of which Emacs is told
+ * of but the detach; a listing drops nothing. So agentpane-mode sends no
+ * handle, and the helper fills it in from the binding for every request on
+ * a live session, refusing one from a view bound to nothing `not_attached`,
+ * as the server refuses an ended handle (D31 point 9). A binding also
+ * changes at an `ended` or a gap, which reach the helper on their own, so a
+ * prompt sent while the buffer held a handle carries `live`, and is refused
+ * rather than sent by ref once the binding has gone: by ref it would resume
+ * the session another client closed (D30). An attach from one view that
+ * lands on a handle another view holds binds nothing, and its reply names
+ * the holder, for agentpane-mode to show (D32 point 2); no buffers merge.
+ * Until D32 agentpane-mode minted a token per attach, and the helper held
+ * a claim per token on each handle (OW-wukako, OW-nowihu). The helper does not
  * reconnect: when the socket closes, or fails to open, the helper exits
  * (D25 point 4, D31 point 6). Agentpane is local-only, so a close means the
  * server went away, and there is nothing to reconnect to. agentpane-mode takes the exit to mean every
@@ -98,7 +83,7 @@
  * write forces it. A held node is rendered from the transcript as it stood
  * at its upsert, not from the current state, which a later snapshot may have
  * rewound past it, so it is exactly the node the unthrottled stream would
- * have sent. A detach or close drops what is held for its session, and the
+ * have sent. A detach, an `ended` or a gap drops what is held under its handle, and the
  * end of the input drops everything held, so no timer keeps the process up
  * past it (OW-kofuda). A held node whose rendering throws is skipped and the
  * rest still go out (OW-vejeka): the send runs from the timer, where a throw
@@ -145,19 +130,35 @@ const NODE_INTERVAL_MS = 250;
  */
 const REFUSED = -32000;
 
+/** The integer agentpane-mode names a transcript buffer by (D32 point 1). */
+type View = number;
+
 /**
- * A request that attaches a session for the buffer that sent `token`
- * (OW-rebawa, OW-wukako), not yet replied to; `done` once its snapshot has
- * gone out, or a detach or close carrying its token gave it up (`forget`).
+ * A request that attaches a session for `view` (OW-rebawa), not yet replied
+ * to; `done` once its snapshot has gone out, or the view's detach gave it up.
  */
 interface Attaching {
-	token: number;
+	view: View;
 	done: boolean;
+}
+
+/**
+ * A refusal naming a session it attached, or a fork, that another view holds
+ * (D32 point 2): it goes out naming that view beside the session.
+ */
+class HeldElsewhere extends Error {
+	constructor(
+		readonly refusal: ApiClientError,
+		readonly view: View,
+	) {
+		super(refusal.message);
+	}
 }
 
 /** An upsert not yet sent: what `session/node` will say, short of the rendering. */
 interface HeldNode {
 	session: SessionRef;
+	view: View;
 	handle: string;
 	target: UpsertTarget;
 	isStreaming: boolean;
@@ -203,12 +204,14 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	});
 
 	let state: ClientState = initialClientState();
-	/** Handle of each session Emacs has attached -> the ref it last told Emacs, which is the one Emacs names it by. */
-	const attached = new Map<string, SessionRef>();
+	/** Each bound view -> the handle it is attached under, no handle under two views; see the head of this file. */
+	const views = new Map<View, string>();
+	const holderOf = (handle: string): View | undefined => {
+		for (const [view, held] of views) if (held === handle) return view;
+		return undefined;
+	};
 	/** Every request that attaches, not yet replied to; see `Attaching`. */
 	const attaching = new Set<Attaching>();
-	/** Handle of each session Emacs has attached -> the token of every attach answered under it that Emacs has not released; see `forget`. */
-	const claims = new Map<string, Set<number>>();
 	let stopped = false;
 	const reader = options.input.getReader();
 	/** Held nodes by handle and node index, in the order each was first held; a later upsert keeps its place. */
@@ -220,14 +223,14 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		flushTimer = undefined;
 		const nodes = [...waiting.values()];
 		waiting.clear();
-		for (const { session, handle, target, isStreaming } of nodes) {
+		for (const { session, view, handle, target, isStreaming } of nodes) {
 			let node: TranscriptNode;
 			try {
 				node = projectTarget(target, isStreaming, render);
 			} catch {
 				continue;
 			}
-			const notification: HelperNotification = { method: "session/node", params: { session, handle, node } };
+			const notification: HelperNotification = { method: "session/node", params: { session, view, handle, node } };
 			options.write(encodeFrame({ jsonrpc: "2.0", ...notification }));
 		}
 	};
@@ -253,7 +256,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	/**
 	 * The `defaultEffort` of `view`'s model, from its backend's listing (D32
 	 * point 8), as the browser's effort select reads `ModelInfo.defaultEffort`;
-	 * `null` until the listing has answered, and then each attached session
+	 * `null` until the listing has answered, and then each bound view's session
 	 * on the backend whose model names one is sent a status carrying it.
 	 */
 	const defaultEffortOf = (view: SessionView): string | null => {
@@ -269,10 +272,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			(models) => {
 				listings.set(backend, models);
 				if (stopped) return;
-				for (const handle of attached.keys()) {
+				for (const [bound, handle] of views) {
 					const view = state.sessions[handle];
 					if (view?.ref.backend === backend && defaultEffortOf(view) !== null) {
-						notify({ method: "session/status", params: statusOf(view, handle) });
+						notify({ method: "session/status", params: statusOf(view, bound, handle) });
 					}
 				}
 			},
@@ -280,8 +283,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		);
 	};
 
-	const statusOf = (view: SessionView, handle: string) => ({
+	const statusOf = (view: SessionView, bound: View, handle: string) => ({
 		session: view.ref,
+		view: bound,
 		handle,
 		isStreaming: view.isStreaming,
 		compaction: view.compaction ?? null,
@@ -291,13 +295,12 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		unrestoredModel: view.unrestoredModel ?? null,
 	});
 
-	/** Send `view` as a snapshot under `handle`, answering the attach that sent `token` if given. */
-	const notifySnapshot = (view: SessionView, handle: string, token?: number): void => {
+	/** Send `view` to the view `bound` as a snapshot under `handle`. */
+	const notifySnapshot = (view: SessionView, bound: View, handle: string): void => {
 		notify({
 			method: "session/snapshot",
 			params: {
-				...statusOf(view, handle),
-				...(token === undefined ? {} : { token }),
+				...statusOf(view, bound, handle),
 				nodes: projectTranscript(view.messages, view.isStreaming, render),
 				error: view.error,
 				errorId: view.errorId,
@@ -308,31 +311,40 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 
 	/**
 	 * Answer `attach`, whose reply named `handle`, with the snapshot that
-	 * attaches its buffer, from the view the reducer holds under the handle;
+	 * binds its view, from the view the reducer holds under the handle;
 	 * called as the reply is handled, and before it goes out. The reply
 	 * follows the snapshot its command broadcast, so the view is there,
 	 * unless something handled since took it: an `ended` or a gap under the
-	 * handle, after which nothing is recorded and the buffer is not attached,
-	 * as it should not be (D25 point 5, D26). Nothing either for an attach a
-	 * detach or close gave up while it was out (`forget`).
+	 * handle, after which nothing is bound and the buffer is not attached,
+	 * as it should not be (D25 point 5, D26). Nothing either for an attach the
+	 * view's detach gave up while it was out. Where another view holds the
+	 * handle, nothing is bound and that view is answered, for the reply to
+	 * name (D32 point 2); where the view itself holds it, a `g` on an
+	 * attached buffer, it is sent the snapshot again. A view bound to
+	 * another handle moves to this one, dropping what was held for the old.
 	 */
-	const bind = (attach: Attaching, handle: string): void => {
-		if (attach.done) return;
+	const bind = (attach: Attaching, handle: string): View | undefined => {
+		if (attach.done) return undefined;
 		attach.done = true;
 		const view = state.sessions[handle];
-		if (!view) return;
-		attached.set(handle, view.ref);
-		claims.set(handle, (claims.get(handle) ?? new Set()).add(attach.token));
-		notifySnapshot(view, handle, attach.token);
+		if (!view) return undefined;
+		const holder = holderOf(handle);
+		if (holder !== undefined && holder !== attach.view) return holder;
+		const old = views.get(attach.view);
+		if (old !== undefined && old !== handle) dropHeld(old);
+		views.set(attach.view, handle);
+		notifySnapshot(view, attach.view, handle);
+		return undefined;
 	};
 
 	/**
-	 * Run `request`, an attach for whoever sent `token`, binding the handle
-	 * `handleOf` reads from its reply, or from its refusal where one names a
-	 * session it attached (D30).
+	 * Run `request`, an attach for `view`, binding the handle `handleOf`
+	 * reads from its reply, or from its refusal where one names a session it
+	 * attached (D30); answer the reply and the view holding that handle, if
+	 * another does, and throw a refusal naming one as `HeldElsewhere`.
 	 */
-	const attachingBy = async <T>(token: number, request: () => Promise<T>, handleOf: (reply: T) => string | null | undefined): Promise<T> => {
-		const attach: Attaching = { token, done: false };
+	const attachingBy = async <T>(view: View, request: () => Promise<T>, handleOf: (reply: T) => string | null | undefined): Promise<{ reply: T; holder: View | undefined }> => {
+		const attach: Attaching = { view, done: false };
 		attaching.add(attach);
 		try {
 			let reply: T;
@@ -340,84 +352,92 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				reply = await request();
 			} catch (error: unknown) {
 				const handle = error instanceof ApiClientError ? (error.attached?.handle ?? error.fork?.handle) : undefined;
-				if (handle) bind(attach, handle);
-				throw error;
+				const holder = handle ? bind(attach, handle) : undefined;
+				throw holder === undefined ? error : new HeldElsewhere(error as ApiClientError, holder);
 			}
 			const handle = handleOf(reply);
-			if (handle) bind(attach, handle);
-			return reply;
+			return { reply, holder: handle ? bind(attach, handle) : undefined };
 		} finally {
 			attaching.delete(attach);
 		}
 	};
 
+	/** `reply` with `view` beside it, where another view holds what it names. */
+	const naming = <T extends object>(reply: T, holder: View | undefined): T | (T & { view: View }) => (holder === undefined ? reply : { ...reply, view: holder });
+
+	/** The handle `view` is bound to, or a refusal `not_attached`, as the server refuses an ended handle (D31 point 9). */
+	const liveHandle = (view: View): string => {
+		const handle = views.get(view);
+		if (handle === undefined) throw new ApiClientError("not_attached", "no live session is attached to this buffer");
+		return handle;
+	};
+
 	/**
 	 * Forward the snapshot `event`, whose view the reducer now holds under
-	 * its handle, to an attachment already under the handle. Nothing but a
-	 * snapshot introduces an attachment (OW-rebawa), since only a snapshot
-	 * tells Emacs the buffer is attached, and any other event under a handle
-	 * Emacs has not been sent one for would reach a buffer that holds nothing
-	 * for it; and an attach is answered by its reply (`bind`), never here,
-	 * whatever ref the snapshot names. Until OW-wukako one was answered by the
-	 * ref it asked for, and a snapshot under an older handle for that ref --
-	 * another client's attach, or an opening snapshot -- answered it ahead of
-	 * the reply naming the handle the server had since minted, whose own
-	 * snapshot and events then went nowhere (OW-savafi).
+	 * its handle, to the view bound to the handle, if any. Nothing but a
+	 * snapshot binds a view (OW-rebawa), since only a snapshot tells Emacs
+	 * the buffer is attached, and an attach is answered by its reply
+	 * (`bind`), never here, whatever ref the snapshot names. Until OW-wukako
+	 * one was answered by the ref it asked for, and a snapshot under an
+	 * older handle for that ref -- another client's attach, or an opening
+	 * snapshot -- answered it ahead of the reply naming the handle the server
+	 * had since minted, whose own snapshot and events then went nowhere
+	 * (OW-savafi).
 	 */
 	const introduce = (event: Extract<ServerEvent, { type: "snapshot" }>): void => {
 		const { handle } = event;
-		if (!attached.has(handle)) return;
-		attached.set(handle, event.session);
-		notifySnapshot(state.sessions[handle]!, handle);
+		const bound = holderOf(handle);
+		if (bound === undefined) return;
+		notifySnapshot(state.sessions[handle]!, bound, handle);
 	};
 
-	/** Stop telling Emacs anything under `held`, and forget every claim on it, so no token released later drops anything. */
-	const drop = (held: string): void => {
-		attached.delete(held);
-		claims.delete(held);
-		for (const [key, node] of waiting) if (node.handle === held) waiting.delete(key);
+	/** Drop every node held under `handle`. */
+	const dropHeld = (handle: string): void => {
+		for (const [key, node] of waiting) if (node.handle === handle) waiting.delete(key);
+	};
+
+	/** Unbind the view bound to `held`, if any, and tell it `session/detached` for `cause`, naming `session`, the ref it last had. */
+	const release = (held: string, session: SessionRef, cause: "ended" | "gapped"): void => {
+		const bound = holderOf(held);
+		if (bound === undefined) return;
+		views.delete(bound);
+		dropHeld(held);
+		notify({ method: "session/detached", params: { session, view: bound, handle: held, cause } });
 	};
 
 	/**
 	 * The server let go of `handle` (D26): a close, by any client, or on Pi a
 	 * fork moving the process onto a conversation of its own, and nothing
-	 * comes under it again. The attachment under it goes and Emacs is told:
-	 * a buffer left counting itself attached would send a prompt naming the
-	 * ended handle, which the server refuses (D25, D30). The buffer lets
-	 * go of the handle, and its own next attach, by the ref it holds, finds
-	 * the session wherever it is now, the server answering the current handle
-	 * and ref (`agentpane--notified-buffer` in emacs/agentpane.el).
+	 * comes under it again. The view bound to it is unbound and Emacs is
+	 * told, `session` being the ref the view last had: a buffer left counting
+	 * itself attached would send a prompt the helper would send by the ended
+	 * handle, which the server refuses (D25, D30). The buffer lets go of the
+	 * handle, and its own next attach, by the ref it holds, finds the session
+	 * wherever it is now, the server answering the current handle and ref.
 	 * Re-attaching here instead would respawn the session the other client
 	 * closed. An attach still out whose reply names the handle finds no view
-	 * under it, and records nothing (`bind`).
+	 * under it, and binds nothing (`bind`).
 	 */
-	const end = (handle: string): void => {
-		const session = attached.get(handle);
-		if (session === undefined) return;
-		drop(handle);
-		notify({ method: "session/detached", params: { session, handle, cause: "ended" } });
-	};
+	const end = (handle: string, session: SessionRef): void => release(handle, session, "ended");
 
 	/**
 	 * Detach the session whose `seq` gapped under `handle` (D25 point 5): its
 	 * view goes, so no later event under the handle is applied to it, or gaps
-	 * against it again, until a snapshot forms it afresh; and where Emacs
-	 * attached it, the attachment goes and Emacs is told, as for a handle the
-	 * server let go (`end`). Nothing is attached on Emacs's behalf: an
-	 * attach is what spawns, and one here would spawn again a session whose
+	 * against it again, until a snapshot forms it afresh; and the view of
+	 * Emacs's bound to it is unbound and told, as for a handle the server let
+	 * go (`end`). Nothing is attached on Emacs's behalf: an attach is what
+	 * spawns, and one here would spawn again a session whose
 	 * `sessions/close` is out. The buffer comes back by a send or `a`, `g`
 	 * previewing it (D26). An attach still out whose reply names the handle
 	 * finds no view under it, and ends with the buffer not attached, which
 	 * point 5 accepts (`bind`).
 	 */
 	const detachGapped = (handle: string): void => {
+		const session = state.sessions[handle]?.ref;
 		const sessions = { ...state.sessions };
 		delete sessions[handle];
 		state = { ...state, sessions };
-		const session = attached.get(handle);
-		if (session === undefined) return;
-		drop(handle);
-		notify({ method: "session/detached", params: { session, handle, cause: "gapped" } });
+		if (session !== undefined) release(handle, session, "gapped");
 	};
 
 	const onEvent = (event: ServerEvent): void => {
@@ -432,7 +452,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		}
 		if (event.type === "sessions-changed") return;
 		if (event.type === "ended") {
-			end(event.handle);
+			end(event.handle, before.sessions[event.handle]?.ref ?? event.session);
 			return;
 		}
 
@@ -443,109 +463,43 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			return;
 		}
 		const { handle } = event;
-		if (!attached.has(handle)) return;
-		attached.set(handle, event.session);
+		const bound = holderOf(handle);
+		if (bound === undefined) return;
 		const view = state.sessions[handle]!;
 		switch (event.type) {
 			case "upsert": {
 				const target = locateUpsert(before.sessions[handle]!.messages, event.index, event.message);
 				const key = JSON.stringify([handle, target.entry.index]);
-				waiting.set(key, { session: view.ref, handle, target, isStreaming: view.isStreaming });
+				waiting.set(key, { session: view.ref, view: bound, handle, target, isStreaming: view.isStreaming });
 				flushTimer ??= setTimeout(flushNodes, NODE_INTERVAL_MS);
 				return;
 			}
 			case "status":
-				notify({ method: "session/status", params: statusOf(view, handle) });
+				notify({ method: "session/status", params: statusOf(view, bound, handle) });
 				return;
 			case "error":
-				notify({ method: "session/error", params: { session: view.ref, handle, message: event.message, errorId: event.errorId } });
+				notify({ method: "session/error", params: { session: view.ref, view: bound, handle, message: event.message, errorId: event.errorId } });
 				return;
 			case "error-cleared":
-				notify({ method: "session/errorCleared", params: { session: view.ref, handle } });
+				notify({ method: "session/errorCleared", params: { session: view.ref, view: bound, handle } });
 				return;
 			case "notice":
-				notify({ method: "session/notice", params: { session: view.ref, handle, notice: event.notice } });
+				notify({ method: "session/notice", params: { session: view.ref, view: bound, handle, notice: event.notice } });
 				return;
 		}
 	};
 
 	/**
-	 * Stop telling Emacs about a session, for a `sessions/detach` or
-	 * `sessions/close`, by the `tokens` it carries: agentpane-mode sends the
-	 * token of every attach its buffer sent, and of every one a buffer it
-	 * absorbed sent, save those a close of its already released
-	 * (`agentpane--detach` and `agentpane--absorb` in emacs/agentpane.el); a
-	 * token released twice releases nothing the second time. Each attach
-	 * they name that no snapshot has answered is abandoned,
-	 * so no snapshot answers it later, and no other attach
-	 * is: until OW-wukako every attach of the ref was, another buffer's on
-	 * the same ref included, so a buffer killed while holding the handle, or
-	 * a close carrying it, left the attach in flight beside it not attached
-	 * (OW-jofodu). Each token answered under a handle releases its claim
-	 * there (`claims`), and the attachment goes with its handle's last claim,
-	 * whichever buffer released it; `handle` stops nothing.
-	 *
-	 * At most one buffer holds a handle -- the one whose attach a snapshot
-	 * answers absorbs any other, taking its tokens -- so a claim is one of:
-	 * a buffer that holds the handle, or will once it handles the snapshot
-	 * on its way; one killed before handling it, which releases the claim
-	 * by its own detach; an attach its buffer gave up waiting for, which
-	 * that buffer releases with the rest; an attach an absorbed buffer had
-	 * in flight, whose snapshot matches no buffer's latest attach and goes
-	 * only to the handle's holder, if any, the absorbing buffer releasing
-	 * it; or a buffer since moved off the handle -- by an untagged snapshot
-	 * under another handle for its ref, or by its own later attach answered
-	 * under another handle -- whose claim stays until it detaches. The last
-	 * two need two live handles for one ref.
-	 *
-	 * Until OW-nowihu the handle stopped the attachment under it, and
-	 * without one the token stopped the attachment its own answer had
-	 * created, and either way a buffer killed after another's answer under
-	 * the handle went out -- holding the handle, or before handling the
-	 * answer that created the attachment -- silenced the other, which then
-	 * bound the handle; and a buffer killed with an attach it gave up
-	 * answered and a later one waiting left the first's attachment standing
-	 * with no buffer, since its detach named only the later. Until OW-linowe
-	 * the attachment went by the ref Emacs was last told, unless the token
-	 * gave up an attach. A claim goes with the attachment (`drop`), so the
-	 * tokens of a buffer the helper let go of -- a gap or an `ended` --
-	 * release nothing.
-	 *
-	 * What stays, accepted (OW-nowihu):
-	 *
-	 * - A handle holding claims and no buffer. The buffer told of it was
-	 *   killed before handling its snapshot; or the attach answered was one
-	 *   its buffer gave up, whose tagged snapshot binds only the handle's
-	 *   holder (`agentpane--notified-buffer`); or every claimant moved off
-	 *   it. Until the last claim is released the helper goes on sending
-	 *   under the handle, and agentpane-mode routes it by the ref: an
-	 *   untagged snapshot binds a buffer holding the ref under another
-	 *   handle or under none -- the buffer that gave the attach up, or a
-	 *   preview that never attached -- and every other notification reaches
-	 *   a buffer holding the ref and no handle, so a preview shows it,
-	 *   streaming and all. The untagged snapshot can come from the server's
-	 *   own, or from the snapshot for the giving-up buffer's later attach
-	 *   reaching the helper before that attach's reply, which `introduce`
-	 *   sends untagged under the handle already attached. A buffer so bound
-	 *   holds no claim, unless it is the one that gave the attach up, and
-	 *   hears nothing once the claims are released; an attach given up and
-	 *   answered keeps the attachment until its buffer is killed or closes
-	 *   its session.
-	 * - A Pi fork's parent with a refetch in flight: `agentpane-fork` reads
-	 *   `agentpane--attached-p` before `agentpane--attaching`, so `g` then
-	 *   `f` forks with the refetch's attach out. Should it reach the server
-	 *   after the fork let the parent's container go, it respawns the parent
-	 *   under a new handle; should its tagged snapshot be written after the
-	 *   fork's reply and before this reads the parent's detach, it binds the
-	 *   parent by its token, and the parent counts itself attached, while
-	 *   the detach releases that token and drops the attachment.
+	 * Stop telling Emacs about `view`'s session, for its `sessions/detach`:
+	 * its buffer was killed, or is a Pi fork's parent. Each attach it has out
+	 * is given up, so no snapshot answers it later, and the view's binding
+	 * goes, so no reply names it.
 	 */
-	const forget = (tokens: readonly number[] = []): void => {
-		for (const token of tokens) {
-			const pending = [...attaching].find((attach) => !attach.done && attach.token === token);
-			if (pending) pending.done = true;
-			for (const [handle, held] of claims) if (held.delete(token) && held.size === 0) drop(handle);
-		}
+	const detach = (view: View): void => {
+		for (const attach of attaching) if (attach.view === view) attach.done = true;
+		const handle = views.get(view);
+		views.delete(view);
+		if (handle !== undefined) dropHeld(handle);
 	};
 
 	// Opened by the first request for a known method, whose reply then follows the opening
@@ -593,70 +547,86 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			// A preview is a stored session, never live, so nothing in it is running.
 			return projectTranscript(previewMessages(preview.turns), false, render);
 		},
-		// An attach of the new session for whoever sent `token`, as well as the
-		// operation (D30), bound as `sessions/attach` binds its own.
-		"sessions/create": ({ token, ...body }) => attachingBy(token, () => api.createSession(body), (summary) => summary.handle),
+		// An attach of the new session for `view`, as well as the operation
+		// (D30), bound as `sessions/attach` binds its own.
+		"sessions/create": async ({ view, ...body }) => {
+			const { reply, holder } = await attachingBy(view, () => api.createSession(body), (summary) => summary.handle);
+			return naming(reply, holder);
+		},
 		"models/list": ({ backend }) => api.listModels(backend),
 		// The reply follows the snapshot the attach broadcast, or the opening
 		// snapshot of a session already live, so the reducer holds the view the
-		// reply's handle names, and the snapshot that attaches the buffer goes
+		// reply's handle names, and the snapshot that binds the buffer goes
 		// out from it ahead of the reply (`bind`). `session.ref` in the reply is
 		// authoritative and may differ from the one asked for (D9).
-		"sessions/attach": ({ session, token }) => attachingBy(token, () => api.attach(session), (summary) => summary.handle),
-		// One naming its handle goes only to the live session under it (D30). One
-		// naming none is an attach for the buffer that sent `token` as well:
-		// the server attaches the session if it must, and the snapshot that
-		// answers it is bound as `sessions/attach` binds its own; so is a
-		// refusal naming the session attached. Emacs gets the disposition
-		// alone, null for one that started a turn.
-		"sessions/prompt": async ({ session, handle, token, ...body }) => {
-			const reply =
+		"sessions/attach": async ({ session, view }) => {
+			const { reply, holder } = await attachingBy(view, () => api.attach(session), (summary) => summary.handle);
+			return naming(reply, holder);
+		},
+		// Routed by the view's binding (D30): a bound view's goes only to the
+		// live session under its handle; an unbound view's is an attach for it
+		// as well, the server attaching the session if it must, bound as
+		// `sessions/attach` binds its own, a refusal naming the session
+		// attached included; and one marked `live` from an unbound view, whose
+		// binding an `ended` or a gap took after it was sent, is refused, since
+		// by ref it would resume what was closed. Emacs gets the disposition,
+		// and the view holding the session where another does.
+		"sessions/prompt": async ({ session, view, live, ...body }) => {
+			const handle = views.get(view);
+			if (handle === undefined && live) liveHandle(view);
+			const { reply, holder } =
 				handle !== undefined
-					? await api.prompt(session, { ...body, handle })
-					: await attachingBy(token, () => api.prompt(session, body), (reply) => reply?.session?.handle);
-			return reply?.disposition === "handled" ? { disposition: "handled" } : null;
+					? { reply: await api.prompt(session, { ...body, handle }), holder: undefined }
+					: await attachingBy(view, () => api.prompt(session, body), (reply) => reply?.session?.handle);
+			const answer = reply?.disposition === "handled" ? { disposition: "handled" as const } : null;
+			return holder === undefined ? answer : { ...answer, view: holder };
 		},
-		"sessions/abort": async ({ handle }) => (await api.abort(handle)) ?? null,
-		"sessions/compact": async ({ handle }) => {
-			await api.compact(handle);
+		"sessions/abort": async ({ view }) => (await api.abort(liveHandle(view))) ?? null,
+		"sessions/compact": async ({ view }) => {
+			await api.compact(liveHandle(view));
 			return null;
 		},
-		"sessions/close": async ({ session, tokens }) => {
+		// By ref, as ever. The view's binding goes at the `ended` the close
+		// brings, which the server writes ahead of the reply (D31 point 3).
+		"sessions/close": async ({ session }) => {
 			await api.close(session);
-			forget(tokens);
 			return null;
 		},
-		"sessions/dismissError": async ({ handle, errorId }) => {
-			await api.dismissError(handle, errorId);
+		"sessions/dismissError": async ({ view, errorId }) => {
+			await api.dismissError(liveHandle(view), errorId);
 			return null;
 		},
 		// Emacs no longer shows the session, and nothing more: unlike `close`,
 		// the session goes on running on the server.
-		"sessions/detach": async ({ tokens }) => {
-			forget(tokens);
+		"sessions/detach": async ({ view }) => {
+			detach(view);
 			return null;
 		},
-		"sessions/setModel": async ({ handle, model }) => {
-			await api.setModel(handle, model);
+		"sessions/setModel": async ({ view, model }) => {
+			await api.setModel(liveHandle(view), model);
 			return null;
 		},
-		"sessions/setEffort": async ({ handle, effort }) => {
-			await api.setEffort(handle, effort);
+		"sessions/setEffort": async ({ view, effort }) => {
+			await api.setEffort(liveHandle(view), effort);
 			return null;
 		},
-		"sessions/setName": async ({ handle, name }) => {
-			await api.setName(handle, name);
+		"sessions/setName": async ({ view, name }) => {
+			await api.setName(liveHandle(view), name);
 			return null;
 		},
-		"sessions/forkPoints": ({ handle }) => api.forkPoints(handle),
-		"sessions/fork": ({ session: _session, handle, ...body }) => api.fork(handle, body),
-		// An attach of the fork for the buffer that sent `token`, as well as the
-		// operation (D30): the fork's snapshot, broadcast before its prompt goes
-		// out, is bound as an attach's binds that attach. So does a refusal
-		// naming a fork that was attached; one whose own start failed names no
-		// handle, and binds nothing.
-		"sessions/forkAndPrompt": ({ session: _session, handle, token, ...body }) =>
-			attachingBy(token, () => api.forkAndPrompt(handle, body), (reply) => reply.session.handle),
+		"sessions/forkPoints": async ({ view }) => api.forkPoints(liveHandle(view)),
+		"sessions/fork": async ({ session: _session, view, ...body }) => api.fork(liveHandle(view), body),
+		// An attach of the fork for `forkView`, the buffer agentpane-mode made
+		// for it before sending (D32 point 3), as well as the operation (D30):
+		// the fork's snapshot, broadcast before its prompt goes out, is bound
+		// as an attach's binds that attach. So does a refusal naming a fork
+		// that was attached; one whose own start failed names no handle, and
+		// binds nothing.
+		"sessions/forkAndPrompt": async ({ session: _session, view, forkView, ...body }) => {
+			const handle = liveHandle(view);
+			const { reply, holder } = await attachingBy(forkView, () => api.forkAndPrompt(handle, body), (reply) => reply.session.handle);
+			return naming(reply, holder);
+		},
 	};
 
 	const respond = async (request: JsonRpcRequest): Promise<void> => {
@@ -675,11 +645,12 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		} catch (error: unknown) {
 			// Lost with the socket: no reply; see `runHelper`.
 			if (error instanceof ConnectionLostError) return;
+			const [cause, holder] = error instanceof HeldElsewhere ? [error.refusal, error.view] : [error, undefined];
 			const named =
-				error instanceof ApiClientError && error.code === "unauthorized"
-					? new ApiClientError(error.code, refusal, error.fork, error.attached)
-					: error;
-			write(encodeFrame({ jsonrpc: "2.0", id, error: toRpcError(named) }));
+				cause instanceof ApiClientError && cause.code === "unauthorized"
+					? new ApiClientError(cause.code, refusal, cause.fork, cause.attached)
+					: cause;
+			write(encodeFrame({ jsonrpc: "2.0", id, error: toRpcError(named, holder) }));
 		}
 	};
 
@@ -696,16 +667,18 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	disconnect();
 }
 
-function toRpcError(error: unknown): { code: number; message: string; data?: unknown } {
+/** `holder`, where given, is the view holding the session the refusal's `attached` or `fork` names (D32 point 2). */
+function toRpcError(error: unknown, holder?: View): { code: number; message: string; data?: unknown } {
 	if (error instanceof ApiClientError) {
+		const viewed = holder === undefined ? {} : { view: holder };
 		return {
 			code: REFUSED,
 			message: error.message,
 			data: {
 				error: error.code,
 				detail: error.detail,
-				...(error.fork ? { fork: error.fork } : {}),
-				...(error.attached ? { attached: error.attached } : {}),
+				...(error.fork ? { fork: { ...error.fork, ...viewed } } : {}),
+				...(error.attached ? { attached: { ...error.attached, ...viewed } } : {}),
 			},
 		};
 	}

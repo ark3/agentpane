@@ -44,17 +44,19 @@ what the echo area said, as a cons.  BUSY as in the file's commentary."
                                      :command (list "bun" "run" agentpane-probe--drop-stand-in)
                                      :connection-type 'pipe :noquery t
                                      :stderr (get-buffer-create "*agentpane probe stderr*")))))
-            (agentpane--request 'sessions/list nil #'ignore)
+            ;; A real attach, so the helper binds this buffer's view to
+            ;; the handle the prompt then goes under (D32 point 1).
+            (agentpane--attach)
+            (should (agentpane-test--wait-for #'agentpane--attached-p (+ (float-time) 10)))
             (let ((connection agentpane--connection))
-              (setq agentpane--attached connection
-                    agentpane--handle "h1")
               (goto-char (point-max))
               (insert "hello")
               (agentpane-send)
               ;; The server admitted the prompt and broadcast its turn
               ;; streaming; the prompt's own reply has not come.
               (agentpane--on-notification connection 'session/status
-                                          (list :session ref :handle "h1" :isStreaming t))
+                                          (list :view agentpane--view :session ref :handle "h1"
+                                                :isStreaming t))
               (when busy
                 (agentpane-test--dead-unheard (jsonrpc--process connection)))
               (agentpane-test--heard-out connection)

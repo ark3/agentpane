@@ -60,17 +60,17 @@ the indicator and the prompt's failure message, as a list."
                                              :stderr (get-buffer-create "*agentpane probe stderr*")
                                              :command (list "bun" "run" "src/emacs/main.ts"
                                                             (format "http://127.0.0.1:%d" port)))))))
-                  (let ((listed nil))
-                    (agentpane--request 'sessions/list nil (lambda (_) (setq listed t)))
-                    (should (agentpane-test--wait-for (lambda () listed) (+ (float-time) 10))))
+                  ;; A real attach, so the helper binds this buffer's view
+                  ;; to the handle the prompt then goes under (D32 point 1).
+                  (agentpane--attach)
+                  (should (agentpane-test--wait-for #'agentpane--attached-p (+ (float-time) 10)))
                   (let ((connection agentpane--connection))
-                    (setq agentpane--attached connection
-                          agentpane--handle "h1")
                     (goto-char (point-max))
                     (insert "hello")
                     (agentpane-send)
                     (agentpane--on-notification connection 'session/status
-                                                (list :session ref :handle "h1" :isStreaming t))
+                                                (list :view agentpane--view :session ref :handle "h1"
+                                                      :isStreaming t))
                     (sleep-for 0.3)
                     (signal-process server 'SIGKILL)
                     (agentpane-test--heard-out connection)

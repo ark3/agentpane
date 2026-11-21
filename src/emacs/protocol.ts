@@ -86,6 +86,15 @@
  * HTTP status; an attach's reply follows its snapshot, so nothing waits on
  * a snapshot or on an open; and a request that reached no server is refused
  * as such, where it answered `-32603`.
+ * D32 raised it a twenty-fourth, under points 1 to 3: a transcript buffer
+ * is a view, named by an integer agentpane-mode mints, and every
+ * per-session request carries `view` where it carried `token`, `tokens` or
+ * `handle`, the helper holding each view's binding and filling in the
+ * handle; every per-session notification carries `view` beside `handle`;
+ * `sessions/prompt` carries `live`; `sessions/forkAndPrompt` carries
+ * `forkView`; and a reply, or a refusal's `attached` or `fork`, names the
+ * view holding the session where another does. The tokens of OW-wukako,
+ * OW-linowe and OW-nowihu are history.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -209,10 +218,20 @@
  * A rename is said by nothing else: the `session` of any notification under
  * a handle is the session's ref from then on.
  * Every per-session notification below carries it, as every event the
- * server sends on a session does, and every request on a live session sends
- * its own to the server, which refuses one that has ended (D31 point 9); `sessions/detach`
- * and `sessions/close` accept one and send it nowhere (OW-nowihu); `compaction` is `"requesting"`, `"running"` or `null`;
- * `model` is a string or `null`; so is `effort`, the reasoning effort the
+ * server sends on a session does, and `view` beside it. `view` (integer) is
+ * the transcript buffer's name for itself: agentpane-mode mints one when it
+ * makes a buffer, the buffer keeps it for its life, and every per-session
+ * request below carries its own, beside `session` (D32 point 1). The helper
+ * holds each view's binding, the handle it is attached under, at most one
+ * view to a handle, and fills that handle in for every request on a live
+ * session, refusing one from a view bound to none with `data.error`
+ * `not_attached`, as the server refuses a handle that has ended (D31 point
+ * 9). A view is bound by the `session/snapshot` that answers its attach,
+ * and unbound by its own `sessions/detach`, by the server's `ended` under
+ * its handle, and by a `seq` gap, the last two said by `session/detached`.
+ * No request carries `handle`, `token` or `tokens`.
+ * `compaction` is `"requesting"`, `"running"` or `null`;
+ * `model` is a string or `null`; * `model` is a string or `null`; so is `effort`, the reasoning effort the
  * session's next turn runs at, `null` when the backend reports none; so is
  * `defaultEffort`, the `defaultEffort` of `model`'s `models/list` entry,
  * which the helper asks for once per backend and holds (D32 point 8), `null`
@@ -241,73 +260,72 @@
  *   server does not hold and no file backs answers an error whose `data`
  *   carries `error: "gone"` (D26 point 5); one it holds with nothing on
  *   disk yet answers no nodes.
- * - `sessions/create` -- `{ cwd, backend, model?, token }` -> the new
+ * - `sessions/create` -- `{ cwd, backend, model?, view }` -> the new
  *   session's `SessionSummary`, carrying its `handle`. Creates the session
  *   and starts its agent, as one server operation (D30), and answers once it
  *   is attached; nothing hits disk until its first turn (D9). A start that
  *   fails is refused as an attach's would be and leaves no session behind,
  *   so a retry is a new create. It is also an attach, as
- *   `sessions/forkAndPrompt` is, for whoever minted `token` (integer,
- *   always, from the count `sessions/attach`'s come from): the session is
- *   attached from the `session/snapshot` under the reply's handle that
- *   carries `token`, sent as for `sessions/attach` and before the reply, and
- *   released by a `sessions/detach` or `sessions/close` carrying it. Until
- *   ark3/agentpane#48 it carried no token, started nothing, and answered the
- *   bare ref.
+ *   `sessions/forkAndPrompt` is, for `view`, the buffer agentpane-mode made
+ *   for the session before sending (D32 point 3): the `session/snapshot`
+ *   under the reply's handle binds `view`, sent as for `sessions/attach` and
+ *   before the reply. Until ark3/agentpane#48 it started nothing, and
+ *   answered the bare ref.
  * - `models/list` -- `{ backend }` -> array of `{ id, label, efforts,
  *   defaultEffort }`, the server's listing unchanged. `efforts` is an array of
  *   `{ id, description }`, the reasoning efforts that model accepts, empty
  *   when the model or its backend offers none -- and then there is no effort
  *   to choose; `defaultEffort` (string or `null`) is what the backend runs it
  *   at when none is chosen.
- * - `sessions/attach` -- `{ session, token }` -> the `SessionSummary` the
- *   server's `sessions/attach` answers, carrying the session's `handle`. `token`
- *   (integer, always) names this attach: agentpane-mode mints it, no two
- *   attaches it sends carry the same one, and the helper sends it nowhere
- *   but back, on the snapshot that answers this attach, and holds it to
- *   match a `sessions/detach` or `sessions/close` carrying it among its
- *   `tokens` (OW-wukako, OW-nowihu).
+ * - `sessions/attach` -- `{ session, view }` -> the `SessionSummary` the
+ *   server's `sessions/attach` answers, carrying the session's `handle`, and
+ *   `view` (integer) beside it where another view holds that handle.
  *   The reply's `ref` is authoritative and may differ from the one asked
  *   for. The reply ends the request and says nothing about attachment:
- *   the session is attached from the `session/snapshot` that answers the
- *   attach, carrying its `token`, and only then (OW-rebawa). That is a
- *   snapshot under the handle the reply names, sent as the reply arrives
- *   and before it goes out, from the view the helper holds under that
- *   handle, which the attach's own snapshot formed before the reply
- *   (D31 point 3); one that came under another handle, the same ref or
- *   not, answers nothing. A reply that goes out with no snapshot having
- *   answered its attach means none will: a `seq` gap or the server's
- *   `ended` took the session's view before the reply was handled, or a
- *   `sessions/detach` or `sessions/close` carrying this attach's token
- *   landed while it was in flight; the session ends not attached, as after
- *   any gap (D25). A snapshot under a handle already attached goes out
- *   untagged as it arrives, as every later snapshot under it does, so a
- *   second attach answered under that handle is preceded by one.
+ *   the session is attached from the `session/snapshot` under the view that
+ *   sent the attach, and only then (OW-rebawa). That is a snapshot under
+ *   the handle the reply names, sent as the reply arrives and before it
+ *   goes out, from the view the helper's reducer holds under that handle,
+ *   which the attach's own snapshot formed before the reply (D31 point 3);
+ *   one that came under another handle, the same ref or not, answers
+ *   nothing. A reply that goes out with no snapshot having answered its
+ *   attach means none will: a `seq` gap or the server's `ended` took the
+ *   session's view before the reply was handled, the view's
+ *   `sessions/detach` landed while it was in flight, or another view holds
+ *   the handle (D32 point 2), which the reply then names by `view`: nothing
+ *   is bound for the view that asked, and no buffers merge. An attach from
+ *   the view that already holds the handle, as `g` sends, is answered with
+ *   the snapshot again. A snapshot under a handle already bound goes out as
+ *   it arrives, as every later snapshot under it does.
  *   From here on the per-session notifications below flow for this
- *   session.
- * - `sessions/prompt` -- `{ session, handle, text, images?, priorErrorId? }`
- *   or `{ session, token, text, images?, priorErrorId? }` ->
- *   `null` for a prompt that started a turn or joined one, or
+ *   session, under the view.
+ * - `sessions/prompt` -- `{ session, view, text, images?, priorErrorId?,
+ *   live? }` -> `null` for a prompt that started a turn or joined one, or
  *   `{ disposition: "handled" }` for one the backend consumed without
  *   starting a turn for it: the server's own `PromptResponse`
- *   (OW-dulipe). An extension that handled it may still start work of its
+ *   (OW-dulipe); either with `view` (integer) where the prompt attached a
+ *   session another view holds, `{ view }` standing for `null`. An extension that handled it may still start work of its
  *   own, whose notifications arrive as usual (`docs/rpc-commands.md` "prompt"
  *   in `pi 1.2.0`, read at the installed package, not measured); after
  *   `/refs`, `/llama` and `/mcp` on `pi 1.2.0` none did (docs/MANUAL_TESTING.md,
  *   OW-kokotu). No other backend answers it.
- *   How it is addressed says what it may do (D30). Sent from a buffer
- *   holding the session live, it names that buffer's `handle`, goes only to
- *   the live session under it and starts nothing: a handle that has ended is
- *   refused with `data.error` `not_attached`, a close and a
- *   re-attach crossing it included. Sent from a buffer that knows the
- *   session is not running, it names no handle and carries a `token`, and
- *   the server attaches the session if it must and then prompts it: the
- *   snapshot that answers that attach carries the `token`, is about the
- *   buffer whose `agentpane--attach-sent` it is, and goes out before the
- *   reply, as `sessions/attach` above says of its own. A refusal after the
- *   attach carries `attached`, `{ ref, handle }`, in its `data`, and answers
- *   the same way before its error goes out; one whose start failed names
- *   nothing and binds nothing.
+ *   The view's binding says what it may do (D30). From a bound view it goes
+ *   only to the live session under the view's handle and starts nothing: a
+ *   handle that has ended is refused with `data.error` `not_attached`, a
+ *   close and a re-attach crossing it included. `live` (boolean, absent
+ *   meaning false) says the buffer held a handle when it sent: one marked
+ *   so from a view the helper has unbound since, at an `ended` or a gap, is
+ *   refused `not_attached` too and reaches no server, since by ref it would
+ *   resume a session another client closed. From an unbound view, and not
+ *   `live`, it goes by ref, and the server attaches the session if it must
+ *   and then prompts it: the snapshot that answers that attach binds the
+ *   view and goes out before the reply, as `sessions/attach` above says of
+ *   its own, and where another view holds the handle nothing is bound and
+ *   the reply names that view. A refusal after the attach carries
+ *   `attached`, `{ ref, handle, view? }`, in its `data`, `view` naming the
+ *   view that holds the handle where another does, and answers the same way
+ *   before its error goes out; one whose start failed names nothing and
+ *   binds nothing.
  *   `priorErrorId` (string or `null`) is the `errorId` of the turn
  *   error the buffer held when the user sent, `null` when it held none, read
  *   at the send: admitting the prompt clears the session's error only while
@@ -316,69 +334,60 @@
  *   (OW-jokoto). Absent, the server takes whatever error it holds when the
  *   prompt arrives.
  * Every request on a live session below, from `sessions/abort` on but
- * `sessions/close` and `sessions/detach`, takes `{ session, handle }`: the
- * handle the buffer holds, which the server refuses `not_attached` once it
- * has ended, so a request that crosses a close and a re-attach cannot land
- * on the new session (D31 point 9). `session` goes nowhere.
+ * `sessions/close` and `sessions/detach`, takes `{ session, view }`, and the
+ * helper sends the server the handle the view is bound to, which the server
+ * refuses `not_attached` once it has ended, so a request that crosses a
+ * close and a re-attach cannot land on the new session (D31 point 9); one
+ * from a view bound to none the helper refuses `not_attached` itself.
+ * `session` goes nowhere.
  *
- * - `sessions/abort` -- `{ session, handle }` -> `null` for a stop that took nothing
+ * - `sessions/abort` -- `{ session, view }` -> `null` for a stop that took nothing
  *   out of the backend's queue, or `{ queued }` for one that did: the
  *   server's own `AbortResponse`, the text of each prompt steered into the turn
  *   and not yet delivered, which only Pi holds, for the buffer that stopped
  *   it to take back (D16, OW-wisifo). No notification carries them.
- * - `sessions/compact` -- `{ session, handle }` -> `null`.
- * - `sessions/close` -- `{ session, handle?, tokens? }` -> `null`. Kills the
- *   subprocess, then gives up and releases the attaches `tokens` names, as
- *   `sessions/detach` below says; the server's `ended` for the handle
- *   stops this session's notifications whatever claims still stand.
- * - `sessions/dismissError` -- `{ session, handle, errorId }` -> `null`. Clears the
+ * - `sessions/compact` -- `{ session, view }` -> `null`.
+ * - `sessions/close` -- `{ session, view }` -> `null`. Kills the
+ *   subprocess of the session `session` names; the server's `ended` for its
+ *   handle, written ahead of the reply, unbinds the view and stops this
+ *   session's notifications.
+ * - `sessions/dismissError` -- `{ session, view, errorId }` -> `null`. Clears the
  *   session's turn error, so later `session/snapshot`s carry `error: null`,
  *   but only while `errorId` (string) still names the error the server
  *   holds: a newer one survives the dismissal of the one Emacs was showing
  *   (OW-desufa), even one with the same text (OW-jokoto).
- * - `sessions/detach` -- `{ session, handle?, tokens? }` -> `null`. Stops
+ * - `sessions/detach` -- `{ session, view }` -> `null`. Stops
  *   showing a session, and does nothing else: nothing goes to the server, and the
- *   session goes on running on the server. Sent when Emacs stops showing a
- *   session. `tokens` (array of integers, absent meaning none) names every
- *   `sessions/attach` the buffer sent and every one a buffer it absorbed
- *   sent, save those a `sessions/close` of its already carried; one
- *   carried twice releases nothing the second time. Each that no snapshot
- *   has answered and whose reply has not gone out yet is given up: its
- *   reply still goes out, and no snapshot answers it. No other attach is, another of the
- *   same ref included. Each answered under a handle releases its claim
- *   there, and the notifications under a handle stop once every attach
- *   answered under it is released, whichever buffer releases last
- *   (OW-nowihu). A claim goes with the handle's notifications, so a token
- *   answered under a handle whose notifications stopped since -- a
- *   detach, a close or a `session/detached` -- releases nothing. `handle`
- *   and `session` pick out no notifications. Until OW-nowihu `token` named
- *   one attach, and `handle` stopped the notifications under it, or
- *   without one the handle of the snapshot answering that attach, if
- *   nothing was attached under it before (OW-linowe). What stays is named
- *   at `forget` in helper.ts.
- * - `sessions/setModel` -- `{ session, handle, model }` -> `null`. A chosen effort the
+ *   session goes on running on the server. Sent when a buffer is killed,
+ *   and for a Pi fork's parent. Every attach from `view` still out is given
+ *   up: its reply still goes out, and no snapshot answers it. The view's
+ *   binding goes, and the notifications under its handle stop. Until D32 it
+ *   carried `tokens`, every attach its buffer and every buffer it absorbed
+ *   had sent, and the notifications under a handle stopped once every token
+ *   answered under it was released (OW-nowihu).
+ * - `sessions/setModel` -- `{ session, view, model }` -> `null`. A chosen effort the
  *   new model does not list falls back to that model's `defaultEffort`, or
  *   where that is `null` to whatever the backend then picks, which the
  *   `session/status` that follows reports.
- * - `sessions/setName` -- `{ session, handle, name }` -> `null`. Names the session,
+ * - `sessions/setName` -- `{ session, view, name }` -> `null`. Names the session,
  *   written through to its backend, which holds it; agentpane keeps no copy
  *   (D13, "Names are not marks"). Only an attached session can be named:
  *   the server refuses any other `not_attached`, and a `name` empty once
  *   trimmed `bad_request`; line breaks in it become one space.
  *   The name arrives in the listing the
  *   `sessions/changed` that follows asks for.
- * - `sessions/setEffort` -- `{ session, handle, effort }` -> `null`. `effort` is one of
+ * - `sessions/setEffort` -- `{ session, view, effort }` -> `null`. `effort` is one of
  *   the session's model's `efforts` ids, taking effect from the next turn;
  *   the server refuses any other `bad_request`, and any at all while that
  *   model lists none or is not yet known.
- * - `sessions/forkPoints` -- `{ session, handle }` -> `{ points, forkStopsTurn }`:
+ * - `sessions/forkPoints` -- `{ session, view }` -> `{ points, forkStopsTurn }`:
  *   `points` an array of `{ id, text, index }`, and `forkStopsTurn` whether
  *   a fork of the session stops a turn running when it lands, which is what
  *   "Stop and fork" reads (D30). Until ark3/agentpane#47 the result was the
  *   array alone.
- * - `sessions/fork` -- `{ session, handle, entryId }` -> the fork's ref.
- * - `sessions/forkAndPrompt` -- `{ session, handle, index, text, images?, token }`
- *   -> `{ session, disposition }`. An edit of an earlier message as one
+ * - `sessions/fork` -- `{ session, view, entryId }` -> the fork's ref.
+ * - `sessions/forkAndPrompt` -- `{ session, view, index, text, images?,
+ *   forkView }` -> `{ session, disposition }`. An edit of an earlier message as one
  *   server operation (D30): fork at the user message whose transcript
  *   `index` this is, attach the fork, and prompt it with `text`, clearing no
  *   turn error. `session` in the result is the fork's summary, with its
@@ -387,15 +396,14 @@
  *   `not_a_fork_point` and nothing forked. A failure after the fork was
  *   created carries `fork`, `{ ref, handle }`, in its `data`, `handle` being
  *   `null` where the fork's own start failed; the server removes nothing.
- *   It is also an attach of the fork, for the buffer that minted `token`
- *   (integer, always, from the count `sessions/attach`'s come from): the
- *   fork is attached from the `session/snapshot` under its handle that
- *   carries `token`, sent as for `sessions/attach` and before the reply,
- *   and released by a `sessions/detach` or `sessions/close` carrying it,
- *   so agentpane-mode binds the fork's buffer as an attach binds one (D25).
- *   A refusal that names a fork under a handle answers the same way before
- *   its error goes out; one that names none, or no fork, answers nothing.
- *   Until ark3/agentpane#51 it carried no token and attached nothing.
+ *   `view` is the edit's buffer, whose binding names the session forked;
+ *   `forkView` (integer) is the buffer agentpane-mode made for the fork
+ *   before sending (D32 point 3). It is also an attach of the fork for
+ *   `forkView`: the `session/snapshot` under the fork's handle binds it,
+ *   sent as for `sessions/attach` and before the reply. A refusal that
+ *   names a fork under a handle answers the same way before its error goes
+ *   out; one that names none, or no fork, answers nothing.
+ *   Until ark3/agentpane#51 it attached nothing.
  *
  * Errors: a request the server refused answers with `-32000` as `code`, the
  * server's text as `message`, and `{ error, detail }` as `data`, `error`
@@ -413,17 +421,20 @@
  * naming the token file, for each one out when the server refused the
  * token. Any other failure is `-32603` with its message and no `data`, and
  * says nothing of whether the server acted on the request; an unknown
- * method is `-32601`. A request still out when the socket closes, at the
+ * method is `-32601`. A request on a live session from a view bound to no
+ * handle is refused `not_attached` by the helper, its `message` saying so.
+ * A request still out when the socket closes, at the
  * end of the helper's input or the server's going, gets no reply at all
  * (`runHelper` in helper.ts): Emacs answers it as the helper's death
  * (OW-hiliti).
  *
  * Notifications, by `method`, with `params`; each names the session it is
- * about, and none arrives for a session Emacs has not attached, except
- * `sessions/changed`; the first under a handle is the `session/snapshot`
- * that attaches it:
+ * about and the view it is for, and none arrives for a session no view is
+ * bound to, except `sessions/changed`; the first under a view's handle is
+ * the `session/snapshot` that binds it. Emacs drops one for a view no
+ * buffer holds:
  *
- * - `session/snapshot` -- `{ session, handle, nodes, isStreaming, compaction,
+ * - `session/snapshot` -- `{ session, view, handle, nodes, isStreaming, compaction,
  *   model, effort, defaultEffort, unrestoredModel, error, errorId, notices }`.
  *   Replaces everything the buffer holds; also how a session first appears
  *   after `sessions/attach`, and how a missed event is healed. `error` and
@@ -437,27 +448,21 @@
  *   `notice` a `session/notice` carried.
  *   The buffer draws both after `nodes`, since a snapshot replaces
  *   everything the buffer holds and would otherwise wipe them.
- *   `token` (integer, only on a snapshot that answers a
- *   `sessions/attach`, one such snapshot for each attach it answers) is
- *   the `token` that attach carried, whatever ref it asked for and the
- *   snapshot names (OW-wukako). It is request correlation, not identity:
- *   it says which waiting attach this snapshot answers, so the receiver can
- *   bind the handle to what sent that attach -- which may hold another
- *   ref, the ref of a session another buffer holds under that handle, or
- *   a handle of its own already -- and is the only thing that does, the
- *   reply binding nothing (OW-rebawa). Until OW-wukako it was `askedFor`,
- *   the ref asked for, which two attaches of one ref shared. Nor could the
- *   receiver rely on handling
+ *   The snapshot that answers an attach is the first notification under
+ *   the view it binds; it is sent under the view that asked, whatever ref
+ *   it names, and the view, not the reply, is what binds it (OW-rebawa).
+ *   Until D32 it carried that attach's `token`, and until OW-wukako
+ *   `askedFor`, the ref asked for. Nor could the receiver rely on handling
  *   the reply first -- as of jsonrpc.el 1.0.29 on Emacs 31.1, the reply to
  *   an asynchronous request that arrives while a synchronous one is
  *   outstanding runs only once that one returns, while notifications are
  *   handled at once (docs/MANUAL_TESTING.md, "jsonrpc.el runs an async reply
  *   after later notifications").
- * - `session/node` -- `{ session, handle, node }`. One node to replace by
+ * - `session/node` -- `{ session, view, handle, node }`. One node to replace by
  *   `index`.
- * - `session/status` -- `{ session, handle, isStreaming, compaction, model,
+ * - `session/status` -- `{ session, view, handle, isStreaming, compaction, model,
  *   effort, defaultEffort, unrestoredModel }`.
- * - `session/error` -- `{ session, handle, message, errorId }`. A turn error.
+ * - `session/error` -- `{ session, view, handle, message, errorId }`. A turn error.
  *   `errorId` (string, opaque) names this raise: two with the same
  *   `message` are two errors, and `sessions/dismissError` and
  *   `sessions/prompt` name the one the buffer showed by it (OW-jokoto). No
@@ -465,7 +470,7 @@
  *   across a restart names nothing the new process raised. Every later
  *   `session/snapshot` carries it again, in `error` and `errorId`, until it
  *   is cleared, which `session/errorCleared` says.
- * - `session/errorCleared` -- `{ session, handle }`. The server no longer
+ * - `session/errorCleared` -- `{ session, view, handle }`. The server no longer
  *   holds the session's turn error: a prompt that started or joined a turn
  *   was admitted over it, it being still the one its sender held, or a
  *   client dismissed it by its `errorId` (OW-jopifu, OW-jokoto). Drop its
@@ -473,7 +478,7 @@
  *   snapshot sent before the clear on the one ordered stream, so a line such
  *   a snapshot drew again goes with it; one Emacs never drew is nothing to
  *   drop.
- * - `session/notice` -- `{ session, handle, notice }`. Something non-fatal the
+ * - `session/notice` -- `{ session, view, handle, notice }`. Something non-fatal the
  *   backend said (OW-tujiya), never a turn error: `notice` is the server's
  *   `AgentNotice` unchanged -- `kind` (string, the backend's own name for
  *   it), `message` (string, the text to show, which may span lines, each
@@ -482,8 +487,8 @@
  *   where the backend named a place in it). The Codex and Pi adapters
  *   produce them; Claude Code's does not. Every later `session/snapshot`
  *   carries it again, in `notices`.
- * - `session/detached` -- `{ session, handle, cause }`. Nothing more comes
- *   under `handle`, and the helper has dropped the attachment: either the
+ * - `session/detached` -- `{ session, view, handle, cause }`. Nothing more comes
+ *   under `handle`, and the helper has unbound `view`: either the
  *   server let go of the handle and said so with an `ended` under it -- a
  *   close, by another client or this one, or on Pi a fork moving the
  *   process onto a conversation of its own (D26) -- and `cause` is
@@ -491,7 +496,7 @@
  *   one session rather than attach it again (D25 point 5, OW-filuge), and
  *   `cause` is `"gapped"`: the handle stays live on the server, and a turn
  *   running under it may go on unheard. `session` is the ref it last named
- *   the session by. The buffer holding `handle` lets go of it and counts
+ *   the session by. The view's buffer lets go of the handle and counts
  *   itself detached and not streaming, keeping its ref and what it drew;
  *   its next `sessions/attach`, by that ref, is answered under whatever
  *   handle and ref the session has now, if any, as a first attach is.
@@ -523,48 +528,45 @@ import type {
 	SessionSummary,
 } from "$shared/protocol.ts";
 
-/** What a request names its session by: the ref, and the handle it may carry beside it. */
-export interface SessionParams {
+/**
+ * What a per-session request names its session by: the ref, and the view
+ * that sends it, the integer agentpane-mode named its transcript buffer by
+ * (D32 point 1). The helper fills in the handle from the view's binding.
+ */
+export interface ViewParams {
 	session: SessionRef;
-	handle?: string;
+	view: number;
 }
 
-/**
- * What a request on a live session names it by: the handle the buffer holds,
- * which the server refuses `not_attached` once it has ended, so a request
- * that crosses a close and a re-attach cannot land on the new session (D31
- * point 9); and the ref beside it, which the helper sends nowhere.
- */
-export interface LiveParams {
-	session: SessionRef;
-	handle: string;
-}
+/** The reply to a request that attaches, naming the view that holds the session where another does (D32 point 2). */
+type Naming<T> = T & { view?: number };
 
 export interface HelperRequests {
 	"sessions/list": { params: { cwd?: string }; result: SessionSummary[] };
-	"sessions/preview": { params: SessionParams; result: TranscriptNode[] };
-	"sessions/create": { params: CreateSessionRequest & { token: number }; result: SessionSummary };
+	"sessions/preview": { params: { session: SessionRef }; result: TranscriptNode[] };
+	"sessions/create": { params: CreateSessionRequest & { view: number }; result: Naming<SessionSummary> };
 	"models/list": { params: { backend: BackendId }; result: ModelInfo[] };
-	"sessions/attach": { params: SessionParams & { token: number }; result: SessionSummary };
+	"sessions/attach": { params: ViewParams; result: Naming<SessionSummary> };
 	"sessions/prompt": {
-		params: { session: SessionRef } & Omit<PromptRequest, "handle"> & ({ handle: string; token?: undefined } | { handle?: undefined; token: number });
-		result: PromptResponse | null;
+		params: ViewParams & Omit<PromptRequest, "handle"> & { live?: boolean };
+		result: Naming<{ disposition?: "handled" }> | null;
 	};
-	"sessions/abort": { params: LiveParams; result: AbortResponse | null };
-	"sessions/compact": { params: LiveParams; result: null };
-	"sessions/close": { params: SessionParams & { tokens?: number[] }; result: null };
-	"sessions/dismissError": { params: LiveParams & DismissErrorRequest; result: null };
-	"sessions/detach": { params: SessionParams & { tokens?: number[] }; result: null };
-	"sessions/setModel": { params: LiveParams & { model: string }; result: null };
-	"sessions/setEffort": { params: LiveParams & { effort: string }; result: null };
-	"sessions/setName": { params: LiveParams & { name: string }; result: null };
-	"sessions/forkPoints": { params: LiveParams; result: ForkPointsResponse };
-	"sessions/fork": { params: LiveParams & ForkRequest; result: SessionRef };
-	"sessions/forkAndPrompt": { params: LiveParams & ForkAndPromptRequest & { token: number }; result: ForkAndPromptResponse };
+	"sessions/abort": { params: ViewParams; result: AbortResponse | null };
+	"sessions/compact": { params: ViewParams; result: null };
+	"sessions/close": { params: ViewParams; result: null };
+	"sessions/dismissError": { params: ViewParams & DismissErrorRequest; result: null };
+	"sessions/detach": { params: ViewParams; result: null };
+	"sessions/setModel": { params: ViewParams & { model: string }; result: null };
+	"sessions/setEffort": { params: ViewParams & { effort: string }; result: null };
+	"sessions/setName": { params: ViewParams & { name: string }; result: null };
+	"sessions/forkPoints": { params: ViewParams; result: ForkPointsResponse };
+	"sessions/fork": { params: ViewParams & ForkRequest; result: SessionRef };
+	"sessions/forkAndPrompt": { params: ViewParams & ForkAndPromptRequest & { forkView: number }; result: Naming<ForkAndPromptResponse> };
 }
 
 export interface SessionStatusParams {
 	session: SessionRef;
+	view: number;
 	handle: string;
 	isStreaming: boolean;
 	compaction: "requesting" | "running" | null;
@@ -582,15 +584,14 @@ export type HelperNotification =
 				error: string | null;
 				errorId: string | null;
 				notices: AgentNotice[];
-				token?: number;
 			};
 	  }
-	| { method: "session/node"; params: { session: SessionRef; handle: string; node: TranscriptNode } }
+	| { method: "session/node"; params: { session: SessionRef; view: number; handle: string; node: TranscriptNode } }
 	| { method: "session/status"; params: SessionStatusParams }
-	| { method: "session/error"; params: { session: SessionRef; handle: string; message: string; errorId: string } }
-	| { method: "session/errorCleared"; params: { session: SessionRef; handle: string } }
-	| { method: "session/notice"; params: { session: SessionRef; handle: string; notice: AgentNotice } }
-	| { method: "session/detached"; params: { session: SessionRef; handle: string; cause: "ended" | "gapped" } }
+	| { method: "session/error"; params: { session: SessionRef; view: number; handle: string; message: string; errorId: string } }
+	| { method: "session/errorCleared"; params: { session: SessionRef; view: number; handle: string } }
+	| { method: "session/notice"; params: { session: SessionRef; view: number; handle: string; notice: AgentNotice } }
+	| { method: "session/detached"; params: { session: SessionRef; view: number; handle: string; cause: "ended" | "gapped" } }
 	| { method: "sessions/changed"; params?: undefined };
 
 export interface TranscriptNode {
