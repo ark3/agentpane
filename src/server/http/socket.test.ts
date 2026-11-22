@@ -15,7 +15,7 @@ import {
 	type SessionRef,
 	sessionKey,
 } from "../../shared/protocol.ts";
-import { BackendRefusedError } from "../adapters/types.ts";
+import { BackendRefusedError, TurnRunningError } from "../adapters/types.ts";
 import { type App, createApp } from "./app.ts";
 import type { AppDeps } from "./deps.ts";
 import { AtCapacityError, maxSessions } from "./session-manager.ts";
@@ -541,6 +541,24 @@ describe("commands that name a ref", () => {
 		const reply = await socket.refused("sessions/attach", { ref: refs[maxSessions] as SessionRef });
 		expect([reply.code, reply.detail]).toEqual(["at_capacity", new AtCapacityError().message]);
 		expect(pi.created).toHaveLength(maxSessions);
+		expect(logged).toEqual([]);
+	});
+
+	it("refuses turn_running an attach, and a prompt naming the ref, whose session's turn runs elsewhere (D34)", async () => {
+		build(
+			{},
+			{
+				onStart: () => {
+					throw new TurnRunningError();
+				},
+			},
+		);
+		const socket = await connected();
+
+		const attach = await socket.refused("sessions/attach", { ref: CODEX_SESSION });
+		expect([attach.code, attach.detail]).toEqual(["turn_running", new TurnRunningError().message]);
+		const prompt = await socket.refused("sessions/prompt", { ref: CODEX_SESSION, text: "hello" });
+		expect([prompt.code, prompt.detail]).toEqual(["turn_running", new TurnRunningError().message]);
 		expect(logged).toEqual([]);
 	});
 

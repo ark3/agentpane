@@ -8,9 +8,7 @@
  *
  * Assembly rules, per DESIGN:
  *
- * - `item/started` creates the placeholder message(s) for an item -- or, for
- *   an item that started before a re-attach, its first delta does, and the
- *   history paged in after supplies the head (see `hydrate`)
+ * - `item/started` creates the placeholder message(s) for an item
  * - deltas append to the right content block, correlated by **`itemId`**
  * - `item/completed` replaces with the authoritative content
  * - `turn/completed` ends the turn
@@ -47,12 +45,6 @@ export type CodexEffect =
 	/** The transcript changed wholesale; the server must re-snapshot. */
 	| { type: "reset" }
 	| { type: "streaming"; isStreaming: boolean }
-	/**
-	 * A turn the history listed running whose `turn/started` this reducer never
-	 * heard: it went out before a re-attach joined the stream (OW-dirazu). The
-	 * shell adopts it as though that notification had arrived.
-	 */
-	| { type: "running-turn"; turnId: string }
 	| { type: "compaction"; compaction: "requesting" | "running" | null }
 	/** A `ServerRequest` -- the turn is blocked until it is answered, which the adapter does at once (D2a). */
 	| { type: "request"; requestId: RequestId; kind: string }
@@ -75,14 +67,6 @@ interface Slot {
 	messages: AgentMessage[];
 	timestamp: number;
 	completed: boolean;
-	/**
-	 * Non-null for a headless slot: one a delta opened, for an item whose
-	 * `item/started` this reducer never heard, so it lacks whatever streamed
-	 * before (see `applyDelta`). Holds the deltas that arrived since the last
-	 * history page was asked for, which a listed copy of the item cannot hold
-	 * (see `hydrate`). Null once `item/completed` makes the slot whole.
-	 */
-	sincePage: ((item: ThreadItem) => boolean)[] | null;
 }
 
 const DEFAULT_API = "codex-app-server";
@@ -94,16 +78,6 @@ export class CodexReducer {
 	private slots = new Map<string, Slot>();
 	private streaming = false;
 	private compaction: "requesting" | "running" | null = null;
-	/**
-	 * Non-null between the first `pageRequested` and `hydrate`, which is only
-	 * on a borrowed re-attach: the history is being paged in, so a headless
-	 * slot keeps its deltas for the merge. `turn` records that the stream has
-	 * settled the running turn since -- a `turn/started`, a `turn/completed`,
-	 * or a `thread/status/changed` to anything but `active`, which names no
-	 * turn -- and `compaction` that it set compaction state; either is newer
-	 * than any page and so wins over what the listing says of it (OW-dirazu).
-	 */
-	private pageRead: { turn: boolean; compaction: boolean } | null = null;
 	private now: () => number;
 	private identity: { api: string; provider: string; model: string; effort: string | null };
 
@@ -198,92 +172,38 @@ export class CodexReducer {
 	/**
 	 * Replay a thread's turns, paged in with `thread/turns/list` at
 	 * `itemsView: "full"`, into a transcript: the whole of it on a cold start
-	 * (D3), and merged with the live stream on a borrowed re-attach. A listed
-	 * item takes the same path as a live one; only a headless slot's deltas
-	 * are laid on it.
+	 * (D3), and merged with the live stream on a borrowed attach. A listed
+	 * item takes the same path as a live one.
 	 *
-	 * The merge (OW-vijuyi). A re-attach over an app-server that still holds
-	 * the thread hears it from `CodexAdapter.adoptConnection` on, so a turn
-	 * still running there streams while the history is paged in. The listing
-	 * owns what went before the attach, and the stream what came after it:
-	 *
-	 * - An item the stream opened with `item/started`, or completed, keeps its
-	 *   live slot in place of the listed copy, since that slot holds the whole
-	 *   of it -- so its text shows once whether or not the listing held it.
-	 * - A headless slot, one a delta opened (`applyDelta`), yields to a listed
-	 *   copy, which holds the head the slot lacks, and only the deltas that
-	 *   arrived after the page was asked for (`pageRequested`) are laid on top
-	 *   of it: the ones before, the page already holds (OW-dirazu).
-	 * - A live slot the listing lacks follows the history. As of `codex-cli
-	 *   0.156.0` that was every item still streaming -- an `agentMessage`,
-	 *   `reasoning`, `plan` and `commandExecution` alike were listed only once
-	 *   complete (docs/MANUAL_TESTING.md, OW-dutute and OW-dirazu) -- so a
-	 *   headless slot's head showed only when `item/completed` replaced it.
-	 *
-	 * The running turn is the listing's too, unless the stream has settled it
-	 * since the page was asked for. As of that version `thread/resume` read
-	 * the thread `active` but named no turn and replayed no `turn/started`,
-	 * and the listing named the turn `inProgress`: a user turn with its
-	 * `userMessage` first, a compaction's with no items at all. So a last turn
-	 * listed `inProgress` is streaming, and a compaction when it lists no items
-	 * at all, and its id goes to the shell as a `running-turn` effect -- save
-	 * that a turn the stream settled during the read, or compaction state it
-	 * set, wins over the listing's (see `pageRead`). Only on a re-attach: a
-	 * cold start's app-server is fresh and can be running no turn, whatever
-	 * its listing says.
+	 * The merge (OW-vijuyi). A borrowed attach hears its thread from
+	 * `CodexAdapter.adoptConnection` on, so an item can arrive before the
+	 * history is paged in. The listing owns what went before the attach, and
+	 * the stream what came after it: an item the stream opened with
+	 * `item/started`, or completed, keeps its live slot in place of the listed
+	 * copy, and a live slot the listing lacks follows the history. Only a
+	 * settled transcript is merged: a re-attach whose thread reads `active` is
+	 * refused before any page is read (`CodexAdapter.startBorrowed`, D34), and
+	 * a fork's thread runs no turn at its first attach.
 	 */
 	hydrate(thread: Pick<Thread, "id" | "turns">): CodexEffect[] {
 		const live = this.slots;
 		this.slots = new Map();
 		this.threadId = thread.id;
-		const read = this.pageRead;
-		this.pageRead = null;
 		for (const turn of thread.turns) {
 			this.turnId = turn.id;
 			const timestamp = (turn.startedAt ?? 0) * 1000 || this.now();
 			for (const item of turn.items) {
 				const slot = live.get(item.id);
-				const headless = read ? slot?.sincePage : null;
-				if (slot && !headless) {
+				if (slot) {
 					this.slots.set(item.id, slot);
 					continue;
 				}
-				this.applyItem(item, timestamp, !slot);
-				const merged = this.slots.get(item.id);
-				if (!merged || !headless) continue;
-				for (const apply of headless) apply(merged.item);
-				this.remap(merged);
+				this.applyItem(item, timestamp, true);
 			}
 		}
 		for (const [id, slot] of live) if (!this.slots.has(id)) this.slots.set(id, slot);
 		this.messages = this.flattenMessages();
-
-		const effects: CodexEffect[] = [];
-		const last = thread.turns.at(-1);
-		if (read && !read.turn && last?.status === "inProgress") {
-			this.streaming = true;
-			if (!read.compaction && last.items.length === 0) this.compaction = "running";
-			effects.push({ type: "running-turn", turnId: last.id });
-		}
-		effects.push({ type: "reset" });
-		return effects;
-	}
-
-	/**
-	 * A history page is about to be asked for, so it will hold every delta
-	 * this reducer has seen: from here on a headless slot keeps what arrives
-	 * for `hydrate` to lay on the listed copy. Called before each page, since
-	 * the running turn is on the last.
-	 *
-	 * As of `codex-cli 0.156.0` no line arrived between a listing's request
-	 * and its answer (docs/MANUAL_TESTING.md, OW-dirazu), so the request is
-	 * where the page's edge was measured to be. A delta Codex wrote in that
-	 * window and also listed would be laid on twice; none has been seen, and
-	 * no partial item was ever listed for one to belong to.
-	 */
-	pageRequested(): void {
-		this.pageRead ??= { turn: false, compaction: false };
-		for (const slot of this.slots.values()) if (slot.sincePage) slot.sincePage = [];
+		return [{ type: "reset" }];
 	}
 
 	/** One parsed line from app-server's stdout. */
@@ -306,13 +226,9 @@ export class CodexReducer {
 			}
 
 			case "thread/status/changed":
-				// `active` names no turn, so it leaves the listing to name the
-				// running one; any other status settles that none is running.
-				if (this.pageRead && message.params.status.type !== "active") this.pageRead.turn = true;
 				return this.setStreaming(message.params.status.type === "active");
 
 			case "turn/started": {
-				if (this.pageRead) this.pageRead.turn = true;
 				this.turnId = message.params.turn.id;
 				this.turnDiff = null;
 				return this.setStreaming(true);
@@ -320,7 +236,6 @@ export class CodexReducer {
 
 			case "turn/completed": {
 				const turn = message.params.turn;
-				if (this.pageRead) this.pageRead.turn = true;
 				const effects: CodexEffect[] = this.setCompaction(null);
 				// NOTE: `turn.items` here is at most a *summary* view -- only the
 				// final agent message (`itemsView: "summary"`), or nothing at all
@@ -357,41 +272,40 @@ export class CodexReducer {
 						return this.setCompaction("running");
 					}
 					this.compaction = null;
-					if (this.pageRead) this.pageRead.compaction = true;
 				}
 				return this.applyItem(message.params.item, at, completed);
 			}
 
 			case "item/agentMessage/delta":
-				return this.applyDelta(message.params.itemId, message.params.delta, openAgentMessage, (item, delta) => {
+				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
 					if (item.type !== "agentMessage") return false;
 					item.text += delta;
 					return true;
 				});
 
 			case "item/plan/delta":
-				return this.applyDelta(message.params.itemId, message.params.delta, openPlan, (item, delta) => {
+				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
 					if (item.type !== "plan") return false;
 					item.text += delta;
 					return true;
 				});
 
 			case "item/reasoning/summaryTextDelta":
-				return this.applyDelta(message.params.itemId, message.params.delta, openReasoning, (item, delta) => {
+				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
 					if (item.type !== "reasoning") return false;
 					appendAt(item.summary, message.params.summaryIndex, delta);
 					return true;
 				});
 
 			case "item/reasoning/textDelta":
-				return this.applyDelta(message.params.itemId, message.params.delta, openReasoning, (item, delta) => {
+				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
 					if (item.type !== "reasoning") return false;
 					appendAt(item.content, message.params.contentIndex, delta);
 					return true;
 				});
 
 			case "item/commandExecution/outputDelta":
-				return this.applyDelta(message.params.itemId, message.params.delta, null, (item, delta) => {
+				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
 					if (item.type !== "commandExecution") return false;
 					item.aggregatedOutput = (item.aggregatedOutput ?? "") + delta;
 					return true;
@@ -462,8 +376,8 @@ export class CodexReducer {
 		// parsed payload (or a `Thread` we are hydrating from) is not ours.
 		const owned = structuredClone(item);
 		const slot: Slot = existing
-			? { ...existing, item: owned, completed, sincePage: null }
-			: { item: owned, messages: [], timestamp, completed, sincePage: null };
+			? { ...existing, item: owned, completed }
+			: { item: owned, messages: [], timestamp, completed };
 		this.slots.set(id, slot);
 		return this.remap(slot);
 	}
@@ -534,33 +448,14 @@ export class CodexReducer {
 	}
 
 	/**
-	 * A delta for an item this reducer has no slot for opens one, from the
-	 * empty item `open` builds, when the delta's kind says what the item is
-	 * (OW-zudase). That is an item whose `item/started` went out before
-	 * `CodexAdapter.adoptConnection` joined the stream on a re-attach, and as
-	 * of `codex-cli 0.156.0` nothing else carried its text until
-	 * `item/completed`: `thread/turns/list` left every item still streaming
-	 * out of the running turn it listed, and `thread/resume` replayed no
-	 * `item/started` (docs/MANUAL_TESTING.md, OW-dutute and OW-dirazu). The
-	 * slot is headless -- it holds what streamed from the attach on, not the
-	 * head before it -- so a listed copy wins over it in `hydrate`, and
-	 * `item/completed` replaces it with the whole item where it stands. A
-	 * command's output has no `open`: alone it names no command to draw.
+	 * A delta lands on its item's slot. One for an item this reducer never saw
+	 * start has none and is dropped: a borrowed attach meets no running turn
+	 * (see `hydrate`), so no item of this thread streams across it.
 	 */
-	private applyDelta(
-		itemId: string,
-		delta: string,
-		open: ((id: string) => ThreadItem) | null,
-		apply: (item: ThreadItem, delta: string) => boolean,
-	): CodexEffect[] {
-		let slot = this.slotFor(itemId);
-		if (!slot && open) {
-			slot = { item: open(itemId), messages: [], timestamp: this.now(), completed: false, sincePage: [] };
-			this.slots.set(itemId, slot);
-		}
+	private applyDelta(itemId: string, delta: string, apply: (item: ThreadItem, delta: string) => boolean): CodexEffect[] {
+		const slot = this.slotFor(itemId);
 		if (!slot) return [];
 		if (!apply(slot.item, delta)) return [];
-		if (slot.sincePage && this.pageRead) slot.sincePage.push((item) => apply(item, delta));
 		return this.remap(slot);
 	}
 
@@ -577,7 +472,6 @@ export class CodexReducer {
 	}
 
 	private setCompaction(compaction: "requesting" | "running" | null): CodexEffect[] {
-		if (this.pageRead) this.pageRead.compaction = true;
 		if (this.compaction === compaction) return [];
 		this.compaction = compaction;
 		return [{ type: "compaction", compaction }];
@@ -609,19 +503,6 @@ export class CodexReducer {
 }
 
 // ---------------------------------------------------------------------------
-
-/** The empty items a delta opens a slot with; see `CodexReducer.applyDelta`. */
-function openAgentMessage(id: string): ThreadItem {
-	return { type: "agentMessage", id, text: "", phase: null, memoryCitation: null, delivery: null, questions: null };
-}
-
-function openPlan(id: string): ThreadItem {
-	return { type: "plan", id, text: "" };
-}
-
-function openReasoning(id: string): ThreadItem {
-	return { type: "reasoning", id, summary: [], content: [] };
-}
 
 function appendAt(parts: string[], index: number, delta: string): void {
 	while (parts.length <= index) parts.push("");

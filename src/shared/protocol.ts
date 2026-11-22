@@ -642,7 +642,10 @@ export type PromptParams = Omit<PromptRequest, "handle"> & (
  * `sessions/forkAndPrompt` made -- may first close the least recently
  * attached live session, and is refused `at_capacity` when D12's cap is
  * reached and none may be closed for it (`maxSessions` in
- * `src/server/http/session-manager.ts`).
+ * `src/server/http/session-manager.ts`). `sessions/attach` and a
+ * `sessions/prompt` naming a ref are refused `turn_running` when the session's
+ * turn is still running on a backend that holds it elsewhere, a Codex thread
+ * re-attached over a live app-server (D34); nothing is started.
  */
 export interface Commands {
 	hello: { params: { token: string }; result: null };

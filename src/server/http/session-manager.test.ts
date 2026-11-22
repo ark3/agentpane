@@ -3282,7 +3282,7 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 							break;
 						}
 						this.#locks.set(threadId, proc);
-						proc.emit({ id, result: { thread: { id: threadId, turns: [] }, model: "m" } });
+						proc.emit({ id, result: { thread: { id: threadId, status: { type: "idle" }, turns: [] }, model: "m" } });
 						break;
 					}
 					case "thread/start": {
@@ -3473,7 +3473,7 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 			const id = message["id"];
 			if (typeof id !== "number") return;
 			if (message["method"] === "initialize") proc.emit({ id, result: { userAgent: "test" } });
-			if (message["method"] === "thread/resume") proc.emit({ id, result: { thread: { id: ref.id, turns: [] }, model: "m" } });
+			if (message["method"] === "thread/resume") proc.emit({ id, result: { thread: { id: ref.id, status: { type: "idle" }, turns: [] }, model: "m" } });
 			if (message["method"] === "thread/turns/list") proc.emit({ id, result: { data: [], nextCursor: null, backwardsCursor: null } });
 		});
 		index = new FakeSessionIndex([storedSession(ref, WORKSPACE)]);

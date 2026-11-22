@@ -294,3 +294,16 @@ export class BackendRefusedError extends Error {
 		this.name = "BackendRefusedError";
 	}
 }
+
+/**
+ * An attach met its session's turn still running on a backend that holds it
+ * elsewhere, so the adapter started nothing (D34 point 1). The server refuses
+ * the command `turn_running` with this message. Thrown by Codex's re-attach of
+ * a thread a live app-server holds (`CodexAdapter.startBorrowed`).
+ */
+export class TurnRunningError extends Error {
+	constructor() {
+		super("the session's turn is still running elsewhere; try again when it ends");
+		this.name = "TurnRunningError";
+	}
+}

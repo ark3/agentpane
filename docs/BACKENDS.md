@@ -147,10 +147,11 @@ They carry 15 `turn/start` replies, four of them in `compact.jsonl`, and no `thr
   Order: the reply came before `thread/status/changed` `active` and `turn/started` for all 15 `turn/start` replies in the wire captures, `codex-cli 0.147.0` to `0.157.1`.
   Not relied on: `pendingTurnCompletions` covers lifecycle lines handled before the awaited reply resumes (`codex/adapter.test.ts`, "does not revive a turn completed in the same chunk as turn/start response").
   D18: first group.
-- **The running turn at a re-attach**, from the last `thread/turns/list` page's `inProgress` turn, into `isStreaming`, compaction and, through the `running-turn` effect, `turnId` and `turnBusy` (`CodexReducer.hydrate`); exempt as a listing, though it writes session state.
-  Event: none, since `thread/resume` replayed no `turn/started` on `codex-cli 0.156.0` (`docs/MANUAL_TESTING.md` OW-dutute).
-  Order: relied on, no line arriving between a page's request and its answer (`CodexReducer.pageRequested`), measured on `codex-cli 0.156.0` (OW-dutute, OW-dirazu).
-  D18: third group, **licenses absent code**, a delta laid on twice; #78 deletes this path, so #79 asserts nothing here.
+- **The running turn at a re-attach**, from the `thread/resume` reply's `thread.status` on a re-attach over a live app-server: `active` refuses the attach with `TurnRunningError`, `turn_running` on both wires, before any page is read (`CodexAdapter.startBorrowed`, D34); it writes no session state, since the refused attach starts nothing.
+  Event: none; the resume named no turn and replayed no `turn/started` on `codex-cli 0.156.0` (`docs/MANUAL_TESTING.md` OW-dirazu), and no line arrived between its request and its answer on `0.170.0` (ark3/agentpane#78).
+  Measured: `{"type": "active", "activeFlags": []}` mid-turn in all eight samples on `codex-cli 0.156.0`, compaction included (OW-dirazu), and in the one `agentMessage` sample on `0.170.0` (ark3/agentpane#78).
+  Order: none relied on.
+  D18: third group, **licenses absent code**: were a release's resume to stop reading `active` mid-turn, the re-attach would go through and the reducer would drop the deltas of an item that started before it (`CodexReducer.applyDelta`) with nothing to say so; whether to assert there is #79's.
 - **Turn order**, `turnOrder`, from each `thread/turns/list` reply at hydrate and in `listForkPoints`; exempt.
   Event: `turn/started` carries each new turn's id, in every wire capture; not read for this.
   Order: none relied on.

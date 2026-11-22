@@ -8,7 +8,7 @@ import { CodexAdapter, CodexAdapterFactory, type CodexAdapterOptions } from "./i
 import type { CodexProcess } from "./process.ts";
 import type { Thread } from "./protocol.ts";
 import { CodexReducer } from "./reducer.ts";
-import { BackendRefusedError, type StateChange } from "../types.ts";
+import { BackendRefusedError, type StateChange, TurnRunningError } from "../types.ts";
 import { FakeCodexProcess } from "./test-support.ts";
 
 const VIRTUAL_REF: SessionRef = { backend: "codex", id: "virtual:test" };
@@ -203,6 +203,7 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 						thread: {
 							id: options.threadId ?? "thread-real",
 							historyMode,
+							status: { type: "idle" },
 							turns: full ? (options.turns ?? []) : [],
 							...(options.threadName !== undefined ? { name: options.threadName } : {}),
 						},
@@ -2369,6 +2370,8 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		codexRoot?: string;
 		/** The turns the fork inherited, which `thread/turns/list` pages out for any thread but the parent. */
 		forkTurns?: unknown[];
+		/** What a resume of any thread but the parent reads its status as; idle unless given. */
+		resumeStatus?: { type: string; activeFlags?: string[] };
 	}
 
 	function shareableServer(proc: AdapterProcess, options: ShareableOptions = {}): void {
@@ -2395,7 +2398,8 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 							threadId !== "thread-parent" && options.forkSettings ? options.forkSettings : { model: "m" };
 						const full = params["excludeTurns"] !== true && threadId !== "thread-parent";
 						const turns = full ? (options.forkTurns ?? []) : [];
-						proc.emit({ id, result: { thread: { id: threadId, turns }, ...settings } });
+						const status = (threadId !== "thread-parent" && options.resumeStatus) || { type: "idle" };
+						proc.emit({ id, result: { thread: { id: threadId, status, turns }, ...settings } });
 					};
 					if (options.holdResume) void options.holdResume.promise.then(answer);
 					else answer();
@@ -2633,240 +2637,71 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		expect(borrower.getState().messages).toEqual([]);
 	});
 
-	describe("re-attaching a thread whose turn is running (OW-vijuyi)", () => {
+	describe("re-attaching a thread a live app-server holds (D34)", () => {
 		// The re-attach of OW-voyezi: the fork's session is closed while the
 		// parent keeps the app-server, and the thread it held may still be running
-		// a turn. The reattached adapter hears that turn from `adoptConnection` on,
-		// well before its history is paged in.
+		// a turn. As of `codex-cli 0.170.0` the resume read such a thread
+		// `{"type": "active"}` and named no turn (docs/MANUAL_TESTING.md,
+		// ark3/agentpane#78), so that is what refuses the attach.
 
-		/** A fork closed and re-attached over the parent's app-server, with `gap` emitted after the first of the history's two pages. */
-		async function reattachWithGap(forkTurns: unknown[], gap: unknown[]) {
+		/** A fork closed and re-attached over the parent's app-server, whose resume reads `resumeStatus`. */
+		async function reattach(resumeStatus: { type: string; activeFlags?: string[] }) {
 			const connections = new CodexConnectionRegistry();
 			const proc = new AdapterProcess();
-			shareableServer(proc, { forkTurns });
+			shareableServer(proc, { forkTurns: twoStoredTurns(), resumeStatus });
 			const spawn = vi.fn(() => proc);
-			const options = { spawn, codexRoot: NO_STORE, connections };
-			const parent = new CodexAdapter(VIRTUAL_REF, options);
+			const parent = new CodexAdapter(VIRTUAL_REF, { spawn, codexRoot: NO_STORE, connections });
 			await parent.start({ cwd: "/workspace" });
 			await parent.listForkPoints();
 			const forked = await parent.fork("turn-2");
 			await forked.adapter?.dispose();
-			proc.onWrite((message) => {
-				const params = (message["params"] ?? {}) as Record<string, unknown>;
-				if (message["method"] !== "thread/turns/list" || params["threadId"] !== "thread-forked" || params["cursor"]) return;
-				for (const line of gap) proc.emit(line);
+			let storeReads = 0;
+			const reattached = new CodexAdapter(forked.ref, {
+				spawn,
+				connections,
+				get codexRoot() {
+					storeReads += 1;
+					return NO_STORE;
+				},
 			});
-			const reattached = new CodexAdapter(forked.ref, options);
-			await reattached.start({ cwd: "/workspace", resumeId: "thread-forked" });
+			const before = proc.written.length;
+			const started = await reattached.start({ cwd: "/workspace", resumeId: "thread-forked" }).then(
+				() => null,
+				(error: unknown) => error,
+			);
 			expect(spawn).toHaveBeenCalledTimes(1);
-			return { proc, reattached };
+			const sent = proc.written.slice(before).map((message) => message["method"]);
+			return { proc, reattached, started, sent, storeReads };
 		}
 
-		const liveTurn = (text: string) => ({
-			id: "turn-live",
-			items: [{ type: "agentMessage", id: "item-live", text, phase: null, memoryCitation: null }],
-			itemsView: "full",
-			status: "inProgress",
-			error: null,
-			startedAt: 1_700_000_010,
-			completedAt: null,
-			durationMs: null,
-		});
-		const gap = [
-			{ method: "turn/started", params: { threadId: "thread-forked", turn: { id: "turn-live" } } },
-			{
-				method: "item/started",
-				params: { threadId: "thread-forked", startedAtMs: 1, item: { id: "item-live", type: "agentMessage", text: "" } },
-			},
-			{ method: "item/agentMessage/delta", params: { threadId: "thread-forked", itemId: "item-live", delta: "said early" } },
-		];
-		const later = { method: "item/agentMessage/delta", params: { threadId: "thread-forked", itemId: "item-live", delta: ", then more" } };
+		it("refuses turn_running when the resume reads the thread active, and hydrates nothing", async () => {
+			const { reattached, started, sent, storeReads } = await reattach({ type: "active", activeFlags: [] });
 
-		it("keeps what the turn streamed before the history was paged in, when the history does not list it", async () => {
-			const { proc, reattached } = await reattachWithGap(twoStoredTurns(), gap);
-
-			expect(reattached.getState().messages).toMatchObject([
-				{ role: "user", content: [{ type: "text", text: "first prompt" }] },
-				{ role: "user", content: [{ type: "text", text: "second prompt" }] },
-				{ role: "assistant", content: [{ type: "text", text: "said early" }] },
-			]);
-			expect(reattached.getState().isStreaming).toBe(true);
-			proc.emit(later);
-			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "said early, then more" }] });
+			expect(started).toBeInstanceOf(TurnRunningError);
+			expect(sent).toEqual(["thread/resume"]);
+			expect(storeReads).toBe(0);
+			expect(reattached.getState().messages).toEqual([]);
 		});
 
-		it("shows the turn's text once when the history already lists what it streamed", async () => {
-			const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), liveTurn("said early")], gap);
+		it("re-attaches and hydrates a thread whose resume reads it idle", async () => {
+			const { reattached, started, sent, storeReads } = await reattach({ type: "idle" });
 
-			expect(reattached.getState().isStreaming).toBe(true);
-			expect(reattached.getState().messages).toHaveLength(3);
-			proc.emit(later);
-			expect(reattached.getState().messages).toHaveLength(3);
-			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "said early, then more" }] });
-		});
-
-		it("keeps the deltas of an item that started before the attach (OW-zudase)", async () => {
-			// As of `codex-cli 0.156.0` a turn listed mid-stream at `itemsView:
-			// "full"` was `inProgress` with its completed items only: the
-			// `agentMessage` still streaming was not listed at all, and
-			// `thread/resume` replayed no `item/started` for it
-			// (docs/MANUAL_TESTING.md, OW-dutute). So its deltas are the only copy
-			// of its text until `item/completed`.
-			const running = {
-				id: "turn-live",
-				items: [
-					{
-						type: "userMessage",
-						id: "user-live",
-						clientId: null,
-						content: [{ type: "text", text: "live prompt", text_elements: [] }],
-					},
+			expect(started).toBeNull();
+			expect(sent).toEqual(["thread/resume", "thread/turns/list", "thread/turns/list"]);
+			expect(storeReads).toBe(1);
+			expect(reattached.getState()).toMatchObject({
+				isStreaming: false,
+				messages: [
+					{ role: "user", content: [{ type: "text", text: "first prompt" }] },
+					{ role: "user", content: [{ type: "text", text: "second prompt" }] },
 				],
-				itemsView: "full",
-				status: "inProgress",
-				error: null,
-				startedAt: 1_700_000_010,
-				completedAt: null,
-				durationMs: null,
-			};
-			const delta = (text: string) => ({
-				method: "item/agentMessage/delta",
-				params: { threadId: "thread-forked", itemId: "item-before", delta: text },
 			});
-			const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running], [delta("37\n38\n")]);
-
-			expect(reattached.getState().messages).toMatchObject([
-				{ role: "user", content: [{ type: "text", text: "first prompt" }] },
-				{ role: "user", content: [{ type: "text", text: "second prompt" }] },
-				{ role: "user", content: [{ type: "text", text: "live prompt" }] },
-				{ role: "assistant", content: [{ type: "text", text: "37\n38\n" }] },
-			]);
-			expect(reattached.getState().isStreaming).toBe(true);
-			proc.emit(delta("39\n"));
-			expect(reattached.getState().messages).toHaveLength(4);
-			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "37\n38\n39\n" }] });
-			proc.emit({
-				method: "item/completed",
-				params: {
-					threadId: "thread-forked",
-					completedAtMs: 2,
-					item: { id: "item-before", type: "agentMessage", text: "1\n2\n...39\n", phase: null, memoryCitation: null },
-				},
-			});
-			expect(reattached.getState().messages).toHaveLength(4);
-			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "1\n2\n...39\n" }] });
 		});
 
-		describe("a turn whose turn/started went out before the attach (OW-dirazu)", () => {
-			// As of `codex-cli 0.156.0` the listing named such a turn `inProgress`
-			// -- a user turn with its `userMessage`, a compaction's with no items
-			// at all -- and nothing else named it: `thread/resume` read the
-			// thread `active` but gave no turn id, and replayed no `turn/started`
-			// (docs/MANUAL_TESTING.md, OW-dirazu).
-			const userMessage = {
-				type: "userMessage",
-				id: "user-live",
-				clientId: null,
-				content: [{ type: "text", text: "live prompt", text_elements: [] }],
-			};
-			const running = (items: unknown[]) => ({
-				id: "turn-live",
-				items,
-				itemsView: "full",
-				status: "inProgress",
-				error: null,
-				startedAt: 1_700_000_010,
-				completedAt: null,
-				durationMs: null,
-			});
-			const completed = {
-				method: "turn/completed",
-				params: {
-					threadId: "thread-forked",
-					turn: { ...running([]), itemsView: "summary", status: "completed", completedAt: 1_700_000_020, durationMs: 1000 },
-				},
-			};
+		it("does not refuse a fork's first attach, whatever its resume reads", async () => {
+			const { borrower, forked } = await forkedPair({ resumeStatus: { type: "active", activeFlags: [] } });
 
-			it("streams, and interrupts that turn on abort", async () => {
-				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], []);
-
-				expect(reattached.getState().isStreaming).toBe(true);
-				await reattached.abort();
-				expect(request(proc, "turn/interrupt")["params"]).toEqual({ threadId: "thread-forked", turnId: "turn-live" });
-			});
-
-			it("steers a submit into that turn, and refuses to compact", async () => {
-				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], []);
-
-				await reattached.submit("and also");
-				expect(request(proc, "turn/steer")["params"]).toMatchObject({ threadId: "thread-forked", expectedTurnId: "turn-live" });
-				expect(methods(proc)).not.toContain("turn/start");
-				await expect(reattached.compact()).rejects.toThrow("cannot submit while a turn is active");
-				expect(methods(proc)).not.toContain("thread/compact/start");
-			});
-
-			it("is idle once that turn completes", async () => {
-				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], []);
-
-				proc.emit(completed);
-				expect(reattached.getState().isStreaming).toBe(false);
-				await reattached.abort();
-				expect(methods(proc)).not.toContain("turn/interrupt");
-			});
-
-			it("stays idle when that turn completed while the history was paged in", async () => {
-				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], [completed]);
-
-				expect(reattached.getState().isStreaming).toBe(false);
-				await reattached.abort();
-				expect(methods(proc)).not.toContain("turn/interrupt");
-			});
-
-			it("stays idle when the thread went idle while the history was paged in", async () => {
-				const idle = { method: "thread/status/changed", params: { threadId: "thread-forked", status: { type: "idle" } } };
-				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], [idle]);
-
-				expect(reattached.getState().isStreaming).toBe(false);
-				await reattached.abort();
-				expect(methods(proc)).not.toContain("turn/interrupt");
-			});
-
-			it("still adopts the listed turn when the thread reads active while the history was paged in", async () => {
-				const active = {
-					method: "thread/status/changed",
-					params: { threadId: "thread-forked", status: { type: "active", activeFlags: [] } },
-				};
-				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], [active]);
-
-				expect(reattached.getState().isStreaming).toBe(true);
-				await reattached.abort();
-				expect(request(proc, "turn/interrupt")["params"]).toEqual({ threadId: "thread-forked", turnId: "turn-live" });
-			});
-
-			it("shows a compaction the listing names by a turn with no items", async () => {
-				const { reattached } = await reattachWithGap([...twoStoredTurns(), running([])], []);
-
-				expect(reattached.getState()).toMatchObject({ isStreaming: true, compaction: "running" });
-				await expect(reattached.submit("and also")).rejects.toThrow("cannot submit while a turn is active");
-			});
-
-			it("does not read a turn past its compaction as compacting", async () => {
-				const compacted = { type: "contextCompaction", id: "compaction-live" };
-				const { reattached } = await reattachWithGap([...twoStoredTurns(), running([compacted])], []);
-
-				expect(reattached.getState()).toMatchObject({ isStreaming: true, compaction: null });
-			});
-
-			it("adopts no turn on a cold resume, where no turn can be running", async () => {
-				const { adapter, proc } = await startedAdapter(
-					{ threadId: STORED_REF.id, turns: [...twoStoredTurns(), running([userMessage])] },
-					STORED_REF,
-				);
-
-				expect(adapter.getState().isStreaming).toBe(false);
-				await adapter.abort();
-				expect(methods(proc)).not.toContain("turn/interrupt");
-			});
+			await expect(borrower.start(forked.start as { cwd: string; resumeId: string })).resolves.toBeUndefined();
 		});
 	});
 

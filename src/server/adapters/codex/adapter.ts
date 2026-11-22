@@ -20,6 +20,7 @@ import {
 	type ImageInput,
 	type StartOptions,
 	type StateChange,
+	TurnRunningError,
 	type Unsubscribe,
 } from "../types.ts";
 import { CodexConnection, CodexConnectionRegistry, type CodexConnectionHolder } from "./connection.ts";
@@ -143,9 +144,7 @@ export class CodexAdapter implements BackendAdapter {
 	private threadId: string | null = null;
 	/**
 	 * A known-safe lifecycle id that `abort()` may interrupt: from a
-	 * `turn/started`, a `turn/start` response, or -- for a turn whose
-	 * `turn/started` went out before a re-attach -- the history's running turn
-	 * (the reducer's `running-turn` effect, OW-dirazu).
+	 * `turn/started` or a `turn/start` response.
 	 */
 	private turnId: string | null = null;
 	/**
@@ -259,11 +258,12 @@ export class CodexAdapter implements BackendAdapter {
 		// asking to resume would be refused with `-32600 already has an active
 		// writer`. Resuming it a SECOND time on the process that holds it is
 		// allowed, and the thread is drivable afterwards -- measured on the home
-		// server, 2026-09-15, `codex-cli 0.154.0`.
+		// server, 2026-09-15, `codex-cli 0.154.0`. One whose turn is running is
+		// refused (see `startBorrowed`).
 		const shared = opts.resumeId ? this.options.connections?.find(opts.resumeId) : undefined;
 		if (shared && opts.resumeId) {
 			this.adoptConnection(shared, opts.resumeId, opts.cwd);
-			return this.startBorrowed(opts.model);
+			return this.startBorrowed(opts.model, true);
 		}
 
 		const spawner = this.options.spawn ?? spawnCodex;
@@ -372,6 +372,15 @@ export class CodexAdapter implements BackendAdapter {
 	 * fork inherited, and read from the store the model and effort its kept
 	 * prefix last ran, which `thread/fork` does not carry (see `effort`).
 	 *
+	 * A `reattach`, of a thread the app-server held before this adapter, is
+	 * refused `TurnRunningError` when the resume reads the thread `active`,
+	 * before anything is read or hydrated: its turn may be running, and this
+	 * adapter heard none of it (D34 point 1). As of `codex-cli 0.170.0`, as on
+	 * `0.156.0`, that resume read `{"type": "active"}` mid-turn, named no turn
+	 * and replayed no `turn/started` (docs/MANUAL_TESTING.md, ark3/agentpane#78).
+	 * A fork's first attach is not refused: its thread can be running no turn,
+	 * and what its resume reads was never measured.
+	 *
 	 * Identity is NOT seeded here. `adoptConnection` did that synchronously at
 	 * fork time, because the shared line stream reaches this adapter from that
 	 * moment and the reducer's cross-thread guard is only armed once `threadId`
@@ -381,7 +390,7 @@ export class CodexAdapter implements BackendAdapter {
 	 * `#start` reaps a failed start through `#terminate` -- and that is what
 	 * releases it.
 	 */
-	private async startBorrowed(chosenModel: string | undefined): Promise<void> {
+	private async startBorrowed(chosenModel: string | undefined, reattach = false): Promise<void> {
 		const holder = this.holder;
 		const ownership = this.ownership;
 		const threadId = this.threadId;
@@ -403,6 +412,7 @@ export class CodexAdapter implements BackendAdapter {
 			excludeTurns: true,
 		});
 		assertOwned();
+		if (reattach && resumed.thread.status.type === "active") throw new TurnRunningError();
 		const stored = await this.readStoredTurn(resumed.thread.id);
 		assertOwned();
 
@@ -418,9 +428,8 @@ export class CodexAdapter implements BackendAdapter {
 			modelProvider: resumed.modelProvider,
 			reasoningEffort: resumed.reasoningEffort,
 		});
-		const turns = await readTurns(holder, resumed.thread.id, () => this.reducer.pageRequested());
+		const turns = await readTurns(holder, resumed.thread.id);
 		assertOwned();
-		// Even with no turns: the hydrate is what ends the reducer's page read.
 		this.applyEffects(this.reducer.hydrate({ id: resumed.thread.id, turns }));
 		assertOwned();
 		this.rememberTurns(turns);
@@ -541,11 +550,10 @@ export class CodexAdapter implements BackendAdapter {
 		//
 		// `expectedTurnId` is a precondition app-server enforces, so this needs
 		// a turn id it knows is live: `turnId` is exactly that, set only from an
-		// unambiguously correlated id -- a `turn/started` notification, a
-		// `turn/start` response whose candidate nothing contradicts, or the turn
-		// a re-attach's history listed running (see `turnId`). A `turnBusy`
-		// with no id is a submission the adapter cannot name, so there is nothing
-		// to steer and the rejection stands.
+		// unambiguously correlated id -- a `turn/started` notification or a
+		// `turn/start` response whose candidate nothing contradicts (see
+		// `turnId`). A `turnBusy` with no id is a submission the adapter cannot
+		// name, so there is nothing to steer and the rejection stands.
 		//
 		// A compaction is the one live turn that must not be steered: `compact` is
 		// one of the two `NonSteerableTurnKind`s, and a compaction runs as its own
@@ -1004,12 +1012,6 @@ export class CodexAdapter implements BackendAdapter {
 				case "message":
 					this.emitUpdate(effect.index);
 					break;
-				case "running-turn":
-					// What `turn/started` would have set, had it not gone out before
-					// the attach (OW-dirazu).
-					this.turnId = effect.turnId;
-					this.turnBusy = { source: "lifecycle", turnId: effect.turnId };
-					break;
 				case "reset":
 					this.emitUpdate("transcript");
 					break;
@@ -1127,16 +1129,12 @@ export class CodexAdapter implements BackendAdapter {
  * a turn's items, and the reducer's replay needs every one.
  *
  * Every page is fetched: transcripts are small, and loading only the recent
- * end would be a change of its own. `onPage` runs just before each page is
- * asked for, which is where a hydrate's merge draws the line between what
- * the page holds and what the stream brings after it
- * (`CodexReducer.pageRequested`, OW-dirazu).
+ * end would be a change of its own.
  */
-async function readTurns(client: CodexClientView, threadId: string, onPage?: () => void): Promise<Turn[]> {
+async function readTurns(client: CodexClientView, threadId: string): Promise<Turn[]> {
 	const turns: Turn[] = [];
 	let cursor: string | null = null;
 	do {
-		onPage?.();
 		const page: ThreadTurnsListResponse = await client.request<ThreadTurnsListResponse>("thread/turns/list", {
 			threadId,
 			sortDirection: "asc",

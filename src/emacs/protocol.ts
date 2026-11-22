@@ -474,7 +474,10 @@
  * an agent -- `sessions/attach`, `sessions/create`, a `sessions/prompt`
  * naming no handle, and the fork `sessions/forkAndPrompt` made -- is refused
  * `at_capacity` when D12's cap is reached and no live session may be closed
- * for it, its `message` saying so. A request that never
+ * for it, its `message` saying so. `sessions/attach` and a `sessions/prompt`
+ * naming no handle are refused `turn_running` when the session's turn is
+ * still running on a backend that holds it elsewhere (D34), its `message`
+ * saying so and nothing started. A request that never
  * reached the server is refused the same way, with a code of the helper's
  * own: `unreachable` for one read with the socket not up, `frame_too_large`
  * for one over the server's frame limit, and `unauthorized`, its `message`

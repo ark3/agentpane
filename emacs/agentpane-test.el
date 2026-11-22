@@ -1465,6 +1465,50 @@ attach again once one is detached (ark3/agentpane#31).  Through
                   (should-not agentpane--handle)))
             (when (buffer-live-p buffer) (kill-buffer buffer))))))))
 
+(ert-deftest agentpane-test-attach-and-prompt-refused-turn-running-say-why ()
+  "An attach, and a prompt naming the ref, the server refuses
+`turn_running', the session's turn still running on a backend that holds
+it elsewhere, say the server's text in the echo area and leave the buffer
+the preview it was, attaching nothing, the prompt's text kept as the
+draft, so either can go again once the turn ends (D34).  Through
+`agentpane--request' over a stub jsonrpc, the refusal built as
+`toRpcError' in src/emacs/helper.ts builds one."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (detail "the session's turn is still running elsewhere; try again when it ends")
+        (calls nil)
+        (buffer nil))
+    (agentpane-test--with-helper
+      (agentpane-test--noting
+        (cl-letf (((symbol-function 'jsonrpc-async-request)
+                   (lambda (_conn method _params &rest args)
+                     (push (cons method args) calls)
+                     (list 1 nil))))
+          (unwind-protect
+              (let ((refuse (lambda (method)
+                              (funcall (plist-get (cdr (assq method calls)) :error-fn)
+                                       `(:code -32000 :message ,detail
+                                         :data (:error "turn_running" :detail ,detail))))))
+                (setq buffer (agentpane--transcript-buffer (list :ref ref)))
+                (with-current-buffer buffer
+                  (agentpane--draw [])
+                  (agentpane-attach))
+                (funcall refuse 'sessions/attach)
+                (should (member (format "agentpane: sessions/attach failed: %s" detail) said))
+                (with-current-buffer buffer
+                  (should-not (agentpane--attached-p))
+                  (should-not agentpane--handle)
+                  (goto-char (point-max))
+                  (insert "hello")
+                  (agentpane-send))
+                (funcall refuse 'sessions/prompt)
+                (should (member (format "agentpane: sessions/prompt failed: %s" detail) said))
+                (with-current-buffer buffer
+                  (should-not (agentpane--attached-p))
+                  (should-not agentpane--handle)
+                  (should-not agentpane--sending)
+                  (should (equal (agentpane-test--draft) "hello"))))
+            (when (buffer-live-p buffer) (kill-buffer buffer))))))))
+
 (ert-deftest agentpane-test-kill-of-a-buffer-holding-the-handle-leaves-anothers-attach-of-its-ref ()
   "A buffer holding a handle, killed while another buffer's attach of the
 same ref is in flight, detaches its own view, never the other's, so the

@@ -4,7 +4,7 @@
  */
 
 import type { ApiError } from "../../shared/protocol.ts";
-import { BackendRefusedError } from "../adapters/types.ts";
+import { BackendRefusedError, TurnRunningError } from "../adapters/types.ts";
 import {
 	AtCapacityError,
 	AttachedNotPromptedError,
@@ -62,6 +62,7 @@ export function classifyFailure(thrown: unknown): Failure {
 	if (err instanceof ServerShuttingDownError) return known("server_shutting_down");
 	if (err instanceof AtCapacityError) return known("at_capacity");
 	if (err instanceof BackendRefusedError) return known("backend_refused");
+	if (err instanceof TurnRunningError) return known("turn_running");
 	if (err instanceof EffortNotOfferedError) return known("bad_request");
 	if (err instanceof NotAForkPointError) return known("not_a_fork_point");
 	return { ...known("internal_error"), unexpected: true };

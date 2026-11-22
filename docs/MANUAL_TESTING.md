@@ -3430,7 +3430,7 @@ The `agentMessage` those 43 deltas belonged to was not listed at all, so no part
 After `turn/completed` (`status: "completed"`) the same listing named the same turn with that `agentMessage` as its third item, 1491 characters, equal to all the deltas the wire carried.
 So for an item that started before an attach, as of this version, nothing but its deltas carries its text until `item/completed`, and the listing held none of that item's deltas, so opening a slot at the first delta applied nothing twice here.
 That was one sample of one item kind, an `agentMessage`; OW-dirazu's section below took the other kinds.
-That is the fix `CodexReducer.applyDelta` now makes (OW-zudase); the head of the text streamed before the attach still shows only once `item/completed` replaces the slot.
+That is the fix `CodexReducer.applyDelta` made (OW-zudase), the head of the text streamed before the attach showing only once `item/completed` replaced the slot, until ark3/agentpane#78 refused such a re-attach instead (D34).
 
 **Pi: the abandoned turn ends before the `fork` response, and nothing follows it.**
 The probe ran two short turns, then a third asking for the numbers 1 through 400, gated on forty `text_delta`s as OW-sededi's cell in `fork_probe.py` is, and forked at that third turn's own user message with the turn still streaming: 75 text deltas on the wire at the instant the request went out, `agent_settled` not yet seen.
@@ -5249,6 +5249,20 @@ With the stand-in's status sent as `isStreaming: false` instead, a run of 3 prin
 
 **The helper's `-32001` reached the prompt, 8 of 8, three times.**
 Each run printed `ANSWERED 8 of 8`, every prompt failing with "agentpane: sessions/prompt failed: the connection to the agentpane server closed before it answered", the helper's own message, and none read as a refusal.
+
+## A Codex resume reads a running thread `active` on `codex-cli 0.170.0` (ark3/agentpane#78)
+
+Run on the home server on 2026-11-21 by `python3 resources/probes/hydrate_window_probe.py --backend codex --json /tmp/hydrate-codex-0170.json`, from `resources/probes/`, one invocation exiting 0: `codex-cli 0.170.0`, with `gpt-5.6-luna` named on `thread/start` and `turn/start`.
+It drove `codex app-server` directly, not through agentpane, in a throwaway `CODEX_HOME` the probe's `make_state_home` copied `auth.json` and `config.toml` into, and a throwaway workspace.
+The JSON it wrote was kept only in `/tmp`, so what is below is the whole of the record.
+D34's refusal rests on the resume's thread status, last measured on `codex-cli 0.156.0` (OW-dirazu's section above), so it was measured again before the running-turn merge was deleted.
+
+**`thread/resume` on the live app-server read the thread `active` mid-turn.**
+The probe gated on the turn's `agentMessage` streaming, then sent on the same connection `thread/resume` with `excludeTurns: true`, as `CodexAdapter.startBorrowed` does.
+The resume went out at 41 deltas of that item, 53 streamed characters, with neither the item nor the turn completed, and was answered at the same 41, with no line between request and answer.
+Its `thread.status` was `{"type": "active", "activeFlags": []}`, and it carried no turns.
+The `thread/turns/list` that followed, at `itemsView: "full"`, named one turn `inProgress` with its `userMessage` and a `reasoning` item, and left the streaming `agentMessage` out, as on `0.156.0`.
+After `turn/completed` (`status: "completed"`) the listing held that `agentMessage` at 1491 characters, equal to all its deltas carried.
 
 ## HANDOFF findings 1–49
 

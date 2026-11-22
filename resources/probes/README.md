@@ -558,6 +558,7 @@ Verified with the socket: `claude 2.1.328` on the home server, 2026-11-19; see `
 ## `hydrate_window_probe.py`
 
 Proves: **what each backend sends while an adapter reads a live session's history back** (OW-dutute), the window D24's merge-on-hydrate has to reconcile.
+Since D34 a Codex re-attach meeting a running turn is refused rather than merged, on the `thread.status` the resume reports, so on Codex the reading that now matters is that status (ark3/agentpane#78).
 `--backend codex` lists a thread's turns mid-stream the way a re-attach does and reports whether the streaming item is listed, and with how much of its text; `--backend pi` forks a streaming turn and resumes the abandoned file, recording every line from each request to the `get_messages` answer.
 It reuses `AppServer` from `codex_fork_same_process_probe.py` and `PiSession` from `fork_probe.py`, and spawns `pi` with the pinned `--model`.
 
@@ -571,8 +572,8 @@ python3 hydrate_window_probe.py --backend pi
 
 Costs tokens: one long Codex turn on `gpt-5.6-luna` per `--item`, two for `contextCompaction`, or three Pi turns, one of them cut short by the fork.
 
-Verified with: `codex-cli` 0.156.0 and `pi` 0.87.1 on the home server, 2026-09-24; every `--item` with `codex-cli` 0.156.0 there, 2026-09-25; `--backend pi` with `pi` 1.2.0 there, 2026-10-14, three runs (OW-vijine).
-What it showed is `docs/MANUAL_TESTING.md`, "What each backend says while a live session's history is read back", "What a Codex listing holds of a running turn, by item kind", and "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0`".
+Verified with: `codex-cli` 0.156.0 and `pi` 0.87.1 on the home server, 2026-09-24; every `--item` with `codex-cli` 0.156.0 there, 2026-09-25; `--backend pi` with `pi` 1.2.0 there, 2026-10-14, three runs (OW-vijine); `--backend codex` with `codex-cli` 0.170.0 there, 2026-11-21, for the resume's `thread.status` D34's refusal reads (ark3/agentpane#78).
+What it showed is `docs/MANUAL_TESTING.md`, "What each backend says while a live session's history is read back", "What a Codex listing holds of a running turn, by item kind", "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0`", and "A Codex resume reads a running thread `active` on `codex-cli 0.170.0`".
 
 ## `emacs_helper_drop_probe.el`
 

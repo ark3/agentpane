@@ -395,6 +395,22 @@ describe("client controller", () => {
 		expect(controller.getView().error).toBe(detail);
 	});
 
+	// D34: an attach that meets the session's turn running elsewhere is refused,
+	// and the pane stays on the preview, to attach again once the turn ends.
+	it("shows an attach refused turn_running in the error slot, keeping the preview", async () => {
+		const detail = "the session's turn is still running elsewhere; try again when it ends";
+		const server = fakeServer();
+		server.on["sessions/preview"].mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });
+		server.on["sessions/attach"].mockRejectedValue(new ApiClientError("turn_running", detail));
+		const controller = createController(server.api());
+		await controller.start();
+		await controller.preview(ref);
+
+		await controller.select(ref);
+		expect(controller.getView()).toMatchObject({ error: detail, busy: "idle", preview: { ref } });
+		expect(controller.getView().state.selected).toEqual(ref);
+	});
+
 	it("selects the authoritative ref returned by attach", async () => {
 		const server = fakeServer();
 		server.on["sessions/attach"].mockImplementation(() => ({ session: server.attached(attachedRef) }));
