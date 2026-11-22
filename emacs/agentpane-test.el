@@ -28,7 +28,7 @@
 
 (defconst agentpane-test--live-methods
   '(sessions/abort sessions/compact sessions/dismissError sessions/setModel
-    sessions/setEffort sessions/setName sessions/forkAndPrompt)
+    sessions/setEffort sessions/setName sessions/forkAndPrompt sessions/close)
   "The helper's methods on a live session, each of which it sends the
 server under the handle the request's view is bound to (`ViewParams' in
 src/emacs/protocol.ts).")
