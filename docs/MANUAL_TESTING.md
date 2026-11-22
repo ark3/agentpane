@@ -5279,6 +5279,10 @@ The listing after the close held one row for it, `detached`, with no handle.
 The attach answered the same path under a new handle, and in the five seconds after it no snapshot under that handle carried any other ref.
 The listing then held one row for the path, `attached` under the new handle, and it was the only attached Pi row in the workspace.
 
+**Run again once #90 had built D35 point 1, it read the same.**
+The same probe, built from this checkout with the change, made another session in the same store and exited 0: no move at the first prompt or at the attach, and one row, `attached`.
+`bun resources/probes/agentpane_pi_smoke.ts --skip-build`, whose superseded-ref attach #90 replaced with a check that the create's ref is the first its handle carried, passed every check on the same build, with a throwaway `PI_CODING_AGENT_DIR` and the pinned model read back as `openrouter/deepseek/deepseek-v4.1-flash` at `high`; the rename came inside the create, and the handle carried no other ref.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.

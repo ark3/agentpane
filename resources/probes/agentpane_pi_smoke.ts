@@ -282,21 +282,20 @@ async function main(): Promise<number> {
 			throw new Error(`Pi did not adopt a JSONL path as its id: ${JSON.stringify(refs)}`);
 		}
 
-		// A client that listed or created the session may still hold the ref it
-		// had then, so an attach by it has to keep working -- the difference
-		// between reopening a new conversation and a `not_found`.
-		const alias = await socket.request("sessions/attach", { ref: createdRef }, 120);
-		if (!alias.ok) throw new Error(`the created ref stopped resolving: ${alias.code} ${alias.detail}`);
-		const aliasRef = alias.result.session.ref;
+		// The create answers the ref the session's container has then (D35 point
+		// 1), which is the first the handle carried; an id it outgrows after
+		// that reaches nothing, so nothing here attaches by it.
+		const first = refs[0]!;
+		if (first.backend !== createdRef.backend || first.id !== createdRef.id) {
+			throw new Error(`the create answered ${JSON.stringify(createdRef)}, but its handle first carried ${JSON.stringify(first)}`);
+		}
 		checks.rename = {
 			result: "pass",
 			handle,
 			refs,
 			renamed_during: createdRef.id.startsWith("virtual:") ? "first prompt" : "create",
 			adopted_id_is_jsonl_path: true,
-			created_ref_still_attaches: true,
-			created_ref_attaches_to_new_ref: aliasRef.backend === realRef.backend && aliasRef.id === realRef.id,
-			created_ref_attaches_to_same_handle: alias.result.session.handle === handle,
+			created_ref_is_the_first_on_the_handle: true,
 		};
 
 		// Which model actually answered. The run passes `--model` (see the

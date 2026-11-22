@@ -372,8 +372,8 @@ export function isOf(event: WireEvent, session: Session): boolean {
  * Every ref the session under `handle` carried on the wire, oldest first.
  *
  * One entry per move (D9): what a probe records, rather than requires, about
- * a rename. The last entry is the session's current ref, though any of them
- * still reaches it, because the server honours every name it ever had.
+ * a rename. The last entry is the session's current ref, and the only one
+ * that still reaches it (D35 point 1).
  */
 export function refsUnder(events: Stamped[], handle: string): { backend: string; id: string }[] {
 	const refs: { backend: string; id: string }[] = [];

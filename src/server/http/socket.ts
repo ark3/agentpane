@@ -156,15 +156,11 @@ export function openConnection(
 			return previewSession(context.deps, sessions, requireRef(frame));
 		},
 		async "sessions/attach"(frame) {
-			const ref = requireRef(frame);
-			await sessions.attach(ref);
-			// `session.ref` is authoritative and may differ from the one asked
-			// for: attaching is where a session first adopts its backend's own id
-			// (D9). The snapshot the attach broadcast under `session.handle`,
-			// already written, carries it too.
-			const session = sessions.summaryOf(ref);
-			if (!session) throw new Refusal("not_found", `no such session: ${sessionKey(ref)}`);
-			return { session };
+			// The container the attach landed on: its `ref` is authoritative and
+			// may differ from the one asked for, canonicalised by the index (D9,
+			// D35 point 1). The snapshot the attach broadcast under
+			// `session.handle`, already written, carries it too.
+			return { session: await sessions.attach(requireRef(frame)) };
 		},
 		async "sessions/close"(frame) {
 			await sessions.close(live(frame).handle);

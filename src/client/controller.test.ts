@@ -2354,7 +2354,7 @@ describe("client controller", () => {
 	it("moves to a fork the refusal names with no handle, on a pane that is not live (D30)", async () => {
 		const server = fakeServer();
 		server.on["sessions/forkAndPrompt"].mockRejectedValueOnce(
-			new ApiClientError("not_found", "no such session", { ref: forkedRef, handle: null }),
+			new ApiClientError("not_attached", `session ${sessionKey(forkedRef)} is not attached under handle h-fork`, { ref: forkedRef, handle: null }),
 		);
 		const controller = createController(server.api());
 		await controller.start();

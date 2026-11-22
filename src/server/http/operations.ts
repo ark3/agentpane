@@ -90,11 +90,9 @@ export async function createSession(
 	}
 	if (!isDirectory) throw new Refusal("bad_request", "cwd must name an existing directory");
 	if (!isBackendId(backend)) throw new Refusal("bad_backend", `unknown backend "${String(backend)}"`);
-	// Starts the agent too, and a start that fails leaves nothing (D30).
-	const ref = await sessions.create(cwd, backend, model);
-	const session = sessions.summaryOf(ref);
-	if (!session) throw new Refusal("not_found", `no such session: ${sessionKey(ref)}`);
-	return { session };
+	// Starts the agent too, and a start that fails leaves nothing (D30). The
+	// summary is the container's, under whatever ref the start gave it.
+	return { session: await sessions.create(cwd, backend, model) };
 }
 
 /**

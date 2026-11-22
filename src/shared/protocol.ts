@@ -175,9 +175,9 @@ export interface AgentNotice {
  * minted id at attach, and the first prompt may move it again (D9), so the id
  * a client created a session with is not the id it keeps. Each time, a
  * `snapshot` under the handle carrying the new ref goes out, and every event
- * after it carries that ref. The server honours the old id on every command
- * that names a ref, indefinitely, so a request in flight across the move
- * still lands.
+ * after it carries that ref. The old id reaches nothing from then on (D35
+ * point 1): a command naming it is refused `not_found`, or `gone` for a
+ * preview, so a client takes the new ref from the first event that carries it.
  */
 export type ServerEvent =
 	| {

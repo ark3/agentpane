@@ -475,7 +475,7 @@ describe("requests", () => {
 
 	it("binds nothing for a refusal naming a fork closed before its prompt was refused, or none (D30)", async () => {
 		const refusals = [
-			new ApiClientError("not_found", "no such session", { ref: codex, handle: null }),
+			new ApiClientError("not_attached", "session codex:thread-1 is not attached under handle h-fork", { ref: codex, handle: null }),
 			new ApiClientError("not_a_fork_point", "no point"),
 		];
 		const { io } = start({
@@ -489,7 +489,7 @@ describe("requests", () => {
 		io.send({ jsonrpc: "2.0", id: 5, method: "sessions/forkAndPrompt", params: { session: pi, view: 1, forkView: 8, index: 3, text: "again" } });
 		await io.until(4);
 		expect(io.notifications()).toHaveLength(1);
-		expect(io.response(4)!["error"]).toMatchObject({ data: { error: "not_found", fork: { ref: codex, handle: null } } });
+		expect(io.response(4)!["error"]).toMatchObject({ data: { error: "not_attached", fork: { ref: codex, handle: null } } });
 		expect(io.response(5)!["error"]).toMatchObject({ data: { error: "not_a_fork_point" } });
 	});
 

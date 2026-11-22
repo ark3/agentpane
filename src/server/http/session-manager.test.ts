@@ -87,6 +87,12 @@ function holdDispose(adapter: FakeAdapter): () => void {
 	return () => held.resolve();
 }
 
+/** Attach `ref` and answer its live adapter, read back under the ref the attach answered. */
+async function attachAdapter(ref: SessionRef): Promise<FakeAdapter> {
+	const attached = await sessions.attach(ref);
+	return sessions.adapterFor(attached.ref) as FakeAdapter;
+}
+
 /** Close the session `ref` names by its container's handle, as a client's close does (D35 point 3). */
 function closeLive(ref: SessionRef): Promise<void> {
 	const handle = sessions.summaryOf(ref)?.handle;
@@ -97,7 +103,7 @@ function closeLive(ref: SessionRef): Promise<void> {
 describe("attach", () => {
 	it("spawns once even when two attaches race", async () => {
 		const [a, b] = await Promise.all([sessions.attach(REF), sessions.attach(REF)]);
-		expect(a).toBe(b);
+		expect(a.handle).toBe(b.handle);
 		expect(pi.created).toHaveLength(1);
 	});
 
@@ -163,7 +169,7 @@ describe("attach", () => {
 		);
 	});
 
-	it("uses the index's canonical ref while keeping the requested ref as an alias", async () => {
+	it("uses the index's canonical ref, and the requested spelling becomes no name (D35 point 1)", async () => {
 		const requested: SessionRef = {
 			backend: "pi",
 			id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl",
@@ -183,16 +189,18 @@ describe("attach", () => {
 			broadcaster,
 		);
 
-		const adapter = await sessions.attach(requested);
+		const attached = await sessions.attach(requested);
 
+		expect(attached.ref).toEqual(canonical);
 		expect(pi.createdFor).toEqual([canonical]);
 		expect(pi.created[0]?.startOptions).toEqual({ cwd: WORKSPACE, resumeId: canonical.id });
-		expect(sessions.canonicalRef(requested)).toEqual(canonical);
-		expect(sessions.adapterFor(requested)).toBe(adapter);
-		expect(sessions.summaryOf(requested)?.ref).toEqual(canonical);
+		expect(sessions.adapterFor(canonical)).toBe(pi.created[0]);
+		expect(sessions.summaryOf(canonical)?.handle).toBe(attached.handle);
+		expect(sessions.canonicalRef(requested)).toEqual(requested);
+		expect(sessions.holds(requested)).toBe(false);
 	});
 
-	it("removes the canonical table entry and requested alias when startup fails", async () => {
+	it("removes the canonical table entry when startup fails, leaving the requested spelling unknown", async () => {
 		const requested: SessionRef = {
 			backend: "pi",
 			id: "/home/u/.pi/agent/sessions/subdir/../a.jsonl",
@@ -240,14 +248,13 @@ describe("attach", () => {
 		const first = await sessions.attach(canonical);
 		const throughAlias = await sessions.attach(alias);
 
-		expect(throughAlias).toBe(first);
+		expect(throughAlias).toEqual(expect.objectContaining({ ref: canonical, handle: first.handle }));
 		expect(pi.created).toHaveLength(1);
-		expect(sessions.canonicalRef(alias)).toEqual(canonical);
+		expect(sessions.canonicalRef(alias)).toEqual(alias);
 		expect(sessions.liveRefs()).toEqual([canonical]);
-		expect(sessions.adapterFor(canonical)).toBe(first);
 	});
 
-	it("collapses concurrent distinct aliases after the index canonicalizes them", async () => {
+	it("collapses concurrent distinct spellings at the arbitration after the index canonicalizes them (D35 point 5)", async () => {
 		const canonical: SessionRef = {
 			backend: "pi",
 			id: "/home/u/.pi/agent/sessions/ws/a.jsonl",
@@ -276,15 +283,15 @@ describe("attach", () => {
 			sessions.attach(aliasB),
 		]);
 
-		expect(second).toBe(first);
+		expect(second.handle).toBe(first.handle);
+		expect(first.ref).toEqual(canonical);
 		expect(pi.created).toHaveLength(1);
-		expect(sessions.canonicalRef(aliasA)).toEqual(canonical);
-		expect(sessions.canonicalRef(aliasB)).toEqual(canonical);
+		expect(sessions.canonicalRef(aliasA)).toEqual(aliasA);
+		expect(sessions.canonicalRef(aliasB)).toEqual(aliasB);
 		expect(sessions.liveRefs()).toEqual([canonical]);
-		expect(sessions.adapterFor(canonical)).toBe(first);
 	});
 
-	it("a failed canonical winner leaves no state owned by either concurrent alias", async () => {
+	it("a failed canonical winner fails the spelling that joined it, and leaves no state", async () => {
 		const canonical: SessionRef = {
 			backend: "pi",
 			id: "/home/u/.pi/agent/sessions/ws/a.jsonl",
@@ -327,8 +334,8 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 	// `PiAdapter.ref` is not stable at construction: Pi's session id IS its JSONL
 	// path (D9), which Pi names from start()'s get_state, and a backend that has
 	// named nothing by the end of attach names it at the first prompt instead. The
-	// adapter announces each move through `onRefChanged` and the manager writes
-	// the new id onto the container as one more name (D24); these are that
+	// adapter announces each move through `onRefChanged` and the manager moves
+	// the container's one name to the new id (D24, D35 point 1); these are that
 	// contract.
 	const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
 
@@ -336,59 +343,47 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
 
-		await sessions.attach(REF);
+		const attached = await sessions.attach(REF);
 
-		expect(sessions.canonicalRef(REF)).toEqual({ backend: "pi", id: REAL });
 		expect(sessions.liveRefs()).toEqual([{ backend: "pi", id: REAL }]);
 		// The summary an attach's reply carries is a client's other way of
 		// learning the new id, so it must not still carry the index's stale one.
-		expect(sessions.summaryOf(REF)?.ref).toEqual({ backend: "pi", id: REAL });
-		expect(sessions.summaryOf(REF)?.preview).toBe("hello");
-		// One session, listed once -- not once under each id.
-		const listed = await sessions.list();
-		expect(listed.filter((s) => s.status === "attached")).toHaveLength(1);
+		expect(attached.ref).toEqual({ backend: "pi", id: REAL });
+		expect(attached.preview).toBe("hello");
+		// The id it outgrew reaches nothing (D35 point 1). A stored Pi session
+		// is not renamed at its resume (`pi 1.5.2`, docs/BACKENDS.md "Resume"),
+		// so the second row the index would list for REF is not met in use.
+		expect(sessions.summaryOf(REF)).toBeNull();
 	});
 
 	it("adopts the id a virtual session takes on its first prompt when attach named none (D9)", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = await sessions.create(WORKSPACE, "pi");
-		expect(sessions.canonicalRef(virtualRef)).toEqual(virtualRef);
+		const created = await sessions.create(WORKSPACE, "pi");
+		expect(created.ref.id).toMatch(/^virtual:/);
 
-		await sessions.submit(virtualRef, "first");
+		await sessions.submit(created.ref, "first", undefined, undefined, created.handle);
 
 		const real: SessionRef = { backend: "pi", id: REAL };
-		expect(sessions.canonicalRef(virtualRef)).toEqual(real);
+		expect(sessions.summaryOf(real)?.handle).toBe(created.handle);
 		expect(sessions.liveRefs()).toEqual([real]);
-		expect(sessions.adapterFor(real)).toBeDefined();
+		expect(sessions.holds(created.ref)).toBe(false);
 		// A session listed under a `virtual:` id it no longer has is a session the
 		// browser can never find on disk again.
 		const listed = await sessions.list();
-		expect(listed.map((s) => s.ref.id)).not.toContain(virtualRef.id);
-	});
-
-	it("keeps the pre-rename id working for a client that still holds it", async () => {
-		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: REAL });
-		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = await sessions.create(WORKSPACE, "pi");
-		await sessions.submit(virtualRef, "first");
-
-		// The browser POSTed against the id it created and has not refetched yet.
-		await expect(sessions.submit(virtualRef, "second")).resolves.toBe("started");
-		expect(renaming.forRef(virtualRef)?.prompts.map((p) => p.text)).toEqual(["first", "second"]);
-		expect(renaming.created).toHaveLength(1);
-		expect(sessions.isAttached(virtualRef)).toBe(true);
+		expect(listed.map((s) => s.ref.id)).not.toContain(created.ref.id);
 	});
 
 	it("closes a renamed session by its handle, leaving neither id resolving", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		await sessions.attach(REF);
+		const { handle } = await sessions.attach(REF);
 
-		await closeLive(REF);
+		await sessions.close(handle);
 
 		expect(sessions.liveRefs()).toEqual([]);
 		expect(sessions.canonicalRef(REF)).toEqual(REF);
+		expect(sessions.holds({ backend: "pi", id: REAL })).toBe(false);
 		expect(renaming.created[0]?.disposed).toBe(true);
 	});
 
@@ -402,11 +397,12 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			newSessionId: () => "minted",
 		});
 		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
-		const virtualRef = await sessions.create(WORKSPACE, "claude");
-		const adapter = sessions.adapterFor(virtualRef);
+		const created = await sessions.create(WORKSPACE, "claude");
 		const minted: SessionRef = { backend: "claude", id: "minted" };
-		expect(sessions.canonicalRef(virtualRef)).toEqual(minted);
-		const handle = sessions.summaryOf(minted)?.handle;
+		// The create answers the id the start renamed it to (D35 point 1).
+		expect(created.ref).toEqual(minted);
+		const { handle } = created;
+		const adapter = sessions.adapterFor(minted);
 		const events = broadcastEvents();
 
 		await sessions.submit(minted, "hi");
@@ -416,15 +412,14 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		expect(naming(chosen, events)).toEqual([expect.objectContaining({ type: "snapshot", handle })]);
 		expect(sessions.liveRefs()).toEqual([chosen]);
 		expect(sessions.adapterFor(chosen)).toBe(adapter);
-		expect(sessions.adapterFor(minted)).toBe(adapter);
-		expect(sessions.adapterFor(virtualRef)).toBe(adapter);
+		expect(sessions.adapterFor(minted)).toBeUndefined();
 	});
 
 	describe("a rename announced inside start()", () => {
-		// All three adapters rename there. The container is keyed by its handle
-		// and holds the startup itself, so the new id is written as a name at
-		// once and reaches that startup; only the wire waits for the adapter to
-		// be published (D24, OW-suyinu, OW-mofuho).
+		// All three adapters rename a created session there. The container is
+		// keyed by its handle and carries the startup itself, so its name moves to
+		// the new id at once and reaches that startup; only the wire waits for the
+		// adapter to be published (D24, OW-suyinu, OW-mofuho, D35 point 1).
 		const real: SessionRef = { backend: "pi", id: REAL };
 
 		/** A factory whose adapters rename during `start()`, then do `after` before it settles. */
@@ -460,18 +455,18 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			return { factory, wire, attaching, release: () => gate.resolve() };
 		}
 
-		it("writes the new name at once, and an attach under it joins the one startup", async () => {
+		it("moves the name at once, and an attach under it joins the one startup", async () => {
 			const { factory, wire, attaching, release } = await attachParkedAfterRename();
 
-			expect(sessions.canonicalRef(REF)).toEqual(real);
-			const handle = sessions.summaryOf(REF)?.handle;
-			expect(sessions.summaryOf(real)?.handle).toBe(handle);
+			expect(sessions.holds(REF)).toBe(false);
+			const handle = sessions.summaryOf(real)?.handle;
+			expect(handle).toBeDefined();
 			const joining = sessions.attach(real);
 			// Held for the publish: a start that still fails must leave nothing.
 			expect(wire).toEqual([]);
 
 			release();
-			expect(await joining).toBe(await attaching);
+			expect((await joining).handle).toBe((await attaching).handle);
 			expect(factory.created).toHaveLength(1);
 			// Said once, by the attach, and under the handle.
 			expect(wire.map((event) => event.type)).toEqual(["sessions-changed", "snapshot"]);
@@ -488,7 +483,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			expect(naming(REF, wire)).toEqual([]);
 		});
 
-		it("leaves no rename, no alias and nothing on the wire behind when start() then fails", async () => {
+		it("leaves no rename and nothing on the wire behind when start() then fails", async () => {
 			const factory = renamingInsideStart(async () => {
 				throw new Error("get_messages failed");
 			});
@@ -501,11 +496,26 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			expect(sessions.canonicalRef(REF)).toEqual(REF);
 			expect(sessions.summaryOf(real)).toBeNull();
 			expect(sessions.liveRefs()).toEqual([]);
-			// A name left on REF's container would hide the stored session from the list.
+			// A container left in the table would list a row of its own.
 			expect((await sessions.list()).map((summary) => summary.ref)).toEqual([REF]);
 		});
 
-		it("takes a created container out with the name its failed start took as well as its own (D30)", async () => {
+		it("refuses an attach and a prompt by the virtual id a create's start renamed, spawning nothing (D35 point 1)", async () => {
+			// No index entry has a `virtual:` id, so an outgrown one reaches nothing.
+			const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
+			sessions = new SessionManager({ index, adapters: { pi: renaming }, newId: () => "created" }, broadcaster);
+			const created = await sessions.create(WORKSPACE, "pi");
+			expect(created.ref).toEqual(real);
+
+			await expect(sessions.attach(CREATED)).rejects.toBeInstanceOf(UnknownSessionError);
+			await expect(sessions.attachAndSubmit(CREATED, "hi", undefined, null)).rejects.toBeInstanceOf(UnknownSessionError);
+
+			expect(sessions.holds(CREATED)).toBe(false);
+			expect(renaming.created).toHaveLength(1);
+			expect(renaming.created[0]?.prompts).toEqual([]);
+		});
+
+		it("takes a created container out under the name its failed start moved it to (D30)", async () => {
 			const factory = renamingInsideStart(async () => {
 				throw new Error("get_messages failed");
 			});
@@ -523,13 +533,13 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 });
 
 describe("create (D30)", () => {
-	it("starts the session's agent and answers the virtual ref it minted, attached", async () => {
-		const ref = await sessions.create(WORKSPACE, "pi");
+	it("starts the session's agent and answers its live summary, under the virtual ref it minted", async () => {
+		const created = await sessions.create(WORKSPACE, "pi");
 
-		expect(ref.id).toMatch(/^virtual:/);
+		expect(created.ref.id).toMatch(/^virtual:/);
+		expect(created).toEqual(expect.objectContaining({ status: "attached", onDisk: false }));
 		expect(pi.created).toHaveLength(1);
-		expect(sessions.isAttached(ref)).toBe(true);
-		expect(sessions.summaryOf(ref)).toEqual(expect.objectContaining({ ref, status: "attached", onDisk: false }));
+		expect(sessions.summaryOf(created.ref)?.handle).toBe(created.handle);
 	});
 
 	it("leaves no container, no name and no row when the start fails, and says so to a client that listed it", async () => {
@@ -609,7 +619,8 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		const claude = new FakeAdapterFactory({ forkMode: "claude" });
 		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
 		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
-		const parent = await sessions.attach(claudeRef);
+		await sessions.attach(claudeRef);
+		const parent = sessions.adapterFor(claudeRef);
 
 		const forked = await sessions.fork(claudeRef, "e1");
 
@@ -618,9 +629,9 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect(sessions.canonicalRef(claudeRef)).toEqual(claudeRef);
 		expect(sessions.adapterFor(claudeRef)).toBe(parent);
 
-		const forkAdapter = (await sessions.attach(forked)) as FakeAdapter;
+		await sessions.attach(forked);
 
-		expect(forkAdapter).not.toBe(parent);
+		expect(sessions.adapterFor(forked)).not.toBe(parent);
 		expect(claude.forRef(forked)?.startOptions).toEqual({
 			cwd: WORKSPACE,
 			forkOf: { parentId: "parent", entryId: "e1" },
@@ -981,28 +992,6 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect(sessions.isAttached(forked)).toBe(false);
 	});
 
-	it("leaves an older name of the parent resolving to nothing, not to the fork", async () => {
-		// A `virtual:` id that materialised into the parent is an older name for
-		// the PARENT's conversation. Handing it to the fork's container would
-		// recreate the bug one level up: a stale client ref that can kill the
-		// live fork.
-		const renaming = new FakeAdapterFactory({
-			materialiseOnSubmit: "/home/u/.pi/agent/sessions/materialised.jsonl",
-		});
-		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = await sessions.create(WORKSPACE, "pi");
-		await sessions.submit(virtualRef, "first");
-
-		const forked = await sessions.fork(virtualRef, "e1");
-
-		// The name left with the parent's container, which is now detached, so it
-		// misses -- and a miss is what `canonicalRef` reports by handing `ref`
-		// back. Had it gone to the fork's container it would resolve to the fork.
-		expect(sessions.canonicalRef(virtualRef)).toEqual(virtualRef);
-		expect(sessions.canonicalRef(virtualRef)).not.toEqual(forked);
-		expect(sessions.adapterFor(virtualRef)).toBeUndefined();
-	});
-
 	it("rejects a fork on a session with no live adapter", async () => {
 		await expect(sessions.fork({ backend: "pi", id: "/nope" }, "e1")).rejects.toBeInstanceOf(
 			UnknownSessionError,
@@ -1031,7 +1020,7 @@ describe("fork and prompt, one operation (D30)", () => {
 		["codex", "shared"],
 	] as const)("forks a %s session (%s) at the point the index names, then attaches and prompts the fork, not the parent", async (backend, forkMode) => {
 		const { ref } = managing(backend, { forkPoints: POINTS, forkMode });
-		const parent = (await sessions.attach(ref)) as FakeAdapter;
+		const parent = await attachAdapter(ref);
 
 		const result = await sessions.forkAndPrompt(ref, 2, "again", IMAGES);
 
@@ -1107,7 +1096,7 @@ describe("fork and prompt, one operation (D30)", () => {
 
 	it("refuses an index no fork point names, and forks nothing (D20)", async () => {
 		const { ref } = managing("codex", { forkPoints: POINTS, forkMode: "codex" });
-		const parent = (await sessions.attach(ref)) as FakeAdapter;
+		const parent = await attachAdapter(ref);
 
 		await expect(sessions.forkAndPrompt(ref, 1, "again")).rejects.toBeInstanceOf(NotAForkPointError);
 		expect(parent.forks).toEqual([]);
@@ -1198,6 +1187,22 @@ describe("fork and prompt, one operation (D30)", () => {
 		expect(sessions.liveRefs()).toEqual([ref]);
 	});
 
+	it("prompts a fork its start renamed, the Codex no-turn shape, and answers its renamed ref and handle (OW-hojefo, D35 point 1)", async () => {
+		const options: FakeAdapterOptions = { forkPoints: POINTS, forkMode: "claude" };
+		const { ref } = managing("codex", options);
+		await sessions.attach(ref);
+		// Read by the fork's start alone: the parent's has run.
+		options.materialiseOnStart = "thread-fresh";
+
+		const result = await sessions.forkAndPrompt(ref, 0, "again");
+
+		const fresh: SessionRef = { backend: "codex", id: "thread-fresh" };
+		expect(result).toEqual({ session: sessions.summaryOf(fresh), disposition: "started" });
+		expect(result.session).toMatchObject({ ref: fresh, status: "attached" });
+		expect((sessions.adapterFor(fresh) as FakeAdapter).prompts).toEqual([{ text: "again", images: undefined }]);
+		expect(sessions.holds({ backend: "codex", id: "parent#fork-e1" })).toBe(false);
+	});
+
 	it("clears no error the fork's start raised: nobody has seen one on the fork (OW-jokoto)", async () => {
 		const options: FakeAdapterOptions = { forkPoints: POINTS, forkMode: "claude" };
 		const { ref } = managing("claude", options);
@@ -1213,7 +1218,7 @@ describe("fork and prompt, one operation (D30)", () => {
 /** A prompt names the handle its sender holds live, or only the ref (D30). */
 describe("a prompt names a handle or a ref (D30)", () => {
 	it("prompts the live session under the handle it names", async () => {
-		const adapter = (await sessions.attach(REF)) as FakeAdapter;
+		const adapter = await attachAdapter(REF);
 		const handle = sessions.summaryOf(REF)!.handle;
 
 		await expect(sessions.submit(REF, "hello", undefined, null, handle)).resolves.toBe("started");
@@ -1224,7 +1229,7 @@ describe("a prompt names a handle or a ref (D30)", () => {
 		await sessions.attach(REF);
 		const ended = sessions.summaryOf(REF)!.handle;
 		await closeLive(REF);
-		const again = (await sessions.attach(REF)) as FakeAdapter;
+		const again = await attachAdapter(REF);
 		expect(sessions.summaryOf(REF)!.handle).not.toBe(ended);
 
 		await expect(sessions.submit(REF, "hello", undefined, null, ended)).rejects.toBeInstanceOf(HandleEndedError);
@@ -1235,7 +1240,7 @@ describe("a prompt names a handle or a ref (D30)", () => {
 		const held = deferred();
 		pi = new FakeAdapterFactory({ onSubmit: (_adapter, text) => (text === "first" ? held.promise.then(() => undefined) : undefined) });
 		sessions = new SessionManager({ index, adapters: { pi } }, broadcaster);
-		const adapter = (await sessions.attach(REF)) as FakeAdapter;
+		const adapter = await attachAdapter(REF);
 		const handle = sessions.summaryOf(REF)!.handle;
 
 		const first = sessions.submit(REF, "first", undefined, null, handle);
@@ -1261,7 +1266,7 @@ describe("a prompt names a handle or a ref (D30)", () => {
 	});
 
 	it("prompts a session already live when the prompt names no handle, starting nothing", async () => {
-		const adapter = (await sessions.attach(REF)) as FakeAdapter;
+		const adapter = await attachAdapter(REF);
 
 		await sessions.attachAndSubmit(REF, "hello", undefined, null);
 
@@ -1298,8 +1303,8 @@ describe("a prompt names a handle or a ref (D30)", () => {
 });
 
 /**
- * The container is keyed by a handle the manager mints, and every backend id
- * the conversation has had is a name on it (D24, OW-suyinu). A rename adds a
+ * The container is keyed by a handle the manager mints, and its current
+ * backend id is its one name (D24, OW-suyinu, D35 point 1). A rename moves the
  * name; a fork is a new container with a new handle.
  */
 describe("a container keyed by a handle", () => {
@@ -1311,81 +1316,32 @@ describe("a container keyed by a handle", () => {
 	// must not be the first process's.
 	it("mints a first handle no other manager mints, as a restarted server's would be", async () => {
 		const restarted = new SessionManager({ index, adapters: { pi } }, new Broadcaster());
-		const before = handleOf(await sessions.create(WORKSPACE, "pi"));
-		const after = restarted.summaryOf(await restarted.create(WORKSPACE, "pi"))?.handle;
+		const before = (await sessions.create(WORKSPACE, "pi")).handle;
+		const after = (await restarted.create(WORKSPACE, "pi")).handle;
 		expect(before).toEqual(expect.any(String));
 		expect(after).toEqual(expect.any(String));
 		expect(after).not.toBe(before);
 	});
 
-	it("is reachable by all three names after two renames, and holds one handle throughout", async () => {
-		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
-		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = await sessions.create(WORKSPACE, "pi");
-		const handle = handleOf(virtualRef);
-		expect(handle).toEqual(expect.any(String));
-		const adapter = sessions.adapterFor(virtualRef);
-		const later: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/later.jsonl" };
-		renaming.forRef(virtualRef)?.materialiseAs(later.id);
+	it("gives a Pi-style fork a new handle and not the parent's name, and leaves the parent's ref resolving to nothing", async () => {
+		const { handle: parentHandle } = await sessions.attach(REF);
 
-		for (const name of [virtualRef, { backend: "pi", id: REAL } as SessionRef, later]) {
-			expect(handleOf(name)).toBe(handle);
-			expect(sessions.adapterFor(name)).toBe(adapter);
-			expect(sessions.canonicalRef(name)).toEqual(later);
-		}
-		expect(sessions.liveHandles()).toEqual([handle]);
-	});
-
-	it("gives a Pi-style fork a new handle and none of the parent's names, and leaves no name of the parent resolving", async () => {
-		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
-		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		await sessions.attach(REF);
-		const real: SessionRef = { backend: "pi", id: REAL };
-		const parentHandle = handleOf(REF);
-		expect(parentHandle).toEqual(expect.any(String));
-		expect(handleOf(real)).toBe(parentHandle);
-
-		const forked = await sessions.fork(real, "e1");
+		const forked = await sessions.fork(REF, "e1");
 
 		const forkHandle = handleOf(forked);
 		expect(forkHandle).toEqual(expect.any(String));
 		expect(forkHandle).not.toBe(parentHandle);
-		for (const name of [REF, real]) {
-			expect(sessions.summaryOf(name)).toBeNull();
-			expect(sessions.adapterFor(name)).toBeUndefined();
-		}
+		expect(sessions.summaryOf(REF)).toBeNull();
+		expect(sessions.adapterFor(REF)).toBeUndefined();
 		expect(sessions.liveHandles()).toEqual([forkHandle]);
 
 		// Detached, so the next attach resumes the parent from the index into a
 		// container of its own, and the fork's is untouched.
-		await sessions.attach(REF);
-		expect(renaming.created).toHaveLength(2);
-		expect(handleOf(REF)).not.toBe(parentHandle);
-		expect(handleOf(REF)).not.toBe(forkHandle);
+		const again = await sessions.attach(REF);
+		expect(pi.created).toHaveLength(2);
+		expect(again.handle).not.toBe(parentHandle);
+		expect(again.handle).not.toBe(forkHandle);
 		expect(handleOf(forked)).toBe(forkHandle);
-	});
-
-	it("records a spelling `#start` canonicalised as a name on the container, whichever attach won", async () => {
-		const canonical: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/ws/a.jsonl" };
-		const spellingA: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl" };
-		const spellingB: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/other/../ws/a.jsonl" };
-		const spellingC: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/./ws/a.jsonl" };
-		const summary = storedSession(canonical, WORKSPACE);
-		const canonicalizingIndex: SessionIndex = {
-			list: async () => [summary],
-			get: async () => summary,
-			preview: async () => [],
-		};
-		sessions = new SessionManager({ index: canonicalizingIndex, adapters: { pi } }, broadcaster);
-
-		// A starts the container, B joins its startup, and C arrives once it is live.
-		await Promise.all([sessions.attach(spellingA), sessions.attach(spellingB)]);
-		await sessions.attach(spellingC);
-
-		const handle = handleOf(canonical);
-		expect(handle).toEqual(expect.any(String));
-		for (const spelling of [spellingA, spellingB, spellingC]) expect(handleOf(spelling)).toBe(handle);
-		expect(pi.created).toHaveLength(1);
 	});
 
 	it("unsubscribes the adapter a Pi fork took when the fork's container is closed", async () => {
@@ -1409,15 +1365,13 @@ describe("a container keyed by a handle", () => {
 		expect(sessions.summaryOf({ backend: "pi", id: "/home/u/.pi/agent/sessions/after.jsonl" })).toBeNull();
 	});
 
-	it("leaves a closed container reachable by no name", async () => {
+	it("leaves a closed container reachable by neither its ref nor the one it outgrew", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		await sessions.attach(REF);
+		const { handle } = await sessions.attach(REF);
 		const real: SessionRef = { backend: "pi", id: REAL };
-		const handle = handleOf(REF);
-		expect(handle).toEqual(expect.any(String));
 
-		await closeLive(real);
+		await sessions.close(handle);
 
 		for (const name of [REF, real]) {
 			expect(sessions.summaryOf(name)).toBeNull();
@@ -1452,7 +1406,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		const forked = await sessions.fork(parentRef, "e1");
 		expect(forked).toEqual(forkRef);
 
-		const forkAdapter = (await sessions.attach(forked)) as FakeAdapter;
+		const forkAdapter = await attachAdapter(forked);
 
 		// One adapter from the factory -- the parent's. The fork's came from the
 		// parent adapter, and the factory never saw the fork's ref.
@@ -1470,7 +1424,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 	it("keeps the fork driving the shared child after the parent is closed", async () => {
 		await sessions.attach(parentRef);
 		const forked = await sessions.fork(parentRef, "e1");
-		const forkAdapter = (await sessions.attach(forked)) as FakeAdapter;
+		const forkAdapter = await attachAdapter(forked);
 
 		await closeLive(parentRef);
 
@@ -1481,7 +1435,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 	});
 
 	it("keeps the parent driving the shared child after the fork is closed", async () => {
-		const parent = (await sessions.attach(parentRef)) as FakeAdapter;
+		const parent = await attachAdapter(parentRef);
 		const forked = await sessions.fork(parentRef, "e1");
 		await sessions.attach(forked);
 
@@ -1513,7 +1467,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 			forkOptions: { failStart: "fork refused" },
 		});
 		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
-		const parent = (await sessions.attach(parentRef)) as FakeAdapter;
+		const parent = await attachAdapter(parentRef);
 		const forks = capturingForks();
 
 		const error = await sessions.forkAndPrompt(parentRef, 0, "again").catch((e: unknown) => e);
@@ -1615,7 +1569,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 
 describe("lifecycle", () => {
 	it("keeps virtual sessions out of the backend store until prompted (D9)", async () => {
-		const ref = await sessions.create(WORKSPACE, "pi", "pi-1");
+		const { ref } = await sessions.create(WORKSPACE, "pi", "pi-1");
 		expect(pi.forRef(ref)?.startOptions).toEqual({ cwd: WORKSPACE, model: "pi-1" });
 
 		const before = await sessions.list();
@@ -1635,8 +1589,8 @@ describe("lifecycle", () => {
 		index = new FakeSessionIndex([storedSession(real, WORKSPACE)]);
 		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: real.id });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = await sessions.create(WORKSPACE, "pi", "openrouter/deepseek/deepseek-v4.1-flash:high");
-		await sessions.submit(virtualRef, "first");
+		const created = await sessions.create(WORKSPACE, "pi", "openrouter/deepseek/deepseek-v4.1-flash:high");
+		await sessions.submit(created.ref, "first", undefined, undefined, created.handle);
 		await closeLive(real);
 
 		await sessions.attach(real);
@@ -1680,38 +1634,25 @@ describe("lifecycle", () => {
 		expect(sessions.isAttached(REF)).toBe(false);
 	});
 
-	it("waits for a closing adapter to be disposed before attaching its replacement", async () => {
-		const canonical: SessionRef = {
-			backend: "pi",
-			id: "/home/u/.pi/agent/sessions/materialised.jsonl",
-		};
-		pi = new FakeAdapterFactory({ materialiseOnStart: canonical.id });
-		sessions = new SessionManager({ index, adapters: { pi } }, broadcaster);
+	it("waits for a closing adapter to be disposed before attaching its replacement, once for two attaches (D32 point 5)", async () => {
 		await sessions.attach(REF);
 		const first = pi.created[0];
 		if (!first) throw new Error("no adapter");
-		index.summaries = [storedSession(REF, WORKSPACE), storedSession(canonical, WORKSPACE)];
-		const gate = deferred();
-		const dispose = first.dispose.bind(first);
-		first.dispose = async () => {
-			await gate.promise;
-			await dispose();
-		};
+		const release = holdDispose(first);
 
 		const closing = closeLive(REF);
-		const throughAlias = sessions.attach(REF);
-		const throughCanonical = sessions.attach(canonical);
+		const attaches = [sessions.attach(REF), sessions.attach(REF)] as const;
 		// Give an unguarded attach enough turns to reach the synchronous create().
-		for (let i = 0; i < 4; i++) await Promise.resolve();
+		await settle();
 
 		expect(pi.created).toHaveLength(1);
 
-		gate.resolve();
+		release();
 		await closing;
-		const [aliasAdapter, canonicalAdapter] = await Promise.all([throughAlias, throughCanonical]);
+		const [a, b] = await Promise.all(attaches);
 		expect(first.disposed).toBe(true);
 		expect(pi.created).toHaveLength(2);
-		expect(aliasAdapter).toBe(canonicalAdapter);
+		expect(b.handle).toBe(a.handle);
 	});
 
 	it("says a close ended the handle, and that the list changed, before the adapter's disposal settles (D26, OW-sodohi)", async () => {
@@ -1778,10 +1719,10 @@ describe("lifecycle", () => {
 		release();
 		await closing;
 		expect(first.disposals).toBe(1);
-		expect(await attaching).toBe(pi.created[1]);
+		expect(sessions.adapterFor((await attaching).ref)).toBe(pi.created[1]);
 	});
 
-	it("canonicalizes unseen aliases before replacing a session that is still disposing", async () => {
+	it("waits out a close under the canonical ref two unseen spellings' lookups name, and starts one replacement (D35 point 4)", async () => {
 		const canonical: SessionRef = {
 			backend: "pi",
 			id: "/home/u/.pi/agent/sessions/ws/a.jsonl",
@@ -1826,14 +1767,14 @@ describe("lifecycle", () => {
 		const [replacementA, replacementB] = await Promise.all([throughAliasA, throughAliasB]);
 
 		expect(first.disposed).toBe(true);
-		expect(replacementB).toBe(replacementA);
+		expect(replacementB.handle).toBe(replacementA.handle);
+		expect(replacementA.ref).toEqual(canonical);
 		expect(pi.created).toHaveLength(2);
-		expect(sessions.canonicalRef(aliasA)).toEqual(canonical);
-		expect(sessions.canonicalRef(aliasB)).toEqual(canonical);
+		expect(sessions.canonicalRef(aliasA)).toEqual(aliasA);
 		expect(sessions.liveRefs()).toEqual([canonical]);
 	});
 
-	it("rechecks canonical disposal after a refreshed metadata lookup crosses a second close", async () => {
+	it("waits out a second close that began while an unseen spelling's lookup was in flight (D35 point 4)", async () => {
 		const canonical: SessionRef = {
 			backend: "pi",
 			id: "/home/u/.pi/agent/sessions/ws/a.jsonl",
@@ -1843,17 +1784,11 @@ describe("lifecycle", () => {
 			id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl",
 		};
 		const summary = storedSession(canonical, WORKSPACE);
-		const refreshedLookupEntered = deferred();
-		const releaseRefreshedLookup = deferred();
-		let gets = 0;
+		const aliasLookup = deferred();
 		const canonicalizingIndex: SessionIndex = {
 			list: async () => [summary],
-			get: async () => {
-				gets++;
-				if (gets === 3) {
-					refreshedLookupEntered.resolve();
-					await releaseRefreshedLookup.promise;
-				}
+			get: async (ref) => {
+				if (sessionKey(ref) === sessionKey(alias)) await aliasLookup.promise;
 				return summary;
 			},
 			preview: async () => [],
@@ -1865,43 +1800,32 @@ describe("lifecycle", () => {
 		await sessions.attach(canonical);
 		const first = pi.created[0];
 		if (!first) throw new Error("no first adapter");
-		const firstDisposal = deferred();
-		const disposeFirst = first.dispose.bind(first);
-		first.dispose = async () => {
-			await firstDisposal.promise;
-			await disposeFirst();
-		};
+		const releaseFirst = holdDispose(first);
 
 		const closingFirst = closeLive(canonical);
 		const throughAlias = sessions.attach(alias);
-		firstDisposal.resolve();
+		releaseFirst();
 		await closingFirst;
-		await refreshedLookupEntered.promise;
 
+		// Another attach and close of the file while the spelling's lookup is out.
 		await sessions.attach(canonical);
 		const second = pi.created[1];
 		if (!second) throw new Error("no second adapter");
-		const secondDisposal = deferred();
-		const disposeSecond = second.dispose.bind(second);
-		second.dispose = async () => {
-			await secondDisposal.promise;
-			await disposeSecond();
-		};
+		const releaseSecond = holdDispose(second);
 		const closingSecond = closeLive(canonical);
 
-		releaseRefreshedLookup.resolve();
-		for (let i = 0; i < 4; i++) await Promise.resolve();
+		aliasLookup.resolve();
+		await settle();
 
 		expect(pi.created).toHaveLength(2);
 
-		secondDisposal.resolve();
+		releaseSecond();
 		await closingSecond;
 		const replacement = await throughAlias;
 
 		expect(pi.created).toHaveLength(3);
-		expect(replacement).toBe(pi.created[2]);
-		expect(sessions.canonicalRef(alias)).toEqual(canonical);
-		expect(sessions.adapterFor(canonical)).toBe(replacement);
+		expect(replacement.ref).toEqual(canonical);
+		expect(sessions.adapterFor(canonical)).toBe(pi.created[2]);
 		expect(sessions.liveRefs()).toEqual([canonical]);
 	});
 
@@ -1937,9 +1861,9 @@ describe("onDisk", () => {
 	it("stays false for a session renamed at attach until the index lists it, and then sticks", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = await sessions.create(WORKSPACE, "pi");
+		const created = await sessions.create(WORKSPACE, "pi");
 		const real: SessionRef = { backend: "pi", id: REAL };
-		expect(sessions.canonicalRef(virtualRef)).toEqual(real);
+		expect(created.ref).toEqual(real);
 
 		// Renamed and prompted, and still nothing written: the id and `virtual`
 		// have both moved, and neither says a file exists.
@@ -1981,36 +1905,14 @@ describe("onDisk", () => {
 });
 
 describe("holds, what sessions/preview asks before it answers gone (D26 point 5)", () => {
-	it("holds a name in the table, and nothing it never heard of", async () => {
-		const ref = await sessions.create(WORKSPACE, "pi");
+	it("holds a container's ref in the table, and nothing it never heard of", async () => {
+		const { ref } = await sessions.create(WORKSPACE, "pi");
 		expect(sessions.holds(ref)).toBe(true);
 		expect(sessions.holds(REF)).toBe(false);
 	});
 
-	it("holds a startup still in its index lookup, before any container exists", async () => {
-		const lookup = deferred();
-		const held: SessionIndex = {
-			list: (query) => index.list(query),
-			get: async (ref) => {
-				await lookup.promise;
-				return index.get(ref);
-			},
-			preview: (ref) => index.preview(ref),
-		};
-		sessions = new SessionManager({ index: held, adapters: { pi } }, broadcaster);
-
-		const attaching = sessions.attach(REF);
-		await settle();
-		expect(sessions.summaryOf(REF)).toBeNull();
-		expect(sessions.holds(REF)).toBe(true);
-
-		lookup.resolve();
-		await attaching;
-		expect(sessions.holds(REF)).toBe(true);
-	});
-
 	it("does not hold a session whose close is still disposing it", async () => {
-		const adapter = (await sessions.attach(REF)) as FakeAdapter;
+		const adapter = await attachAdapter(REF);
 		const release = holdDispose(adapter);
 
 		const closing = closeLive(REF);
@@ -2101,10 +2003,9 @@ describe("teardown racing a startup", () => {
 		expect(slow.created).toHaveLength(1);
 	});
 
-	describe("an attach that waited out the close of a session with two names (OW-yufazo)", () => {
+	describe("an attach that waited out the close of a renamed session (OW-yufazo)", () => {
 		// The session was attached as REF and renamed itself to C inside start(),
-		// so its container had both names and the close's disposal sits under
-		// each, resolving to C. An attach under REF that waits it out resumes C.
+		// so the close's disposal sits under C alone (D35 point 4).
 		const C: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/c.jsonl" };
 
 		/** Close that session with its adapter's dispose held, and hold every index lookup from here on. */
@@ -2131,24 +2032,30 @@ describe("teardown racing a startup", () => {
 			return { closing, releaseDispose, releaseLookup: () => lookup.resolve() };
 		}
 
-		it("keeps the spelling it asked for as a name of the container it attached", async () => {
+		it("resumes the ref the close was registered under once it is disposed, and the id it outgrew stays no name", async () => {
 			const { closing, releaseDispose, releaseLookup } = await closeHeld();
-			const attaching = sessions.attach(REF);
+			const attaching = sessions.attach(C);
+			await settle();
+			expect(pi.created).toHaveLength(1);
+
 			releaseDispose();
 			releaseLookup();
 			await closing;
-			await attaching;
+			const attached = await attaching;
 
-			expect(sessions.isAttached(REF)).toBe(true);
-			await closeLive(REF);
+			expect(pi.created).toHaveLength(2);
+			expect(attached.ref).toEqual(C);
+			expect(sessions.holds(REF)).toBe(false);
+			await sessions.close(attached.handle);
 			expect(sessions.liveRefs()).toEqual([]);
 		});
 	});
 
-	describe("an attach whose file a failed start is still reaping (OW-kamave)", () => {
+	describe("an attach whose file a failed start is still reaping (OW-kamave, D35 point 4)", () => {
 		// The index resolves every ref to C. The first adapter's start fails and
 		// its dispose is held, so its startup is reaping, its container out of
-		// the table, while the other attach reaches C.
+		// the table, while the other attach reaches C. Nothing joins a failed
+		// start: the other attach waits the reaping out and starts afresh.
 		const C: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/c.jsonl" };
 
 		/** An index resolving every ref to C, whose lookup of C itself waits for `lookupOfC` if given. */
@@ -2188,7 +2095,9 @@ describe("teardown racing a startup", () => {
 			return { factory, disposing: disposing.promise, releaseDispose: () => release.resolve() };
 		}
 
-		it("joins the failure when the attach was still in its index lookup as the failed start claimed the file", async () => {
+		it("waits out the reaping when the attach was still in its index lookup as the failed start failed, then spawns once", async () => {
+			// The check after the lookup (D35 point 4): the wait in `#attach` ran
+			// before the reaping began, so only the lookup's canonical ref finds it.
 			const lookupOfC = deferred();
 			const { factory, disposing, releaseDispose } = failingFirst();
 			sessions = new SessionManager({ index: canonicalisingToC(lookupOfC.promise), adapters: { pi: factory } }, broadcaster);
@@ -2206,12 +2115,14 @@ describe("teardown racing a startup", () => {
 
 			releaseDispose();
 			await expect(throughRef).rejects.toThrow("start failed");
-			await expect(throughC).rejects.toThrow();
-			expect(factory.created).toHaveLength(1);
-			expect(sessions.liveRefs()).toEqual([]);
+			const attached = await throughC;
+			expect(factory.created).toHaveLength(2);
+			expect(factory.created[0]?.disposals).toBe(1);
+			expect(attached.ref).toEqual(C);
+			expect(sessions.adapterFor(C)).toBe(factory.created[1]);
 		});
 
-		it("joins the failure when the attach arrives under a spelling the index canonicalises to the failed file", async () => {
+		it("waits out the reaping when the attach arrives under a spelling the index canonicalises to the failed file, then spawns once", async () => {
 			const { factory, disposing, releaseDispose } = failingFirst();
 			sessions = new SessionManager({ index: canonicalisingToC(), adapters: { pi: factory } }, broadcaster);
 
@@ -2226,14 +2137,15 @@ describe("teardown racing a startup", () => {
 
 			releaseDispose();
 			await expect(throughC).rejects.toThrow("start failed");
-			await expect(throughRef).rejects.toThrow();
-			expect(factory.created).toHaveLength(1);
-			expect(sessions.liveRefs()).toEqual([]);
+			const attached = await throughRef;
+			expect(factory.created).toHaveLength(2);
+			expect(attached.ref).toEqual(C);
+			expect(sessions.liveRefs()).toEqual([C]);
 		});
 
-		it("joins the failure when the attach arrives under the canonical name a failed alias's start claimed", async () => {
-			// C was never asked for: the failed startup holds it only because its
-			// container was named by it (`#bind`).
+		it("waits out the reaping when the attach arrives under the canonical ref a failed spelling's start claimed, then spawns once", async () => {
+			// C was never asked for: the reaping is registered under it because the
+			// failed start's container was claimed under it (D35 point 4).
 			const { factory, disposing, releaseDispose } = failingFirst();
 			sessions = new SessionManager({ index: canonicalisingToC(), adapters: { pi: factory } }, broadcaster);
 
@@ -2248,10 +2160,45 @@ describe("teardown racing a startup", () => {
 
 			releaseDispose();
 			await expect(throughRef).rejects.toThrow("start failed");
-			await expect(throughC).rejects.toThrow();
-			expect(factory.created).toHaveLength(1);
-			expect(sessions.liveRefs()).toEqual([]);
+			const attached = await throughC;
+			expect(factory.created).toHaveLength(2);
+			expect(factory.created[0]?.disposals).toBe(1);
+			expect(attached.ref).toEqual(C);
+			expect(sessions.adapterFor(C)).toBe(factory.created[1]);
 		});
+	});
+
+	it("resolves a shutdown that lands during a failed start's reaping only once the reaping is done (D35 point 5)", async () => {
+		const disposing = deferred();
+		const release = deferred();
+		const failing = new FakeAdapterFactory({ failStart: "start failed" });
+		const create = failing.create.bind(failing);
+		failing.create = (ref) => {
+			const adapter = create(ref);
+			const dispose = adapter.dispose.bind(adapter);
+			adapter.dispose = async () => {
+				disposing.resolve();
+				await release.promise;
+				await dispose();
+			};
+			return adapter;
+		};
+		sessions = new SessionManager({ index, adapters: { pi: failing } }, broadcaster);
+		const attaching = sessions.attach(REF);
+		await disposing.promise;
+
+		let shutDown = false;
+		const shutdown = sessions.disposeAll().then(() => {
+			shutDown = true;
+		});
+		await settle();
+		await settle();
+		expect(shutDown).toBe(false);
+
+		release.resolve();
+		await shutdown;
+		await expect(attaching).rejects.toThrow("start failed");
+		expect(failing.created[0]?.disposals).toBe(1);
 	});
 
 	it("disposes an adapter once when shutdown lands between its publication and its attach's return", async () => {
@@ -2666,17 +2613,17 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 		await sessions.attach(parentRef);
 		const forked = await sessions.fork(parentRef, "turn-1");
 
-		// No `thread/fork` keeps nothing, so nothing is minted until the attach,
-		// and the placeholder is renamed to the thread `thread/start` names, as a
-		// virtual session's is (D9).
-		expect(forked.id).toMatch(/^virtual:/);
+		// No `thread/fork` keeps nothing, so nothing is minted until the fork's
+		// start, which renames its placeholder to the thread `thread/start` names,
+		// as a virtual session's is (D9). The ref is read from the fork's
+		// container, so it is the renamed one; the placeholder reaches nothing
+		// (D35 point 1).
+		expect(forked).toEqual({ backend: "codex", id: "thread-fresh-1" });
 		expect(cluster.procs[0]?.lastRequest("thread/fork")).toBeUndefined();
-		const adapter = await sessions.attach(forked);
-
 		expect(cluster.procs).toHaveLength(2);
-		expect(adapter.ref).toEqual({ backend: "codex", id: "thread-fresh-1" });
+		expect(sessions.adapterFor(forked)?.ref).toEqual(forked);
 		expect(sessions.liveRefs().map(sessionKey).sort()).toEqual(
-			[sessionKey(parentRef), sessionKey(adapter.ref)].sort(),
+			[sessionKey(parentRef), sessionKey(forked)].sort(),
 		);
 	});
 
@@ -2934,12 +2881,12 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 			onSubmit: (adapter) => adapter.emitError("turn failed"),
 		});
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = await sessions.create(WORKSPACE, "pi");
-		const adapter = renaming.forRef(virtualRef)!;
+		const created = await sessions.create(WORKSPACE, "pi");
+		const adapter = renaming.forRef(created.ref)!;
 		adapter.emitNotice(notice);
 		const events = connect();
 
-		await sessions.submit(virtualRef, "first");
+		await sessions.submit(created.ref, "first", undefined, undefined, created.handle);
 
 		// The snapshot the rename broadcasts under the handle, carrying the new ref.
 		expect(snapshots(events).at(-1)).toEqual(
@@ -3228,7 +3175,7 @@ describe("the idle reaper (D12)", () => {
 
 		release();
 		const [a, b] = await attaches;
-		expect(a).toBe(b);
+		expect(a.handle).toBe(b.handle);
 		expect(pi.created).toHaveLength(2);
 		expect(reaped.disposals).toBe(1);
 		expect(sessions.isAttached(REF)).toBe(true);

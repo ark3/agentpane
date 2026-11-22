@@ -77,7 +77,7 @@ Verified with the port: `codex-cli` 0.170.0 on the home server, 2026-11-19; see 
 
 ## `agentpane_pi_smoke.ts`
 
-The same assembled application path with a real Pi process, plus the three things only Pi can establish: that the production `direnv exec <workspace> sbox -- pi --mode rpc` chain actually starts an agent (`capture_fixtures.py` deliberately bypasses sbox, so nothing had run this chain until this harness first did), that the session id changes under the client and the superseded id keeps working, and that killing the server reaches an agent two `exec`s down inside `bwrap`.
+The same assembled application path with a real Pi process, plus the three things only Pi can establish: that the production `direnv exec <workspace> sbox -- pi --mode rpc` chain actually starts an agent (`capture_fixtures.py` deliberately bypasses sbox, so nothing had run this chain until this harness first did), that the session id changes under the client, and that killing the server reaches an agent two `exec`s down inside `bwrap`.
 
 ```bash
 bun agentpane_pi_smoke.ts --workspace /home/asa0717/src/agentpane
@@ -107,6 +107,8 @@ See `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes in a `card run` session
 Verified after the create began to start the session (ark3/agentpane#48): `pi` 1.5.2 on the home server, 2026-11-19, with and without `--tool-check`; see `docs/MANUAL_TESTING.md`, "A create starts the session on all three backends, and a start that fails leaves no row (ark3/agentpane#48)".
 It was `agentpane_pi_smoke.py`, over HTTP and the event stream, until ark3/agentpane#54 ported it to Bun and the socket (D31), every run above being of the Python one.
 Since the port it prompts, aborts and attaches by the handle the create answered, and the superseded-ref check is an attach of the ref the create answered, which must reach the same handle; replies are recorded by their result or refusal code where HTTP statuses were.
+Since ark3/agentpane#90 an id the session outgrew reaches nothing (D35 point 1), so that check is gone; in its place `checks.rename.created_ref_is_the_first_on_the_handle` requires the ref the create answered to be the first its handle carried.
+Verified with the change: `pi` 1.5.2 on the home server, 2026-11-22, without `--tool-check`; see `docs/MANUAL_TESTING.md`, "Attaching a stored Pi session makes no rename".
 Verified with the port: `pi` 1.5.2 on the home server, 2026-11-19, with `--tool-check`; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
 ## `agentpane_pi_steer_probe.ts`
@@ -237,7 +239,7 @@ It runs against the machine's own `~/.pi/agent/sessions`, refusing to start if i
 It exits 0 when the attach renamed nothing and the file has one row, attached, and 1 otherwise.
 Costs tokens: one one-word turn.
 
-Verified with: `pi` 1.5.2 on the home server, 2026-11-22, at 0dfbcb14; see `docs/MANUAL_TESTING.md`, "Attaching a stored Pi session makes no rename".
+Verified with: `pi` 1.5.2 on the home server, 2026-11-22, at 0dfbcb14 and again once ark3/agentpane#90 had built D35 point 1; see `docs/MANUAL_TESTING.md`, "Attaching a stored Pi session makes no rename".
 
 ## `loopback_token_repro_probe.ts`
 

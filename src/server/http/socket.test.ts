@@ -599,6 +599,29 @@ describe("commands that name a ref", () => {
 		expect(sessions.find((s) => sessionKey(s.ref) === sessionKey(session.ref))?.status).toBe("attached");
 	});
 
+	it("answers a create whose start renamed the session with the renamed ref and its handle (D35 point 1)", async () => {
+		const REAL: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/materialised.jsonl" };
+		rebuild({ pi: new FakeAdapterFactory({ materialiseOnStart: REAL.id }) });
+		const socket = await connected();
+
+		const { session } = await socket.ok("sessions/create", { cwd: WORKSPACE, backend: "pi" });
+
+		expect(session).toEqual(expect.objectContaining({ ref: REAL, status: "attached", handle: expect.any(String) }));
+		expect(socket.typed("snapshot").at(-1)).toMatchObject({ session: REAL, handle: session.handle });
+	});
+
+	it("answers an attach with the session it landed on, under the ref the index canonicalised (D35 point 1)", async () => {
+		const spelling: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/./one.jsonl" };
+		const summary = storedSession(PI_SESSION, WORKSPACE);
+		rebuild({ pi }, { index: { list: async () => [summary], get: async () => summary, preview: async () => [] } });
+		const socket = await connected();
+
+		const { session } = await socket.ok("sessions/attach", { ref: spelling });
+
+		expect(session).toEqual(expect.objectContaining({ ref: PI_SESSION, status: "attached", handle: expect.any(String) }));
+		expect(socket.typed("snapshot").at(-1)).toMatchObject({ session: PI_SESSION, handle: session.handle });
+	});
+
 	it("refuses to create in a workspace that is relative or not there, or for an unknown backend", async () => {
 		const socket = await connected();
 		for (const cwd of ["relative/workspace", `${WORKSPACE}/no-such-agentpane-workspace`]) {
@@ -1359,9 +1382,11 @@ describe("events", () => {
 		const { sessions } = await socket.ok("sessions/list", {});
 		expect(sessions.filter((s) => s.status === "attached").map((s) => s.ref.id)).toEqual([REAL.id]);
 
-		// The handle still reaches it, and so does the ref it was created under.
+		// The handle still reaches it, and so does the new id; the ref it was
+		// created under reaches nothing, and starts nothing (D35 point 1).
 		await socket.ok("sessions/prompt", { handle: session.handle, text: "second" });
-		await socket.ok("sessions/prompt", { ref: session.ref, text: "third" });
+		await socket.ok("sessions/prompt", { ref: REAL, text: "third" });
+		expect((await socket.refused("sessions/prompt", { ref: session.ref, text: "fourth" })).code).toBe("not_found");
 		expect(socket.transcript(REAL)).toHaveLength(3);
 		expect(renaming.created).toHaveLength(1);
 

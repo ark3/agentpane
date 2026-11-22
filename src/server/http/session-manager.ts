@@ -1,7 +1,7 @@
 /**
  * The process table: a handle the manager mints -> the container holding a
- * running adapter, with every backend id the conversation has had as a name
- * that resolves to it (D24, OW-suyinu).
+ * running adapter, with the backend's current id for the conversation as its
+ * one name, which a rename moves (D24, OW-suyinu, D35 point 1).
  *
  * Two rules from DESIGN carry most of the weight here:
  *
@@ -174,16 +174,14 @@ interface ManagedSession {
 	 * with a handle of its own (`#forkOnto`).
 	 */
 	readonly handle: string;
-	/** The backend's id for this conversation now, which a rename moves (D9). */
-	ref: SessionRef;
 	/**
-	 * Every `sessionKey` that has named this conversation: its minted
-	 * `virtual:` id, each id a rename brought, and each spelling `#start`
-	 * canonicalised onto it (OW-fumegi). While the container is in the table
-	 * `#names` resolves each to `handle`, which is D9's promise that an old id
-	 * keeps working on every command that names a ref. A fork takes none of them.
+	 * The backend's id for this conversation now, which a rename moves (D9),
+	 * and its one name: while the container is in the table `#names` resolves
+	 * it to `handle`, and nothing else does. An id it has outgrown reaches
+	 * nothing, and a spelling `#start` canonicalised was never a name (D35
+	 * point 1).
 	 */
-	readonly names: Set<string>;
+	ref: SessionRef;
 	/** The workspace the subprocess is (or will be) jailed to. */
 	cwd: string;
 	model?: string;
@@ -211,14 +209,10 @@ interface ManagedSession {
 	 */
 	adapter?: BackendAdapter;
 	/**
-	 * The startup building this container, from the moment it is bound to it
-	 * (`#bind`) until it is retired (`#retire`): the inverse of
-	 * `PendingStart.session`, and nothing more. An attach under any name the
-	 * container has joins it here, `#handOver` hands it another startup's
-	 * spellings, and `#addName` holds it under each name the container gains.
-	 * Teardown never reads it: shutdown reaches a startup through
-	 * `#attaching`, which holds this one under every name the container has
-	 * (OW-kamave), and a close reaches none (D35 point 3).
+	 * The startup building this container, from its claim until it publishes
+	 * (`#start`), for an attach that finds the container to join (D35 point 5).
+	 * Teardown never reads it: shutdown reaches a startup through `#startups`,
+	 * and a close reaches none (D35 point 3).
 	 */
 	starting?: PendingStart;
 	/** Last state we broadcast, so we can tell a status flip from a message change. */
@@ -304,27 +298,10 @@ interface ManagedSession {
  * see, and an agent nothing can see is one nothing will ever reap.
  */
 interface PendingStart {
+	/** Its container once published; what an attach that joins it awaits. */
 	promise: Promise<ManagedSession>;
-	/**
-	 * Every name it answers to, from its attach until it is retired, and the one
-	 * record of them (OW-kamave): each spelling an attach asked for, whether it
-	 * began this startup or joined it; the spelling it resolved that to -- the
-	 * closed container's ref, for an attach that waited out a close; and, once
-	 * it is bound to a container (`#bind`), every name that container has or
-	 * gains. None leaves while it is live, not even one a failed start takes
-	 * back off its container, so an attach under any of them finds it in
-	 * `#attaching` and joins it (OW-yufazo). Its container takes each as a
-	 * name while the startup is bound to it, save the ones a failed start
-	 * takes back off it and any handed over after that at `#start`'s
-	 * arbitration, which the startup holds alone.
-	 */
-	readonly keys: Set<string>;
-	/** The container it is starting, once there is one: its attach's, or the one `#start` builds. */
-	session?: ManagedSession;
 	/** Assigned the instant the adapter exists, with no `await` in between. */
 	adapter?: BackendAdapter;
-	/** Set by `disposeAll()`, the one teardown that reaches a startup (D35 point 3). A startup that outlives it must not register. */
-	torndown: boolean;
 	/** The single termination both teardown and the startup's failure path await. */
 	disposal?: Promise<void>;
 }
@@ -356,23 +333,16 @@ interface ForkStart {
 	adapter?: BackendAdapter;
 }
 
-interface PendingDisposal {
-	promise: Promise<void>;
-	/** Canonical identity all refs covered by this disposal must resume under. */
-	ref: SessionRef;
-}
-
 export class SessionManager {
 	/** Handle -> the container it names (D24). No map holding a container is keyed by a name. */
 	readonly #sessions = new Map<string, ManagedSession>();
 	/**
-	 * Name -> handle, for every name of every container in the table
-	 * (`ManagedSession.names`). A session takes its backend's own id once the
-	 * backend names it (`#rename`), but the browser that created it is still
-	 * holding the old one and may already have a prompt in flight against it.
-	 * Honouring the old id costs one map entry and is the difference between "the
-	 * second message in a new conversation works" and a `not_found`. A container leaves
-	 * this map with every one of its names, on a close and on a fork alike.
+	 * Current ref -> handle, one entry for each container in the table and
+	 * nothing else (D35 point 1). `#rename` moves the entry; a container leaves
+	 * the map with it, on a close and on a fork alike. Nothing the manager does
+	 * after an attach looks its session up here again: `#attach` answers the
+	 * container it landed on, so a rename inside its start, which no client has
+	 * heard of until it publishes, loses the caller nothing.
 	 */
 	readonly #names = new Map<string, string>();
 	readonly #index: SessionIndex;
@@ -389,28 +359,26 @@ export class SessionManager {
 	/** What makes this manager's handles and error ids its own; see `#container`. */
 	readonly #handlePrefix = crypto.randomUUID();
 	/**
-	 * Name -> every startup in flight held under it (`PendingStart.keys`), from
-	 * its attach until it is retired (`#retire`) (OW-kamave). More than one can
-	 * hold a name -- an attach still in its index lookup under the spelling it
-	 * asked for, and the startup of a container that has come to answer to that
-	 * spelling meanwhile -- and nothing refuses a hold. It is what
-	 * `disposeAll()` walks to reach an adapter that is still starting, what
-	 * `#makeRoom` counts, and what collapses two attaches on one spelling while
-	 * no container is in the table for it: the wait for a close's disposal, a
-	 * stored session's index lookup, and the reaping of a start that failed.
-	 * The earliest holder is the one joined.
+	 * Every startup in flight, from its attach until it publishes, joins
+	 * another at `#start`'s arbitration, or has reaped what it spawned (D35
+	 * point 5). What `disposeAll()` walks to reach an adapter that is still
+	 * starting, and what `#makeRoom` counts, a child being reaped included. An
+	 * attach finds a startup to join through its container
+	 * (`ManagedSession.starting`), never here.
 	 */
-	readonly #attaching = new Map<string, Set<PendingStart>>();
+	readonly #startups = new Set<PendingStart>();
 	/**
 	 * Guards against replacing an adapter before its predecessor has finished
-	 * disposing. Keyed by every name the closed container still answered to,
-	 * so a stale client id cannot bypass the guard; by name and not by handle,
-	 * since what it holds back is an attach, which arrives with a name after
-	 * the container and its handle are gone. Every disposal a close starts is
-	 * one entry here, registered before its first await, so `disposeAll()`
-	 * waits on these too.
+	 * disposing, so no two adapters share a file (D32 point 5). One entry per
+	 * disposal, under the ref of the conversation being disposed (D35 point 4):
+	 * a close's under the closed container's ref, and a failed or timed-out
+	 * start's reaping under the ref its container had at the claim. By ref and
+	 * not by handle, since what it holds back is an attach, which arrives with a
+	 * ref after the container and its handle are gone. Registered in the run
+	 * that takes the container out of the table (`#dispose`), so
+	 * `disposeAll()` waits on these too.
 	 */
-	readonly #disposing = new Map<string, PendingDisposal>();
+	readonly #disposing = new Map<string, Promise<void>>();
 	/**
 	 * Set by `disposeAll()`. The HTTP server is still serving for the whole of
 	 * shutdown -- `src/server/index.ts` stops the socket *after* closing the app,
@@ -449,14 +417,14 @@ export class SessionManager {
 		});
 	}
 
-	/** Resolve a ref by any name its container has had. */
+	/** The container in the table whose current ref is `ref`. */
 	#lookup(ref: SessionRef): ManagedSession | undefined {
 		const handle = this.#names.get(sessionKey(ref));
 		return handle === undefined ? undefined : this.#sessions.get(handle);
 	}
 
 	/**
-	 * A new container, with a freshly minted handle and `ref` as its one name.
+	 * A new container, with a freshly minted handle and `ref` as its name.
 	 * The handle comes from a counter of the manager's own: `deps.newId` mints
 	 * `virtual:` ids, and a test may pin it to one constant.
 	 *
@@ -475,7 +443,6 @@ export class SessionManager {
 		return {
 			handle: `${this.#handlePrefix}:${++this.#minted}`,
 			ref,
-			names: new Set([sessionKey(ref)]),
 			...init,
 			subscriptions: [],
 			lastStreaming: false,
@@ -492,38 +459,19 @@ export class SessionManager {
 		};
 	}
 
-	/** Put a container in the table under its handle, reachable by every name it has. */
+	/** Put a container in the table under its handle, reachable by its ref. */
 	#add(session: ManagedSession): void {
 		this.#sessions.set(session.handle, session);
-		for (const name of session.names) this.#names.set(name, session.handle);
+		this.#names.set(sessionKey(session.ref), session.handle);
 	}
 
-	/**
-	 * Take a container out of the table with every name that still resolves to
-	 * it, and answer those names. The container keeps its own `names`.
-	 */
-	#remove(session: ManagedSession): string[] {
+	/** Take a container out of the table, and its ref with it while that still names it. */
+	#remove(session: ManagedSession): void {
 		if (this.#sessions.get(session.handle) === session) this.#sessions.delete(session.handle);
 		session.idle?.();
 		session.idle = undefined;
-		const removed: string[] = [];
-		for (const name of session.names) {
-			if (this.#names.get(name) !== session.handle) continue;
-			this.#names.delete(name);
-			removed.push(name);
-		}
-		return removed;
-	}
-
-	/**
-	 * One more name for a container, resolving to it while it is in the table,
-	 * and held from the same moment by the startup building it, if one is
-	 * (`#bind`, OW-kamave).
-	 */
-	#addName(session: ManagedSession, name: string): void {
-		session.names.add(name);
-		if (this.#sessions.get(session.handle) === session) this.#names.set(name, session.handle);
-		if (session.starting) this.#holdKey(session.starting, name);
+		const key = sessionKey(session.ref);
+		if (this.#names.get(key) === session.handle) this.#names.delete(key);
 	}
 
 	/**
@@ -564,16 +512,14 @@ export class SessionManager {
 	}
 
 	/**
-	 * Whether this manager holds `ref` under any name: a container in the
-	 * table, or a startup in flight (`#attaching`, whose entries `#retire`
-	 * deletes once empty). What `sessions/preview` asks before it
-	 * reads a missing file as the session gone (D26 point 5, D24). Not
+	 * Whether a container is in the table under `ref`, which a create's is
+	 * from before its start (D35 point 1). What `sessions/preview` asks before
+	 * it reads a missing file as the session gone (D26 point 5, D24). Not
 	 * `#disposing`: a session a close is still disposing, with nothing on
-	 * disk, is going.
+	 * disk, is going; nor an id the container has outgrown.
 	 */
 	holds(ref: SessionRef): boolean {
-		const key = sessionKey(ref);
-		return this.#names.has(key) || this.#attaching.has(key);
+		return this.#names.has(sessionKey(ref));
 	}
 
 	/**
@@ -581,96 +527,88 @@ export class SessionManager {
 	 * `virtual` (D9): nothing touches the backend's store until its first
 	 * turn, whatever id the start gives it, so browsing never litters it with
 	 * empty sessions. A start that fails leaves nothing behind: the container
-	 * goes with every name it took, at the failure itself (`#start`), as every
-	 * container does whose start fails, so no attach under one of them can find
-	 * it afterwards, and a retry is a new create. Answers the `virtual:` ref it minted, which stays one of the
-	 * container's names whatever the start renames it to.
+	 * goes at the failure itself (`#start`), as every container does whose
+	 * start fails, and a retry is a new create. Answers the container's live
+	 * summary, under whatever ref the start renamed the minted `virtual:` one
+	 * to, which no longer reaches it (D35 point 1).
 	 */
-	async create(cwd: string, backend: BackendId, model?: string): Promise<SessionRef> {
+	async create(cwd: string, backend: BackendId, model?: string): Promise<LiveSessionSummary> {
 		if (this.#shuttingDown) throw new ServerShuttingDownError();
 		if (!this.#adapters[backend]) throw new UnknownBackendError(backend);
 		const ref: SessionRef = { backend, id: `virtual:${this.#newId()}` };
 		this.#add(this.#container(ref, { cwd, model, virtual: true, fromStore: false, onDisk: false, createdAt: this.#now() }));
 		try {
-			await this.attach(ref);
+			return this.#summary(await this.#attach(ref));
 		} catch (err) {
 			// A listing taken during the start may have shown it.
 			this.broadcaster.sessionsChanged();
 			throw err;
 		}
-		return ref;
 	}
 
 	/**
-	 * Ensure a subprocess is running for this session, then broadcast a snapshot.
+	 * Ensure a subprocess is running for this session, then broadcast a snapshot,
+	 * and answer the live summary of the container the attach landed on, whose
+	 * `ref` may differ from the one asked for: a lookup canonicalises it, and
+	 * the start may rename it (D9, D35 point 1).
 	 * Idempotent: attaching an already-attached session re-snapshots (which is
 	 * exactly what a session switch wants) without touching the subprocess.
 	 */
-	attach(ref: SessionRef): Promise<BackendAdapter> {
-		return this.#attach(ref);
+	async attach(ref: SessionRef): Promise<LiveSessionSummary> {
+		return this.#summary(await this.#attach(ref));
 	}
 
 	/**
 	 * `attach`, with what a fork's own start is handed where there is one
 	 * (`#attachFork`): the startup that begins here starts the fork from it.
+	 * Answers the container it landed on, from every branch -- a live adapter,
+	 * a startup joined, a startup begun -- so its caller reads the session from
+	 * that and never looks a ref up again (D35 point 1).
 	 */
-	async #attach(ref: SessionRef, fork?: ForkStart): Promise<BackendAdapter> {
+	async #attach(ref: SessionRef, fork?: ForkStart): Promise<ManagedSession> {
 		if (this.#shuttingDown) throw new ServerShuttingDownError();
-		const requested = sessionKey(ref);
-		// A close of this session still disposing its adapter. The attach waits
-		// it out as a startup, held from here like any other, so a second
-		// attach joins it, and resumes under the closed container's ref. Its
-		// container is only looked for once the wait is over: none can be in the
-		// table under a closing name.
-		const disposing = this.#disposing.get(requested);
-		const effectiveRef = disposing?.ref ?? ref;
-		const existing = disposing ? undefined : this.#lookup(effectiveRef);
+		// A disposal of this conversation, a close's or a failed start's reaping:
+		// waited out before anything is looked for, since no container is in the
+		// table under a ref being disposed, and then this starts afresh (D35
+		// point 4). A fork's start, should it wait, carries its `ForkStart` on.
+		await this.#waitOutDisposal(sessionKey(ref));
+		if (this.#shuttingDown) throw new ServerShuttingDownError();
+		const existing = this.#lookup(ref);
 		if (existing?.adapter) {
 			this.#attached(existing);
 			this.broadcaster.broadcastSnapshot(existing.handle);
-			return existing.adapter;
+			return existing;
 		}
-
-		// Two concurrent attaches collapse into one startup: the container's,
-		// whichever of its names each caller said, and while a stored session has
-		// no container yet, the earliest held under the spelling asked for.
-		// Either way the startup is held under what this caller asked for too,
-		// which differs from what it resolved to after waiting out a close, so
-		// that spelling becomes a name of the container it attaches (OW-yufazo).
-		const key = sessionKey(effectiveRef);
-		const [earliest] = this.#attaching.get(key) ?? [];
-		const inFlight = existing ? existing.starting : earliest;
-		if (inFlight) {
-			this.#hold(inFlight, requested);
-			const joined = await inFlight.promise;
+		// The startup building the container, joined. Two attaches of a stored
+		// session with no container yet collapse later, at `#start`'s arbitration.
+		if (existing?.starting) {
+			const joined = await existing.starting.promise;
 			this.#attached(joined);
-			return joined.adapter as BackendAdapter;
+			return joined;
 		}
 
-		const pending: PendingStart = {
-			keys: new Set(),
-			torndown: false,
-			// Deferred by one microtask so this record is registered below -- and
-			// so reachable by disposeAll() -- before `#start` can spawn
-			// anything. A startup teardown cannot see is a startup it cannot stop.
-			// A startup that fails is retired once `#start` has reaped what it
-			// spawned, so an attach arriving while it does joins the failure
-			// rather than spawning beside the adapter still being disposed.
-			promise: Promise.resolve(disposing?.promise)
-				.then(() => (disposing ? this.#afterDisposal(effectiveRef, pending) : this.#start(effectiveRef, existing, pending, fork)))
-				.catch((err: unknown) => {
-					this.#retire(pending);
-					throw err;
-				}),
-		};
-		this.#hold(pending, key);
-		this.#hold(pending, requested);
-		if (existing) this.#bind(pending, existing);
+		// In `#startups` before `#start` can spawn anything, so disposeAll()
+		// reaches it: a startup teardown cannot see is a startup it cannot stop.
+		const pending = {} as PendingStart;
+		this.#startups.add(pending);
+		pending.promise = this.#start(ref, existing, pending, fork).catch((err: unknown) => {
+			this.#startups.delete(pending);
+			throw err;
+		});
 		const session = await pending.promise;
 		this.#attached(session);
 		this.broadcaster.sessionsChanged();
 		this.broadcaster.broadcastSnapshot(session.handle);
-		return session.adapter as BackendAdapter;
+		return session;
+	}
+
+	/**
+	 * Wait out every disposal registered under `key`, one after another, since
+	 * another may begin while this waits (D35 point 4). Asks only the tables,
+	 * never the index, and its caller checks `#shuttingDown` once it returns.
+	 */
+	async #waitOutDisposal(key: string): Promise<void> {
+		for (let disposal = this.#disposing.get(key); disposal; disposal = this.#disposing.get(key)) await disposal;
 	}
 
 	/** An attach landed on `session`: both of D12's clocks, its LRU recency and its idleness. */
@@ -722,97 +660,12 @@ export class SessionManager {
 	#makeRoom(): void {
 		for (;;) {
 			const live = [...this.#sessions.values()].filter((session) => session.adapter);
-			const starting = new Set([...this.#attaching.values()].flatMap((held) => [...held].filter((pending) => pending.adapter)));
-			if (live.length + starting.size < maxSessions) return;
+			const starting = [...this.#startups].filter((pending) => pending.adapter);
+			if (live.length + starting.length < maxSessions) return;
 			const [coldest] = live.filter((session) => this.#evictable(session)).sort((a, b) => a.attachedAt - b.attachedAt);
 			if (!coldest) throw new AtCapacityError();
 			void this.#close(coldest);
 		}
-	}
-
-	/**
-	 * The rest of an attach that waited out a close: what `attach` does before
-	 * its first await, now that a container may have come into being under the
-	 * ref it resolved to. One that has an adapter or a startup of its own takes
-	 * this one's keys (`#handOver`).
-	 */
-	#afterDisposal(ref: SessionRef, pending: PendingStart): ManagedSession | Promise<ManagedSession> {
-		if (this.#shuttingDown) throw new ServerShuttingDownError();
-		if (pending.torndown) throw new UnknownSessionError(ref);
-		const existing = this.#lookup(ref);
-		if (!existing) return this.#start(ref, undefined, pending);
-		const handed = this.#handOver(pending, existing);
-		if (handed) return handed;
-		this.#bind(pending, existing);
-		return this.#start(ref, existing, pending);
-	}
-
-	/**
-	 * Retire `pending` in favour of a container that has an adapter or a
-	 * startup of its own, and answer what it resolves to; `undefined` if it has
-	 * neither. Every spelling `pending` was held under becomes a name of that
-	 * container, and a startup still in flight is held under them in its place,
-	 * so an attach under one joins the startup that will publish (OW-yufazo).
-	 */
-	#handOver(pending: PendingStart, container: ManagedSession): ManagedSession | Promise<ManagedSession> | undefined {
-		if (container.adapter) {
-			for (const key of pending.keys) this.#addName(container, key);
-			this.#retire(pending);
-			return container;
-		}
-		const winner = container.starting;
-		if (!winner) return undefined;
-		this.#retire(pending);
-		for (const key of pending.keys) this.#hold(winner, key);
-		return winner.promise;
-	}
-
-	/**
-	 * Retire a startup from every record that says it is live -- `#attaching`
-	 * and its container's `starting` -- at the one moment it stops being live:
-	 * when `#start` publishes its adapter, hands back another startup's
-	 * container or hands its keys to another startup still in flight, once it
-	 * has failed and reaped what it spawned, or when
-	 * shutdown flags it. From here nothing joins it, so an attach that finds no
-	 * container starts afresh.
-	 */
-	#retire(pending: PendingStart): void {
-		for (const key of pending.keys) {
-			const held = this.#attaching.get(key);
-			if (held?.delete(pending) && held.size === 0) this.#attaching.delete(key);
-		}
-		if (pending.session?.starting === pending) pending.session.starting = undefined;
-	}
-
-	/**
-	 * Hold a live startup under one more name, which becomes one of its
-	 * container's too once it has one (`#addName`). Beside any other startup
-	 * held under it: nothing refuses a hold (OW-kamave).
-	 */
-	#hold(pending: PendingStart, key: string): void {
-		this.#holdKey(pending, key);
-		if (pending.session) this.#addName(pending.session, key);
-	}
-
-	/** Record `key` on both sides, `PendingStart.keys` and `#attaching`, and nothing else. */
-	#holdKey(pending: PendingStart, key: string): void {
-		pending.keys.add(key);
-		const held = this.#attaching.get(key);
-		if (held) held.add(pending);
-		else this.#attaching.set(key, new Set([pending]));
-	}
-
-	/**
-	 * Make `pending` the startup building `session`: each name it holds becomes
-	 * one of the container's, and it is held under every name the container
-	 * has, which `#addName` keeps true for each the container gains until the
-	 * startup is retired (OW-kamave).
-	 */
-	#bind(pending: PendingStart, session: ManagedSession): void {
-		session.starting = pending;
-		pending.session = session;
-		for (const key of pending.keys) this.#addName(session, key);
-		for (const name of session.names) this.#holdKey(pending, name);
 	}
 
 	/**
@@ -850,13 +703,13 @@ export class SessionManager {
 	 *  - `listForkPoints`. A read: it changes nothing a verb here depends on,
 	 *    and its answer can be stale by the time a client acts on it whether or
 	 *    not it waits.
-	 *  - `attach`. It creates the adapter this queues on, and `#attaching`
-	 *    already collapses concurrent attaches. Only `sessions/attach`,
-	 *    `create`, a prompt that names a ref, and `forkAndPrompt` for the fork
-	 *    it made call it (D25, D30); every other command queues on an adapter
-	 *    already there, or is refused.
+	 *  - `attach`. It creates the adapter this queues on, and concurrent
+	 *    attaches already collapse onto one startup (`#attach`, `#start`).
+	 *    Only `sessions/attach`, `create`, a prompt that names a ref, and
+	 *    `forkAndPrompt` for the fork it made call it (D25, D30); every other
+	 *    command queues on an adapter already there, or is refused.
 	 *  - `close` and `disposeAll`. Teardown is ordered by `#disposing`,
-	 *    `PendingStart.torndown` and `#terminate`, and waits behind nothing. A
+	 *    `#shuttingDown` and `#terminate`, and waits behind nothing. A
 	 *    verb still queued when it runs reaches the disposed adapter, as an
 	 *    overlapping one always did; most verbs fail there, but a Codex
 	 *    set-model with no effort chosen only records the model and answers
@@ -970,11 +823,12 @@ export class SessionManager {
 	 * where nobody holds it, then prompt the live session that attach landed
 	 * on, and answer its live summary with the prompt's disposition.
 	 *
-	 * The prompt is sent for that attach's handle, so a close and a re-attach
-	 * landing between the two refuse it rather than prompting a session the
-	 * sender never asked to start. `priorError` is the caller's to read before
-	 * the attach, which an error the attach's start raised is newer than
-	 * (OW-jokoto). A refusal after the attach is `AttachedNotPromptedError`,
+	 * The prompt goes to the container that attach answered, under its ref as
+	 * of the call and for its handle, so a close and a re-attach landing
+	 * between the two refuse it rather than prompting a session the sender
+	 * never asked to start, and a rename inside the start costs it nothing.
+	 * `priorError` is the caller's to read before the attach, which an error
+	 * the attach's start raised is newer than (OW-jokoto). A refusal after the attach is `AttachedNotPromptedError`,
 	 * naming the session; a start that fails is answered as its own failure,
 	 * and leaves nothing (`create`).
 	 */
@@ -984,15 +838,12 @@ export class SessionManager {
 		images: ImageInput[] | undefined,
 		priorError: string | null,
 	): Promise<{ session: LiveSessionSummary; disposition: PromptDisposition }> {
-		await this.attach(ref);
-		const attached = this.summaryOf(ref);
-		if (!attached) throw new UnknownSessionError(ref);
+		const session = await this.#attach(ref);
 		try {
-			const disposition = await this.submit(ref, text, images, priorError, attached.handle);
-			return { session: this.summaryOf(ref) ?? attached, disposition };
+			const disposition = await this.submit(session.ref, text, images, priorError, session.handle);
+			return { session: this.#summary(session), disposition };
 		} catch (cause) {
-			const held = this.summaryOf(ref);
-			throw new AttachedNotPromptedError(cause, { ref: held?.ref ?? attached.ref, handle: attached.handle });
+			throw new AttachedNotPromptedError(cause, { ref: session.ref, handle: session.handle });
 		}
 	}
 
@@ -1032,30 +883,30 @@ export class SessionManager {
 	 *
 	 * Where the ref DOES change, which is Pi alone, the live adapter is driving
 	 * the FORK from there on and the parent is left detached -- still on disk,
-	 * still listed, still attachable, but reachable by none of the names it
-	 * had. That is why the adapter says `"fork"`: unlike a rename, the parent's
-	 * id must not become a name for the fork (`#forkOnto`, OW-kekoji).
+	 * still listed, still attachable, but its live container is gone. That is
+	 * why the adapter says `"fork"`: unlike a rename, the parent's id must not
+	 * become the fork's name (`#forkOnto`, OW-kekoji). The ref this answers is
+	 * read from the fork's container where its own start ran, so a rename
+	 * inside that start is the ref answered (`#attachFork`).
 	 */
 	async fork(ref: SessionRef, entryId: string, handle?: string): Promise<SessionRef> {
 		const forked = await this.#serially(ref, (_session, adapter) => adapter.fork(entryId), handle);
-		if (forked.start) await this.#attachFork(forked);
-		return forked.ref;
+		return forked.start ? (await this.#attachFork(forked)).ref : forked.ref;
 	}
 
 	/**
 	 * Attach the fork `adapter.fork` returned, handing what came back with it
 	 * to the fork's own start (`ForkStart`), so that a start that fails leaves
 	 * nothing, as a create's does (D35 point 6). A Pi fork hands nothing over:
-	 * it is already live, and its attach re-snapshots it.
+	 * it is already live, and its attach re-snapshots it. Answers the fork's
+	 * container, whose ref a Codex fork that keeps no turn has already moved
+	 * off the placeholder `forked.ref` names (OW-hojefo).
 	 */
-	async #attachFork(forked: ForkResult): Promise<void> {
-		if (!forked.start) {
-			await this.attach(forked.ref);
-			return;
-		}
+	async #attachFork(forked: ForkResult): Promise<ManagedSession> {
+		if (!forked.start) return this.#attach(forked.ref);
 		const fork: ForkStart = { start: forked.start, ...(forked.adapter ? { adapter: forked.adapter } : {}) };
 		try {
-			await this.#attach(forked.ref, fork);
+			return await this.#attach(forked.ref, fork);
 		} finally {
 			// An adapter no startup claimed: the start was refused before the
 			// claim, by the cap or by shutdown. Nothing else holds it, and its
@@ -1077,7 +928,11 @@ export class SessionManager {
 	 *
 	 * The attach and the prompt come after that item has settled, not inside
 	 * it: a Pi fork's container shares the parent's queue (`#forkOnto`), so a
-	 * prompt queued inside the item would wait on the item itself.
+	 * prompt queued inside the item would wait on the item itself. The prompt
+	 * goes to the container the attach answered, for its handle, never by the
+	 * ref `adapter.fork` returned: a Codex fork that keeps no turn is renamed
+	 * off that placeholder inside its start, after which it reaches nothing
+	 * (OW-hojefo, D35 point 1).
 	 *
 	 * Admitting the prompt clears no turn error, since nobody has seen one on
 	 * the fork: one its start raised stays up (OW-jokoto). A failure once the
@@ -1112,18 +967,13 @@ export class SessionManager {
 				throw new ForkNotPromptedError(cause, { ref: fork.ref, handle: fork.handle });
 			}
 		}, handle);
-		await this.#attachFork(forked);
+		const fork = await this.#attachFork(forked);
 		try {
-			const disposition = await this.submit(forked.ref, text, images, null);
-			const session = this.summaryOf(forked.ref);
-			if (!session) throw new UnknownSessionError(forked.ref);
-			return { session, disposition };
+			const disposition = await this.submit(fork.ref, text, images, null, fork.handle);
+			return { session: this.#summary(fork), disposition };
 		} catch (cause) {
-			const held = this.summaryOf(forked.ref);
-			throw new ForkNotPromptedError(cause, {
-				ref: held?.ref ?? this.canonicalRef(forked.ref),
-				handle: held?.status === "attached" ? held.handle : null,
-			});
+			const live = this.#sessions.get(fork.handle) === fork && fork.adapter !== undefined;
+			throw new ForkNotPromptedError(cause, { ref: fork.ref, handle: live ? fork.handle : null });
 		}
 	}
 
@@ -1167,19 +1017,21 @@ export class SessionManager {
 	 * A rename: one conversation took a new id, announced by its adapter through
 	 * `onRefChanged` as it moves and before it emits anything under the new id
 	 * (D24). Every backend replaces a `virtual` session's minted id at attach,
-	 * Pi can move it again on the first prompt, because Pi's session id IS its
-	 * JSONL path (D9), and Claude Code whenever a turn's `init` names another.
-	 * The new id is one more name on the container and the old ones stay, so a
-	 * client still holding one reaches the same conversation; nothing is
-	 * re-keyed, since the handle the table is keyed by does not move
-	 * (OW-suyinu).
+	 * a Pi that named no file at start names one at the first prompt, because
+	 * Pi's session id IS its JSONL path (D9), and Claude Code would whenever a
+	 * turn's `init` named another. The new id replaces the old as the
+	 * container's one name, and the old reaches nothing from here (D35 point
+	 * 1); nothing is re-keyed, since the handle the table is keyed by does not
+	 * move (OW-suyinu). Only a container in the table is in `#names`, and the
+	 * old entry goes only while it still names this one; a new one that
+	 * another container holds is taken over.
 	 *
 	 * On the wire a rename is the list invalidation and a snapshot under the
 	 * handle, carrying the new ref; every client keys a live session by the
 	 * handle and takes the ref from any event under it, so nothing else is
 	 * said (OW-mofuho).
 	 *
-	 * `announce` is false for a rename inside `start()`: the name is written at
+	 * `announce` is false for a rename inside `start()`: the name is moved at
 	 * once, so an attach under it finds the one startup, but
 	 * nothing goes on the wire until the start can no longer fail, and then
 	 * `attach` says it, in the `sessionsChanged` and snapshot it sends for every
@@ -1191,9 +1043,14 @@ export class SessionManager {
 	 * with nothing on the wire to say so.
 	 */
 	#rename(session: ManagedSession, next: SessionRef, announce: boolean): void {
-		if (sessionKey(next) === sessionKey(session.ref)) return;
+		const previous = sessionKey(session.ref);
+		const key = sessionKey(next);
+		if (key === previous) return;
 		session.ref = next;
-		this.#addName(session, sessionKey(next));
+		if (this.#sessions.get(session.handle) === session) {
+			if (this.#names.get(previous) === session.handle) this.#names.delete(previous);
+			this.#names.set(key, session.handle);
+		}
 		if (!announce) return;
 		this.broadcaster.sessionsChanged();
 		this.broadcaster.broadcastSnapshot(session.handle);
@@ -1203,7 +1060,7 @@ export class SessionManager {
 	 * A fork that moved the live adapter: on Pi the one process is driving a
 	 * SECOND conversation now (D15), and the first is still on disk, still
 	 * listable and still resumable. So the fork gets a container of its own, with
-	 * a new handle and the fork's id as its only name, and answers as the
+	 * a new handle and the fork's id as its name, and answers as the
 	 * container the adapter's handlers reach from here on (`#start`'s `owner`).
 	 *
 	 * It takes what belongs to the process: the adapter, the subscriptions that
@@ -1213,14 +1070,13 @@ export class SessionManager {
 	 * about the parent's conversation, and starts with no `error` and the
 	 * `stored`, `onDisk` and `createdAt` below.
 	 *
-	 * The parent's container leaves the table with every one of its names, as
-	 * any detached session's does, and keeps no adapter: a command on any of its
-	 * names misses from here on, a verb queued on it behind this fork fails
-	 * rather than running on the fork (`#serially`), and the next attach
-	 * resumes the parent from the index into a container of its own (D9, D12).
-	 * None of its names becomes the fork's, or every client holding the
-	 * parent's ref would hold one that prompts the agent the user is talking
-	 * to on the fork (OW-kekoji).
+	 * The parent's container leaves the table with its name, as any detached
+	 * session's does, and keeps no adapter: a command on its ref misses from
+	 * here on, a verb queued on it behind this fork fails rather than running
+	 * on the fork (`#serially`), and the next attach resumes the parent from
+	 * the index into a container of its own (D9, D12). The parent's ref does
+	 * not become the fork's, or every client holding it would hold one that
+	 * prompts the agent the user is talking to on the fork (OW-kekoji).
 	 *
 	 * Nothing under the parent's handle names the fork: an event there
 	 * carrying a new ref means "this conversation took a new id", and every
@@ -1303,55 +1159,27 @@ export class SessionManager {
 		if (!session) {
 			// Not one of ours yet -- it must exist in the backend's store, and we
 			// need its workspace before we can spawn anything (D7).
-			let lookupRef = ref;
-			let summary: SessionSummary;
-			for (;;) {
-				const found = await this.#index.get(lookupRef);
-				if (!found) throw new UnknownSessionError(lookupRef);
-				summary = found;
-				if (this.#shuttingDown) throw new ServerShuttingDownError();
-				if (pending.torndown) throw new UnknownSessionError(ref);
-
-				// A lookup can canonicalize an unseen spelling onto a session already
-				// closing. Wait for that owner, then look up its authoritative ref and
-				// repeat: the lookup itself is asynchronous, so another disposal may
-				// have begun (or it may return a different canonical identity) before
-				// it completes. Only a disposal-free result may reach arbitration.
-				const canonicalDisposal = this.#disposing.get(sessionKey(summary.ref));
-				if (!canonicalDisposal) break;
-				await canonicalDisposal.promise;
-				if (this.#shuttingDown) throw new ServerShuttingDownError();
-				if (pending.torndown) throw new UnknownSessionError(ref);
-				lookupRef = canonicalDisposal.ref;
-			}
+			const summary = await this.#index.get(ref);
+			if (!summary) throw new UnknownSessionError(ref);
+			if (this.#shuttingDown) throw new ServerShuttingDownError();
+			// The lookup can canonicalise a spelling onto a file whose disposal is
+			// still running, a close's or a failed start's reaping, which the wait
+			// in `#attach` did not see under the spelling (D35 point 4).
+			await this.#waitOutDisposal(sessionKey(summary.ref));
+			if (this.#shuttingDown) throw new ServerShuttingDownError();
 			if (!summary.cwd) {
 				throw new Error(
 					`session ${sessionKey(ref)} has no recorded workspace; cannot spawn a sandboxed agent for it`,
 				);
 			}
-			// The lookup above can reveal that a spelling the manager has never seen
-			// names a container another request already holds or is starting.
-			// Arbitrate on that container before building one: a second would put
-			// two adapters on one file. Whichever attach wins, every spelling this
-			// startup was held under becomes one more name on it (OW-fumegi,
-			// `#handOver`, and `#bind` at the claim below).
-			const canonicalSession = this.#lookup(summary.ref);
-			const handed = canonicalSession && this.#handOver(pending, canonicalSession);
-			if (handed) return handed;
-			// A startup that has claimed a container and still answers to the
-			// file's name stands in for that container when the table no longer
-			// has it under the name: a start that failed, reaping its adapter
-			// after its container left the table or dropped the name. This one
-			// joins its outcome, as `#handOver` joins a winner's, rather than
-			// spawning beside that adapter (OW-kamave). Its keys are held there
-			// alone, not made names of that container. A rival still in its own
-			// lookup has claimed nothing, and arbitrates for itself when it gets
-			// here.
-			for (const rival of this.#attaching.get(sessionKey(summary.ref)) ?? []) {
-				if (rival === pending || !rival.session) continue;
-				this.#retire(pending);
-				for (const key of pending.keys) this.#holdKey(rival, key);
-				return rival.promise;
+			// The arbitration: another attach of this file may have claimed it
+			// meanwhile, its own lookup having answered first. Join that container
+			// rather than build a second, which would put two adapters on one file
+			// (D35 point 5). The spelling this attach asked for becomes no name.
+			const held = this.#lookup(summary.ref);
+			if (held?.adapter || held?.starting) {
+				this.#startups.delete(pending);
+				return held.adapter ? held : (held.starting as PendingStart).promise;
 			}
 			session = this.#container(summary.ref, {
 				cwd: summary.cwd,
@@ -1365,19 +1193,19 @@ export class SessionManager {
 		const factory = this.#adapters[session.ref.backend];
 		if (!factory) throw new UnknownBackendError(session.ref.backend);
 
-		// Asking the index where this session lives is the one await before an
-		// adapter exists, so a teardown can land with nothing yet to dispose.
-		// Everything from here to `pending.adapter` below is synchronous: either
-		// teardown sees the adapter, or this sees the flag and never spawns.
-		if (pending.torndown) throw new UnknownSessionError(ref);
-		if (!existing) {
-			// No await separates the arbitration above from this claim, so no
-			// competing startup can have claimed any of these names since. An
-			// attach still in its index lookup under one of them can hold it too
-			// (OW-kamave).
-			this.#bind(pending, session);
-			this.#add(session);
-		}
+		// Asking the index where this session lives, and waiting out a disposal,
+		// are the only awaits before an adapter exists, and each is followed by
+		// a check of `#shuttingDown`. Everything from there to `pending.adapter`
+		// below is synchronous: either teardown sees the adapter, or this sees
+		// the flag and never spawns.
+		//
+		// The claim. No await separates it from the arbitration above, so no
+		// competing startup can have claimed this file since.
+		session.starting = pending;
+		if (!existing) this.#add(session);
+		// What a failure's reaping is registered under: the ref the container
+		// has now, before a rename inside `start()` can move it (D35 point 4).
+		const claimed = sessionKey(session.ref);
 
 		const bound = session;
 		// The container this adapter drives, which every handler below reaches
@@ -1473,20 +1301,14 @@ export class SessionManager {
 			// would hand a live agent to a container shutdown has already taken
 			// out of the table. Fall through to the same reaping the failure path
 			// uses.
-			if (pending.torndown) throw new UnknownSessionError(ref);
+			if (this.#shuttingDown) throw new ServerShuttingDownError();
 		} catch (err) {
 			for (const off of bound.subscriptions.splice(0)) off();
-			// The container is about to stop answering for the names this start
-			// gave it, a rename's and the index's canonical ref among them, while
-			// the adapter below is still being reaped. The startup does not: it
-			// has been held under each since the container gained it, and keeps
-			// them until retired. An attach under one joins the earliest startup
-			// held there: this one, or one still in its index lookup, which joins
-			// this one in turn at `#start`'s arbitration once the lookup names
-			// this file. Either way nothing spawns beside that adapter (OW-yufazo,
-			// OW-kamave).
-			//
-			// The container goes with every name it has. Only a container
+			// The container goes, and in the same run the reaping below is
+			// registered under the ref it was claimed under, so an attach of that
+			// ref, or one whose lookup names it, waits the reaping out and then
+			// starts afresh: nothing joins a failed start, and nothing spawns
+			// beside the adapter still being reaped (D35 point 4). Only a container
 			// `create` made is in the table without an adapter, and it does not
 			// outlive a failed start (D30): a container that has started never
 			// starts again, since a close and a Pi fork each take it out.
@@ -1494,7 +1316,9 @@ export class SessionManager {
 			// The adapter spawns before it decides it has started -- PiAdapter
 			// spawns, then round-trips a readiness probe -- so a rejection can
 			// leave a live sandboxed agent behind. Nothing else will ever reap it.
-			await this.#terminate(pending);
+			// The startup stays in `#startups` until it is reaped, so the cap
+			// counts the child and shutdown waits for it.
+			await this.#dispose(claimed, this.#terminate(pending));
 			throw err;
 		}
 
@@ -1503,7 +1327,8 @@ export class SessionManager {
 		// disposes it, and `disposeAll()` finds it in the table, where until now
 		// it found the startup.
 		bound.adapter = adapter;
-		this.#retire(pending);
+		bound.starting = undefined;
+		this.#startups.delete(pending);
 		const initialState = adapter.getState();
 		bound.lastStreaming = initialState.isStreaming;
 		bound.lastCompaction = initialState.compaction;
@@ -1655,9 +1480,9 @@ export class SessionManager {
 	async #close(session: ManagedSession): Promise<void> {
 		// Everything up to the first await below is one synchronous run, so an
 		// attach cannot land between its steps and find the session half-closed.
-		// The container leaves the table with the names that still resolve to it,
-		// and the disposal is registered under each of them.
-		const keys = this.#remove(session);
+		// The container leaves the table, and the disposal is registered under
+		// its ref.
+		this.#remove(session);
 		// In the same run that took the container out of the table, so an adapter
 		// still moving -- a `submit()` or `fork()` in flight -- cannot name it, or
 		// fork a container out of it, behind us (`ManagedSession.subscriptions`).
@@ -1675,19 +1500,25 @@ export class SessionManager {
 		// outlived its kill -- DESIGN's third open question, which needs a live
 		// spawn to settle and has no honest answer from in here.
 		const adapter = session.adapter;
-		const disposal: PendingDisposal = {
-			ref: session.ref,
-			promise: Promise.resolve()
+		await this.#dispose(
+			sessionKey(session.ref),
+			Promise.resolve()
 				.then(() => adapter?.dispose())
 				.catch(() => {}),
-		};
-		for (const key of keys) this.#disposing.set(key, disposal);
+		);
+	}
+
+	/**
+	 * Hold attaches of `key` back until `disposal` settles (`#disposing`):
+	 * registered before this function's first await, so a caller that takes
+	 * the container out of the table in the same run leaves no gap.
+	 */
+	async #dispose(key: string, disposal: Promise<void>): Promise<void> {
+		this.#disposing.set(key, disposal);
 		try {
-			await disposal.promise;
+			await disposal;
 		} finally {
-			for (const key of keys) {
-				if (this.#disposing.get(key) === disposal) this.#disposing.delete(key);
-			}
+			if (this.#disposing.get(key) === disposal) this.#disposing.delete(key);
 		}
 	}
 
@@ -1695,21 +1526,16 @@ export class SessionManager {
 		// First, and before any await: the tables below are walked exactly once,
 		// so anything that starts after this point is in neither of them.
 		this.#shuttingDown = true;
+		// A startup still short of creating its adapter finds `#shuttingDown`
+		// rather than spawning into a server that is already leaving.
 		const sessions = [...this.#sessions.values()];
-		// One startup can be held under many names, and one name hold many startups.
-		const starting = [...new Set([...this.#attaching.values()].flatMap((held) => [...held]))];
-		// What a close still in flight is letting go of, a container it took out
-		// of the table, which the table here no longer reaches. One disposal
-		// sits under every name its container had, so once each.
-		const closing = [...new Set(this.#disposing.values())];
+		const starting = [...this.#startups];
+		// What a close or a failed start's reaping is still letting go of, a
+		// container it took out of the table, which the table here no longer
+		// reaches.
+		const closing = [...this.#disposing.values()];
 		this.#sessions.clear();
 		this.#names.clear();
-		// Before the first await, so a startup still short of creating its adapter
-		// finds this rather than spawning into a server that is already leaving.
-		for (const pending of starting) {
-			pending.torndown = true;
-			this.#retire(pending);
-		}
 		// In parallel and settled, not sequential and awaited: every session left
 		// undisposed is a sandboxed agent still holding its workspace, so one
 		// adapter that cannot die must not spare the rest.
@@ -1730,10 +1556,10 @@ export class SessionManager {
 			// Adapters mid-`start()` are not in the table above: they own a child
 			// and their `ManagedSession.adapter` is still undefined. Resolving
 			// without reaping them is exactly how shutdown orphans an agent. Each
-			// adapter is reached by one route alone: a startup is retired in the
-			// run that publishes its adapter to the table.
+			// adapter is reached by one route alone: a startup leaves `#startups`
+			// in the run that publishes its adapter to the table.
 			...starting.map((pending) => this.#terminate(pending)),
-			...closing.map((disposal) => disposal.promise),
+			...closing,
 		]);
 	}
 
@@ -1746,15 +1572,9 @@ export class SessionManager {
 		const byKey = new Map<string, SessionSummary>();
 		for (const summary of stored) {
 			const key = sessionKey(summary.ref);
-			// A name a held container has outgrown -- an id it was RENAMED away
-			// from, or a spelling `#start` canonicalised onto it -- is not a
-			// session of its own. Listing it alongside the session that outgrew it
-			// shows one conversation twice, and offers the browser a ref that opens
-			// a second agent on it. A fork's container takes none of the parent's
-			// names, so a fork's parent -- a genuine second conversation -- is not
-			// caught here (`#forkOnto`).
+			// Only a container's current ref finds it (D35 point 1), so a row the
+			// index lists is never one a held container has outgrown.
 			const live = this.#lookup(summary.ref);
-			if (live && sessionKey(live.ref) !== key) continue;
 			if (live) live.onDisk = true;
 			byKey.set(key, { ...summary, ...this.#liveOverlay(live), ...(live ? { handle: live.handle } : {}) });
 		}
@@ -1777,7 +1597,11 @@ export class SessionManager {
 	 */
 	summaryOf(ref: SessionRef): LiveSessionSummary | null {
 		const session = this.#lookup(ref);
-		if (!session) return null;
+		return session ? this.#summary(session) : null;
+	}
+
+	/** What `summaryOf` answers for a container, read from the container itself. */
+	#summary(session: ManagedSession): LiveSessionSummary {
 		const stored = session.stored;
 		return stored
 			? { ...stored, ref: session.ref, ...this.#liveOverlay(session), handle: session.handle }
