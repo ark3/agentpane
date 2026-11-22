@@ -47,17 +47,17 @@ As of the installed `pi 1.5.2`'s `docs/json.md` (read at the package, not run), 
   Event: none, since nothing replays a stored session (D3).
   Order: relied on, nothing arriving between `start()`'s `get_state` and the `get_messages` answer; the replace would drop it.
   Evidence: nothing arrived on `pi 0.87.1` and in three runs on `pi 1.2.0` (`docs/MANUAL_TESTING.md` OW-dutute and OW-vijine).
-  D18: third group, **licenses absent code** (#79).
+  D18: third group, **licenses absent code**, asserted since #79: an event that changes the reducer's state from the resume's `get_state` answer to the end of `hydrateMessages` raises a session error naming it, once per window (`PiAdapter.hydrateWindow`, checked in `handleLine`).
 - **Session file, model, level and name after a fork**, from `fork()`'s `get_state`; exempt.
   Event: none; a fork answered `get_state` at the spawn's model and level with no event (`pi 0.87.1` and `1.2.0`, OW-sinoha, OW-dojebo and OW-vijine, in the docblocks on `chosenModel` and `thinkingLevel`).
   Order: relied on, nothing arriving between the `fork` reply and this answer, which would go out under the parent's ref.
   Evidence: "Fork" above, its sentence citing OW-dutute: `pi 0.87.1` and three runs on `pi 1.2.0`.
-  D18: third group, **licenses absent code** (#79).
+  D18: third group, **licenses absent code**, asserted since #79: an event that changes the reducer's state from the `fork` answer to the end of `hydrateMessages` raises a session error naming it, once per window (`PiAdapter.hydrateWindow`, checked in `handleLine`).
 - **Transcript after a fork**, from `get_messages` in `hydrateMessages`, a replace that truncates; exempt.
   Event: none; `fork` emits no message events.
   Order: relied on, the abandoned turn's last events arriving before the `fork` reply and nothing between it and the `get_messages` answer (D34 point 2).
   Evidence: "Fork" above, its sentence citing OW-dutute: `pi 0.87.1` and three runs on `pi 1.2.0`.
-  D18: third group, **licenses absent code** (#79).
+  D18: third group, **licenses absent code**, asserted since #79: an event that changes the reducer's state from the `fork` answer to the end of `hydrateMessages` raises a session error naming it, once per window (`PiAdapter.hydrateWindow`, checked in `handleLine`).
 - **`isStreaming: false` after a fork**, written by `fork()` after its replies rather than from an event.
   Event: `agent_settled`.
   Order: `agent_settled` came before the `abort` reply that `fork()` awaits first, in all 22 runs of `docs/MANUAL_TESTING.md` OW-yewiku (`pi 1.2.0`), and before the `fork` reply in OW-dutute (`pi 0.87.1`) and OW-tigaye (`pi 1.2.0`), so the write moves nothing on those versions; not relied on.
@@ -151,7 +151,8 @@ They carry 15 `turn/start` replies, four of them in `compact.jsonl`, and no `thr
   Event: none; the resume named no turn and replayed no `turn/started` on `codex-cli 0.156.0` (`docs/MANUAL_TESTING.md` OW-dirazu), and no line arrived between its request and its answer on `0.170.0` (ark3/agentpane#78).
   Measured: `{"type": "active", "activeFlags": []}` mid-turn in all eight samples on `codex-cli 0.156.0`, compaction included (OW-dirazu), and in the one `agentMessage` sample on `0.170.0` (ark3/agentpane#78).
   Order: none relied on.
-  D18: third group, **licenses absent code**: were a release's resume to stop reading `active` mid-turn, the re-attach would go through and the reducer would drop the deltas of an item that started before it (`CodexReducer.applyDelta`) with nothing to say so; whether to assert there is #79's.
+  D18: third group, **licenses absent code**: were a release's resume to stop reading `active` mid-turn, the re-attach would go through and the reducer would drop the deltas of an item that started before it (`CodexReducer.applyDelta`) with nothing to say so.
+  Asserted since #79: on a re-attach whose resume read `idle`, a delta for an item the reducer does not hold, before the next `turn/started`, raises a session error naming the method and item, once (`CodexReducer.reportUnknownDeltas`, armed in `CodexAdapter.startBorrowed`, checked in `applyDelta`); all 5,641 deltas in the wire captures, `codex-cli 0.147.0` to `0.157.1`, followed their `item/started` (counted on 2026-11-21), so a delta for an unknown item is not normal there either, but nothing else relies on it.
 - **Turn order**, `turnOrder`, from each `thread/turns/list` reply at hydrate and in `listForkPoints`; exempt.
   Event: `turn/started` carries each new turn's id, in every wire capture; not read for this.
   Order: none relied on.

@@ -2698,6 +2698,47 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 			});
 		});
 
+		it("names a delta for an item it never saw start, after a resume that read the thread idle (ark3/agentpane#79)", async () => {
+			const { proc, reattached } = await reattach({ type: "idle" });
+			const errors: string[] = [];
+			reattached.onError((message) => errors.push(message));
+			const delta = (itemId: string) =>
+				proc.emit({ method: "item/agentMessage/delta", params: { threadId: "thread-forked", turnId: "t", itemId, delta: "x" } });
+
+			delta("item-before-attach");
+			delta("item-before-attach");
+
+			expect(errors).toEqual([
+				"codex sent item/agentMessage/delta for item item-before-attach, which started before a re-attach that read the thread idle; agentpane cannot show it",
+			]);
+		});
+
+		it("says nothing of a delta for an item it saw start, nor for an unknown one once a turn has started", async () => {
+			const { proc, reattached } = await reattach({ type: "idle" });
+			const errors: string[] = [];
+			reattached.onError((message) => errors.push(message));
+			proc.emit({ method: "turn/started", params: { threadId: "thread-forked", turn: { id: "t", items: [], status: "inProgress" } } });
+			proc.emit({
+				method: "item/started",
+				params: { threadId: "thread-forked", turnId: "t", startedAtMs: 1, item: { type: "agentMessage", id: "seen", text: "" } },
+			});
+			for (const itemId of ["seen", "unseen"]) {
+				proc.emit({ method: "item/agentMessage/delta", params: { threadId: "thread-forked", turnId: "t", itemId, delta: "x" } });
+			}
+
+			expect(errors).toEqual([]);
+		});
+
+		it("says nothing of an unknown item's delta on a fork's first attach", async () => {
+			const { proc, borrower, forked } = await forkedPair();
+			await borrower.start(forked.start as { cwd: string; resumeId: string });
+			const errors: string[] = [];
+			borrower.onError((message) => errors.push(message));
+			proc.emit({ method: "item/agentMessage/delta", params: { threadId: "thread-forked", turnId: "t", itemId: "unseen", delta: "x" } });
+
+			expect(errors).toEqual([]);
+		});
+
 		it("does not refuse a fork's first attach, whatever its resume reads", async () => {
 			const { borrower, forked } = await forkedPair({ resumeStatus: { type: "active", activeFlags: [] } });
 

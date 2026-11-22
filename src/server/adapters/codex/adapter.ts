@@ -413,6 +413,8 @@ export class CodexAdapter implements BackendAdapter {
 		});
 		assertOwned();
 		if (reattach && resumed.thread.status.type === "active") throw new TurnRunningError();
+		// Idle, so a delta for an item started before now is one that status missed.
+		if (reattach) this.reducer.reportUnknownDeltas = true;
 		const stored = await this.readStoredTurn(resumed.thread.id);
 		assertOwned();
 

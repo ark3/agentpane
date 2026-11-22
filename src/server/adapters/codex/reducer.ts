@@ -119,6 +119,18 @@ export class CodexReducer {
 	 * set exists to carry (OW-mezeso).
 	 */
 	readonly unmappedItemTypes = new Set<string>();
+	/**
+	 * Set by `CodexAdapter.startBorrowed` on a re-attach whose resume read the
+	 * thread idle, and cleared by the next `turn/started` or the first report.
+	 * While it is set, a delta for an item this reducer does not hold can only
+	 * be the turn that resume missed: as of `codex-cli 0.156.0` and `0.170.0`
+	 * it read `active` mid-turn (docs/MANUAL_TESTING.md, OW-dirazu and
+	 * ark3/agentpane#78), so such a delta is D18's impossible input and is
+	 * named in an `error` effect, not dropped unseen (ark3/agentpane#79). Not
+	 * armed elsewhere: every delta in the wire captures, `codex-cli 0.147.0` to
+	 * `0.157.1`, followed its `item/started`, but no attach relies on that.
+	 */
+	reportUnknownDeltas = false;
 
 	constructor(options: CodexReducerOptions = {}) {
 		this.now = options.now ?? (() => Date.now());
@@ -229,6 +241,7 @@ export class CodexReducer {
 				return this.setStreaming(message.params.status.type === "active");
 
 			case "turn/started": {
+				this.reportUnknownDeltas = false;
 				this.turnId = message.params.turn.id;
 				this.turnDiff = null;
 				return this.setStreaming(true);
@@ -277,35 +290,35 @@ export class CodexReducer {
 			}
 
 			case "item/agentMessage/delta":
-				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
+				return this.applyDelta(message.method, message.params.itemId, message.params.delta, (item, delta) => {
 					if (item.type !== "agentMessage") return false;
 					item.text += delta;
 					return true;
 				});
 
 			case "item/plan/delta":
-				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
+				return this.applyDelta(message.method, message.params.itemId, message.params.delta, (item, delta) => {
 					if (item.type !== "plan") return false;
 					item.text += delta;
 					return true;
 				});
 
 			case "item/reasoning/summaryTextDelta":
-				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
+				return this.applyDelta(message.method, message.params.itemId, message.params.delta, (item, delta) => {
 					if (item.type !== "reasoning") return false;
 					appendAt(item.summary, message.params.summaryIndex, delta);
 					return true;
 				});
 
 			case "item/reasoning/textDelta":
-				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
+				return this.applyDelta(message.method, message.params.itemId, message.params.delta, (item, delta) => {
 					if (item.type !== "reasoning") return false;
 					appendAt(item.content, message.params.contentIndex, delta);
 					return true;
 				});
 
 			case "item/commandExecution/outputDelta":
-				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
+				return this.applyDelta(message.method, message.params.itemId, message.params.delta, (item, delta) => {
 					if (item.type !== "commandExecution") return false;
 					item.aggregatedOutput = (item.aggregatedOutput ?? "") + delta;
 					return true;
@@ -335,7 +348,8 @@ export class CodexReducer {
 			// Not errors (OW-tujiya): as of `codex-cli 0.156.0` a `turn/start` on a
 			// model with no metadata drew a `warning` and then ran the turn
 			// (docs/MANUAL_TESTING.md, OW-wawuzu), so none of these may reach the
-			// `error` effect, whose contract is a turn that failed. A thread-scoped
+			// `error` effect, whose contract is a turn that failed or an input D18
+			// asserts cannot arrive (`reportUnknownDeltas`, D34). A thread-scoped
 			// one for another thread never gets here: the guard above drops it. One
 			// for a thread no session drives arrives with its `threadId` nulled
 			// (`CodexConnection.#deliver`, OW-weyefe).
@@ -450,10 +464,25 @@ export class CodexReducer {
 	/**
 	 * A delta lands on its item's slot. One for an item this reducer never saw
 	 * start has none and is dropped: a borrowed attach meets no running turn
-	 * (see `hydrate`), so no item of this thread streams across it.
+	 * (see `hydrate`), so no item of this thread streams across it, and one
+	 * that does is reported (see `reportUnknownDeltas`).
 	 */
-	private applyDelta(itemId: string, delta: string, apply: (item: ThreadItem, delta: string) => boolean): CodexEffect[] {
+	private applyDelta(
+		method: string,
+		itemId: string,
+		delta: string,
+		apply: (item: ThreadItem, delta: string) => boolean,
+	): CodexEffect[] {
 		const slot = this.slotFor(itemId);
+		if (!slot && this.reportUnknownDeltas) {
+			this.reportUnknownDeltas = false;
+			return [
+				{
+					type: "error",
+					message: `codex sent ${method} for item ${itemId}, which started before a re-attach that read the thread idle; agentpane cannot show it`,
+				},
+			];
+		}
 		if (!slot) return [];
 		if (!apply(slot.item, delta)) return [];
 		return this.remap(slot);

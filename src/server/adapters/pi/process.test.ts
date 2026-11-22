@@ -1130,6 +1130,8 @@ describe("PiAdapter.fork", () => {
 
 		expect(h.adapter.getState().messages).toEqual([userMessage("Say ALPHA"), assistantMessage("ALPHA")]);
 		expect(h.adapter.getState().isStreaming).toBe(false);
+		// And the window is loud (D18, ark3/agentpane#79), once for both deltas.
+		expect(h.errors).toEqual([expect.stringMatching(/^Pi sent "message_update" while agentpane was reading a fork's transcript/)]);
 	});
 
 	it("stops the session before it forks, with no turn running too, and drops what the stop took out of Pi's queue (D15, D30)", async () => {
@@ -1182,6 +1184,84 @@ describe("PiAdapter.fork", () => {
 		expect((error as Error).message).toBe("Invalid entry ID for forking");
 		// Nothing forked, so nothing is re-adopted: the only get_state is start()'s.
 		expect(h.child.sent().filter((c) => c.type === "get_state")).toHaveLength(1);
+	});
+});
+
+describe("PiAdapter hydrate window, asserted empty (D18, D34 point 2, ark3/agentpane#79)", () => {
+	const answerHydrate = (h: Harness): void => {
+		h.child.respondTo("get_messages", { messages: [] });
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [] });
+	};
+
+	it("names an event arriving between a resume's get_state and its transcript", async () => {
+		const h = makeHarness();
+		const started = h.adapter.start({ cwd: WORKSPACE, resumeId: REF.id });
+		h.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: REF.id });
+		h.child.emitLine({ type: "agent_start" });
+		await Promise.resolve();
+		answerHydrate(h);
+		await started;
+
+		expect(h.errors).toEqual([
+			'Pi sent "agent_start" while agentpane was reading a resumed session\'s transcript, where no measured Pi sent anything; the transcript may not show it',
+		]);
+	});
+
+	it("names an event arriving between the fork reply and its get_state, but not the level its re-send causes", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		const forked = h.adapter.fork("e1");
+		await answerStop(h);
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		h.child.emitLine({ type: "thinking_level_changed", level: "high" });
+		expect(h.errors).toEqual([]);
+		h.child.emitLine({ type: "message_start", message: assistantMessage("late") });
+		await Promise.resolve();
+		h.child.respondTo("get_state", { model: null, isStreaming: false });
+		await Promise.resolve();
+		answerHydrate(h);
+		await forked;
+
+		expect(h.errors).toEqual([expect.stringMatching(/^Pi sent "message_start" while agentpane was reading a fork's transcript/)]);
+	});
+
+	it("names an agent_settled arriving after the fork reply, before its transcript", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		const forked = h.adapter.fork("e1");
+		await answerStop(h);
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		await Promise.resolve();
+		h.child.respondTo("get_state", { model: null, isStreaming: false });
+		h.child.emitLine({ type: "agent_settled" });
+		await Promise.resolve();
+		answerHydrate(h);
+		await forked;
+
+		expect(h.errors).toEqual([expect.stringMatching(/^Pi sent "agent_settled" while agentpane was reading a fork's transcript/)]);
+	});
+
+	it("closes the window once the transcript is read, and after a vetoed fork", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		const vetoed = h.adapter.fork("e1");
+		await answerStop(h);
+		h.child.respondTo("fork", { text: "original prompt", cancelled: true });
+		await vetoed.catch(() => {});
+		h.child.emitLine({ type: "agent_start" });
+
+		const forked = h.adapter.fork("e1");
+		await answerStop(h);
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		await Promise.resolve();
+		h.child.respondTo("get_state", { model: null, isStreaming: false });
+		await Promise.resolve();
+		answerHydrate(h);
+		await forked;
+		h.child.emitLine({ type: "agent_start" });
+
+		expect(h.errors).toEqual([]);
 	});
 });
 

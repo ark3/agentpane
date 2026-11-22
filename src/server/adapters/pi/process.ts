@@ -52,7 +52,11 @@ type NoticeListener = (notice: AgentNotice) => void;
 interface PendingCommand {
 	resolve: (response: unknown) => void;
 	reject: (error: Error) => void;
+	/** The hydrate window this command's answer opens (the docblock on `hydrateWindow`). */
+	opens?: HydrateWindow;
 }
+
+type HydrateWindow = "resume" | "fork";
 
 /** Pi answered `success: false`: it is alive and said no, unlike a pipe or process failure. */
 class PiCommandError extends Error {}
@@ -237,6 +241,18 @@ export class PiAdapter implements BackendAdapter {
 	 * arrived meanwhile is the old model's and is reported as it stands.
 	 */
 	private settingModel = false;
+	/**
+	 * Open from the answer to a resume's `get_state`, or to `fork`, until
+	 * `hydrateMessages` returns: the window the replace in `hydrateMessages`
+	 * relies on receiving nothing in. As of `pi 0.87.1`, and in three runs on
+	 * `pi 1.2.0`, nothing arrived there (docs/MANUAL_TESTING.md, OW-dutute and
+	 * OW-vijine), save the `thinking_level_changed` the fork's own re-sends
+	 * cause, which `handleLine` takes before the reducer. So an event that
+	 * changes the reducer's state here is D18's impossible input: it is named in
+	 * a session error, once per window, and the transcript the replace leaves
+	 * may lack it (D34 point 2, ark3/agentpane#79).
+	 */
+	private hydrateWindow: HydrateWindow | null = null;
 	/** Every `prompt` written to Pi and not yet answered; a stop waits them out (OW-jifibo). */
 	private readonly unansweredPrompts = new Set<Promise<unknown>>();
 	/** The last stop, until it settles: a prompt waits for it, and the next stop follows it (OW-jifibo). */
@@ -285,7 +301,10 @@ export class PiAdapter implements BackendAdapter {
 		// a raw setTimeout before switching to a get_state round trip -- see
 		// docs/ENVIRONMENT.md's pipane references). Round-tripping get_state here is the
 		// same fix: `start()` doesn't resolve until Pi has actually answered.
-		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
+		const state = await this.sendCommand<PiResponseFor<"get_state">>(
+			{ type: "get_state" },
+			opts.resumeId ? "resume" : undefined,
+		);
 		this.adoptSessionFile(state.data.sessionFile);
 		this.model = state.data.model ? modelToInfo(state.data.model).id : null;
 		this.reasoning = state.data.model?.reasoning === true;
@@ -305,7 +324,13 @@ export class PiAdapter implements BackendAdapter {
 		// (rpc.md), none of which belongs in a transcript view; it is read only
 		// for the level each turn ran at (`hydrateMessages`). Skipped for a fresh
 		// session, which by definition has nothing to fetch.
-		if (opts.resumeId) await this.hydrateMessages();
+		if (opts.resumeId) {
+			try {
+				await this.hydrateMessages();
+			} finally {
+				this.hydrateWindow = null;
+			}
+		}
 	}
 
 	/**
@@ -329,7 +354,7 @@ export class PiAdapter implements BackendAdapter {
 	 * resume between `get_state` and `get_messages`: the abandoned turn's last
 	 * events, `agent_settled` among them, all preceded the `fork` response
 	 * (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine). So nothing the live
-	 * stream builds meanwhile is Pi's to keep.
+	 * stream builds meanwhile is Pi's to keep, and `hydrateWindow` makes it loud.
 	 * Each assistant turn is named the level its message records, as of
 	 * `pi 1.2.0` (OW-zarine), and one written before that stamp from the session
 	 * file's entries (`withLoadedEfforts` in `reducer.ts`, OW-helumu), clamped to
@@ -604,6 +629,14 @@ export class PiAdapter implements BackendAdapter {
 	readonly forkStopsTurn = true;
 
 	async fork(entryId: string): Promise<ForkResult> {
+		try {
+			return await this.forkAfterStop(entryId);
+		} finally {
+			this.hydrateWindow = null;
+		}
+	}
+
+	private async forkAfterStop(entryId: string): Promise<ForkResult> {
 		// The stop D15 makes deliberate, here rather than in each client, and
 		// inside the fork so that nothing queued on the session can land between
 		// the two (D30). Sent whether or not a turn is running: a prompt admitted
@@ -622,7 +655,7 @@ export class PiAdapter implements BackendAdapter {
 		// succeeded Pi has forked, and what fails after that is not a refusal.
 		let forked: PiResponseFor<"fork">;
 		try {
-			forked = await this.sendCommand<PiResponseFor<"fork">>({ type: "fork", entryId });
+			forked = await this.sendCommand<PiResponseFor<"fork">>({ type: "fork", entryId }, "fork");
 		} catch (error) {
 			throw error instanceof PiCommandError ? new BackendRefusedError(error.message) : error;
 		}
@@ -660,7 +693,8 @@ export class PiAdapter implements BackendAdapter {
 		// emit anything under it (D24). Anything Pi emits between the `fork`
 		// response and this answer still goes out under the parent's ref; as of
 		// `pi 0.87.1` and again `1.2.0` nothing arrived there
-		// (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine).
+		// (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine); `hydrateWindow`
+		// makes it loud.
 		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
 		if (state.data.sessionFile) this.moveTo(state.data.sessionFile, "fork");
 		this.model = state.data.model ? modelToInfo(state.data.model).id : this.model;
@@ -835,6 +869,13 @@ export class PiAdapter implements BackendAdapter {
 		const result = reducePiNotification(this.state, parsed);
 		const changed = result.state !== this.state;
 		this.state = result.state;
+		if (changed && this.hydrateWindow) {
+			const what = this.hydrateWindow === "fork" ? "a fork's" : "a resumed session's";
+			this.hydrateWindow = null;
+			this.emitError(
+				`Pi sent "${parsed.type}" while agentpane was reading ${what} transcript, where no measured Pi sent anything; the transcript may not show it`,
+			);
+		}
 		// Nothing the reducer does replaces the transcript, so an update that
 		// names no message moved only the status fields (OW-yirosu).
 		if (changed) this.emitUpdate(result.changedIndex ?? "status");
@@ -860,6 +901,9 @@ export class PiAdapter implements BackendAdapter {
 		const pending = id ? this.pendingCommands.get(id) : undefined;
 		if (pending) {
 			this.pendingCommands.delete(id as string);
+			// Opened here, not where the caller resumes: a line in the same chunk
+			// as the answer is handled before that.
+			if (resp.success && pending.opens) this.hydrateWindow = pending.opens;
 			if (resp.success) pending.resolve(resp);
 			else pending.reject(new PiCommandError(resp.error));
 			return;
@@ -885,10 +929,10 @@ export class PiAdapter implements BackendAdapter {
 		if (!this.disposed) this.emitError(message);
 	}
 
-	private sendCommand<R>(cmd: PiCommand): Promise<R> {
+	private sendCommand<R>(cmd: PiCommand, opens?: HydrateWindow): Promise<R> {
 		return new Promise((resolve, reject) => {
 			const id = `c${this.nextCommandId++}`;
-			this.pendingCommands.set(id, { resolve: resolve as (r: unknown) => void, reject });
+			this.pendingCommands.set(id, { resolve: resolve as (r: unknown) => void, reject, opens });
 			try {
 				this.writeLine({ ...cmd, id });
 			} catch (err) {
