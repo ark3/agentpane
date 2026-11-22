@@ -182,6 +182,7 @@ The reasoning matters more than the conclusion: if a premise turns out to be wro
 - [D32](decisions/D32.md). agentpane-mode's buffers are views the Emacs helper routes by, and the helper holds what a view has in flight
 - [D33](decisions/D33.md). agentpane-mode forks only by an edit, as the browser does, and marks the messages it can fork at
 - [D34](decisions/D34.md). An adapter takes state from its backend's events, and an attach that meets a running turn is refused rather than merged
+- [D35](decisions/D35.md). A live session answers to one name, a start has a deadline, and a close names a handle
 
 ## The backend adapter contract
 
