@@ -16,7 +16,8 @@
  * `thinking_level_changed` event (OW-ruzuhu), from `rpc-commands.md`'s
  * "Thinking" and `json.md` as of `pi 0.87.1`, and `set_session_name` with
  * `get_state`'s `sessionName` (OW-jamaha), from `rpc-types.d.ts` and
- * `rpc-mode.js` as installed at `pi 1.0.0`, and `clear_queue`, which Stop
+ * `rpc-mode.js` as installed at `pi 1.0.0`, with the `session_info_changed`
+ * event (ark3/agentpane#80), from `json.md` as of `pi 1.5.2`, and `clear_queue`, which Stop
  * sends ahead of `abort` (OW-wisifo), from `rpc-commands.md` "clear_queue"
  * and the response `pi 1.2.0` gave (docs/MANUAL_TESTING.md, OW-yewiku).
  */
@@ -270,6 +271,10 @@ export type PiNotification =
 	// and by `set_model` re-applying the settings default (OW-ruzuhu) -- before
 	// the command's own response, as of 0.87.1.
 	| { type: "thinking_level_changed"; level: string }
+	// Emitted at every rename, a `set_session_name`'s before its response, as
+	// of `pi 1.5.2` (resources/fixtures/pi/rename.jsonl). An absent `name` means
+	// it was cleared (`json.md`).
+	| { type: "session_info_changed"; name?: string }
 	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" }
 	| {
 			type: "compaction_end";

@@ -224,11 +224,10 @@ export class PiAdapter implements BackendAdapter {
 	private reasoning = false;
 	/**
 	 * The session's name: `get_state`'s `sessionName` at start and after a
-	 * fork, then whatever `setName` had Pi accept. As of `pi 1.0.0` Pi also
-	 * emits a `session_info_changed` event at every rename (`agent-session.js`,
-	 * read at the source), which nothing here reads yet, so a rename this
-	 * adapter did not send -- an extension's -- is not seen until the next
-	 * attach or fork.
+	 * fork, then the one a `session_info_changed` last reported, a rename
+	 * `setName` sent included (D34 point 5). As of `pi 1.0.0` Pi emits that
+	 * event at every rename (`agent-session.js`, read at the source), so an
+	 * extension's rename is seen too.
 	 */
 	private name: string | null = null;
 	private chosenEffort: string | null = null;
@@ -816,11 +815,16 @@ export class PiAdapter implements BackendAdapter {
 	 * `set_session_name`, which as of `pi 0.85.1` Pi accepted mid-session and
 	 * recorded as a `session_info` entry (docs/MANUAL_TESTING.md, "All three
 	 * backends rename an attached session over the wire").
+	 *
+	 * The name is taken from the `session_info_changed` it also sends, not
+	 * from its reply (D34 point 5), and the reply only ends the request. On
+	 * `pi 1.5.2` the event came before the reply
+	 * (resources/fixtures/pi/rename.jsonl), so the session's update goes out
+	 * before the command's reply as D31 orders them; a Pi that reversed the
+	 * two would answer the command first and update the name just after.
 	 */
 	async setName(name: string): Promise<void> {
 		await this.sendCommand<PiResponseFor<"set_session_name">>({ type: "set_session_name", name });
-		this.name = name;
-		this.emitUpdate("status");
 	}
 
 	/** Sent now, not held for the next prompt: Pi has a standalone command, and records it in the session file. */
@@ -865,6 +869,11 @@ export class PiAdapter implements BackendAdapter {
 		if (parsed.type === "thinking_level_changed") {
 			this.thinkingLevel = parsed.level;
 			if (!this.settingModel && this.syncEffort()) this.emitUpdate("status");
+			return;
+		}
+		if (parsed.type === "session_info_changed") {
+			this.name = parsed.name ?? null;
+			this.emitUpdate("status");
 			return;
 		}
 

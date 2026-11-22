@@ -70,11 +70,9 @@ As of the installed `pi 1.5.2`'s `docs/json.md` (read at the package, not run), 
   Event: none (as above).
   Order: the `thinking_level_changed` that `set_model` resets the level with came before its reply on `pi 0.87.1` (`docs/MANUAL_TESTING.md` OW-ruzuhu); `settingModel` holds it until the reply, and a level arriving after the reply is applied at once, so neither order is relied on (OW-zasozo).
   D18: first group.
-- **Name**, from `setName`'s `set_session_name` reply.
-  Event: `session_info_changed`, emitted at every rename as of `pi 1.0.0` (read at the source, in the docblock on `name`) and documented in `pi 1.5.2`'s `docs/json.md`; not read.
-  Order: not measured; the reply alone is used, so none is relied on.
-  Evidence: the reply's success on `pi 0.85.1` (`docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire").
-  D18: first group.
+- **Name**, which `setName` does not write from its `set_session_name` reply since #80: `session_info_changed` carries it, and the reply only ends the request; the event also carries a rename an extension makes.
+  Order: relied on, the event arriving before the reply, so the update goes out before the command's reply (D31 point 3); on `pi 1.5.2` (home server, 2026-11-22, `deepseek/deepseek-v4.1-flash`, a throwaway `PI_CODING_AGENT_DIR`) it came first, naming the name sent, then the reply, and nothing followed in the next 2s, in both of two runs of `capture_fixtures.py --backend pi --scenario rename` (`resources/fixtures/pi/rename.jsonl`), and `setSessionName` emits it before `rpc-mode.js` answers (read at the source).
+  D18: third group, not asserted: a Pi that reversed the two would have `sessions/setName` answer before the name's update, a brief reorder, and the name would still land with the event.
 - **Level**, which `setEffort` and `fork()`'s re-send do not write from their `set_thinking_level` reply: `thinking_level_changed` carries it.
   Evidence: one `thinking_level_changed` per `set_thinking_level` on `pi 0.87.1` (OW-ruzuhu).
   D18: first group.

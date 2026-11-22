@@ -37,10 +37,10 @@ export interface AdapterState {
 	 */
 	unrestoredModel?: string | null;
 	/**
-	 * The session's name as the backend holds it: the one `setName` last had
-	 * accepted, or else the one the backend reported -- at attach where the
-	 * adapter has it in hand, for Codex at every `thread/name/updated` and for
-	 * Claude Code at every `session_title_changed`, which is also how each
+	 * The session's name as the backend holds it: the one the backend
+	 * reported -- at attach where the adapter has it in hand, and for Codex at
+	 * every `thread/name/updated`, for Pi at every `session_info_changed` and
+	 * for Claude Code at every `session_title_changed`, which is also how each
 	 * reports a rename `setName` sent (D34 point 5).
 	 * Null when the backend has none, or none the adapter can read. This is
 	 * the only copy agentpane serves, and it dies with the adapter (D13,

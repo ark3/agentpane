@@ -768,7 +768,7 @@ describe("PiAdapter stop (D16, OW-wisifo)", () => {
 });
 
 describe("PiAdapter session name (D27, OW-jamaha)", () => {
-	it("sends set_session_name and carries the name once Pi accepts it", async () => {
+	it("sends set_session_name and carries the name from session_info_changed", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
 		const seen: StateChange[] = [];
@@ -779,11 +779,43 @@ describe("PiAdapter session name (D27, OW-jamaha)", () => {
 		expect(cmd).toEqual({ id: cmd.id, type: "set_session_name", name: "probe name" });
 		// Written through: nothing is held until the backend has it.
 		expect(h.adapter.getState().name).toBeNull();
+		// As of `pi 1.5.2` the event comes first, then the reply (rename.jsonl).
+		h.child.emitLine({ type: "session_info_changed", name: "probe name" });
 		h.child.respondTo("set_session_name");
 		await done;
 
 		expect(h.adapter.getState().name).toBe("probe name");
 		expect(seen).toEqual(["status"]);
+	});
+
+	it("takes no name from set_session_name's reply alone (D34 point 5)", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionName: "named before" });
+		const seen: StateChange[] = [];
+		h.adapter.onUpdate((_s, change) => seen.push(change));
+
+		const done = h.adapter.setName("probe name");
+		h.child.respondTo("set_session_name");
+		await done;
+		expect(h.adapter.getState().name).toBe("named before");
+		expect(seen).toEqual([]);
+
+		h.child.emitLine({ type: "session_info_changed", name: "probe name" });
+		expect(h.adapter.getState().name).toBe("probe name");
+		expect(seen).toEqual(["status"]);
+	});
+
+	it("follows a rename it did not send, and a cleared name, from session_info_changed", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionName: "named before" });
+		const seen: StateChange[] = [];
+		h.adapter.onUpdate((_s, change) => seen.push(change));
+
+		h.child.emitLine({ type: "session_info_changed", name: "named by an extension" });
+		expect(h.adapter.getState().name).toBe("named by an extension");
+		h.child.emitLine({ type: "session_info_changed" });
+		expect(h.adapter.getState().name).toBeNull();
+		expect(seen).toEqual(["status", "status"]);
 	});
 
 	it("carries the name the attach-time get_state reports, before any rename", async () => {
