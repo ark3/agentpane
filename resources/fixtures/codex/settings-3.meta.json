@@ -1,0 +1,63 @@
+{
+  "backend": "codex",
+  "scenario": "settings-3",
+  "covers": "a cold thread/resume naming the model",
+  "probe": "resources/probes/codex_settings_updated_probe.ts",
+  "prompt": "Reply with exactly the word OK and nothing else.",
+  "cli_version": "codex-cli 0.170.0",
+  "captured_at": "2026-11-22T06:49:13.030-05:00",
+  "command": "codex -m gpt-5.6-luna app-server",
+  "lines": 9,
+  "thread_id": "01a20316-d28d-74b3-9eb2-88700d95e401",
+  "fork_id": "01a20317-1ab0-7762-a664-29bdbeb296d3",
+  "experimental_thread_id": "01a20317-7501-7cd1-a57f-46abcb86e641",
+  "server_requests_seen": [],
+  "event_census": {
+    "<response>": 2,
+    "account/updated": 1,
+    "mcpServer/startupStatus/updated": 2,
+    "remoteControl/status/changed": 1,
+    "thread/goal/cleared": 1,
+    "thread/status/changed": 1,
+    "thread/tokenUsage/updated": 1
+  },
+  "steps": [
+    {
+      "label": "initialize",
+      "sent": {
+        "model": null,
+        "effort": null
+      },
+      "reply_index": 0,
+      "reply_error": null,
+      "reply": {},
+      "settings_updated": [],
+      "lines_in_order": [
+        "<reply>",
+        "remoteControl/status/changed"
+      ]
+    },
+    {
+      "label": "thread/resume on a fresh app-server (model named)",
+      "sent": {
+        "model": "gpt-5.6-luna",
+        "effort": null
+      },
+      "reply_index": 5,
+      "reply_error": null,
+      "reply": {
+        "model": "gpt-5.6-luna",
+        "modelProvider": "openai",
+        "reasoningEffort": "medium",
+        "threadStatus": "idle"
+      },
+      "settings_updated": [],
+      "lines_in_order": [
+        "thread/status/changed",
+        "<reply>",
+        "thread/tokenUsage/updated",
+        "thread/goal/cleared"
+      ]
+    }
+  ]
+}

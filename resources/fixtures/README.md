@@ -205,6 +205,14 @@ The session header's `cwd` and that message's `cwd` section name the capture's s
 No context file or skill reached these two captures' system messages; a capture whose scratch or state dir held one would carry its content in `sections`, which no scrub reaches, so read those before committing.
 What the runs showed is in `docs/MANUAL_TESTING.md`, "Pi fixtures that keep their session file (OW-piyulu)".
 
+## The settings captures (ark3/agentpane#83, captured 2026-11-22)
+
+`settings-1.jsonl` to `settings-4.jsonl` were written on `codex-cli 0.170.0` by `resources/probes/codex_settings_updated_probe.ts`, not by `capture_fixtures.py`, one per app-server process, to record when `thread/settings/updated` arrives against the `thread/start`, `thread/resume` and `turn/start` replies.
+Each `.meta.json` holds that run's steps: per request, the model and effort it sent, what the reply answered unscrubbed, every `thread/settings/updated` after it and whether it came before the reply, and the lifecycle lines in order.
+The probe scrubs by the keys `capture_fixtures.py` uses, nulls the same account telemetry and replaces the home path; `settings-4` carries Codex's plan-mode developer instructions in its event, and those were read before committing.
+No rollout is kept.
+What the runs showed is in `docs/MANUAL_TESTING.md`, "`thread/settings/updated` reaches only an experimental connection, on `codex-cli 0.170.0` (ark3/agentpane#83)".
+
 ## Determinism
 
 Model output varies between runs. Assert on **structure** — event sequence,

@@ -2490,7 +2490,8 @@ Before any choice the attach snapshot carried `effort: "medium"`, which is `thre
 The prompt `Do not use any tools. Reply with exactly: ok` answered `ok`, and the tap shows the one `turn/start` that ran it carried `model: "gpt-5.6-luna"` and `effort: "low"`.
 The effort was read back from three places: the assistant message on the SSE wire carried `effort: "low"`, the settled snapshot carried `effort: "low"`, and the rollout's `turn_context` record for that turn carried `model: "gpt-5.6-luna"` and `effort: "low"`.
 The driver ran twice, on threads `01a0d045-f945-...` and `01a0d046-65c1-...`, with the same readings.
-No `thread/settings/updated` notification arrived after the overriding `turn/start` in the bare probe below, whose notifications were all listed, so as of this version the notification the generated types offer does not report a `turn/start` override, and the rollout's `turn_context` is where the effort a turn ran at is written down.
+No `thread/settings/updated` notification arrived after the overriding `turn/start` in the bare probe below, whose notifications were all listed, so as of this version the notification the generated types offer did not report a `turn/start` override to a connection sending the adapter's request shapes, and the rollout's `turn_context` is where the effort a turn ran at is written down.
+On `codex-cli 0.170.0` it did report one, ahead of the reply, to a connection whose `initialize` set `experimentalApi`, and none to one that did not (below, "`thread/settings/updated` reaches only an experimental connection", ark3/agentpane#83).
 
 **A resume in a fresh app-server that names the model reports the default, not the override.**
 The second driver's attempt to measure this through agentpane failed for a reason of the run's own making: after `DELETE`, the re-attach answered 404, because the session index walks `~/.codex/sessions` and the thread's rollout was under the temporary `CODEX_HOME`.
@@ -5282,6 +5283,32 @@ The listing then held one row for the path, `attached` under the new handle, and
 **Run again once #90 had built D35 point 1, it read the same.**
 The same probe, built from this checkout with the change, made another session in the same store and exited 0: no move at the first prompt or at the attach, and one row, `attached`.
 `bun resources/probes/agentpane_pi_smoke.ts --skip-build`, whose superseded-ref attach #90 replaced with a check that the create's ref is the first its handle carried, passed every check on the same build, with a throwaway `PI_CODING_AGENT_DIR` and the pinned model read back as `openrouter/deepseek/deepseek-v4.1-flash` at `high`; the rename came inside the create, and the handle carried no other ref.
+
+## `thread/settings/updated` reaches only an experimental connection, on `codex-cli 0.170.0` (ark3/agentpane#83)
+
+Run on the home server on 2026-11-22 by `bun codex_settings_updated_probe.ts --out /tmp/issue83/run.json`, from `resources/probes/`, one invocation exiting 0 with every request answered, on `codex-cli 0.170.0` and `bun 1.4.0`, every app-server spawned as `codex -m gpt-5.6-luna app-server` and the model also named on `thread/start` and each overriding `turn/start`.
+It drove `codex app-server` directly, not through agentpane, in a throwaway `CODEX_HOME` under `/var/tmp` holding copies of `auth.json` and `config.toml`, and a throwaway workspace; `~/.codex` was writable in this session, and the throwaway home kept the probe's threads out of the machine's store.
+The copied `config.toml` names `gpt-5.6-luna` at `model_reasoning_effort = "medium"`.
+After each reply the probe waited three seconds, and after a `turn/start` its `turn/completed` and then three seconds, so a late event would be caught.
+Each app-server's stdout is kept as `resources/fixtures/codex/settings-1.jsonl` to `settings-4.jsonl`, with the steps in each `.meta.json`; the JSON in `/tmp` was kept nowhere else.
+The question was whether `thread/settings/updated` could replace the `thread/start` and `thread/resume` replies as the source of the model and effort `CodexReducer` names (D34 point 5).
+
+**On a connection whose `initialize` sent `capabilities: null`, as `CodexAdapter`'s does, none arrived.**
+App-server 1: `thread/start` answered `reasoningEffort: "medium"`; three `turn/start`s followed, at `effort: "low"`, at `low` again, and naming neither model nor effort; then a `thread/resume` of the thread on the same app-server, a re-attach, answered `low`; a `thread/fork` of the whole thread answered `medium`, and the borrower's `thread/resume` of the fork `medium`.
+App-server 2, fresh: a `thread/resume` naming no model answered `low`.
+App-server 3, fresh: a `thread/resume` naming the model answered `medium`.
+Not one `thread/settings/updated` arrived on any of the three, in 51, 9 and 9 lines.
+Those answers read as OW-sayaju's on `0.156.0` (above, "What model and effort a Codex resume and fork run at"): a resume naming no model keeps the override, one naming the model resets it to the config's, and a fork takes the config's.
+
+**On a connection whose `initialize` set `experimentalApi`, it came ahead of the reply of a `turn/start` that changed a setting, but not after `thread/start`.**
+App-server 4, fresh, with `capabilities: {"experimentalApi": true}`: `thread/start` answered `medium`, and no event followed it.
+A `turn/start` at `effort: "low"` was answered at line 8, and line 7 was `thread/settings/updated` with `model`, `modelProvider` and `effort: "low"`, `collaborationMode.mode` `default` and its `reasoning_effort` `low`.
+A `turn/start` naming `collaborationMode` `plan` with `reasoning_effort: null`, as `plan.jsonl`'s did on `0.157.1`, was answered at line 23, and line 22 was the event again, now `effort: null` and mode `plan`.
+A resume on such a connection was not tried.
+So the one earlier sighting, in `plan.jsonl`, came on a connection that set the capability, and OW-kokalo's bare probe on `0.156.0`, which sent the adapter's request shapes, saw none after its override.
+
+**The event cannot stand in for the replies, and the reducer keeps taking them.**
+The adapter's connection gets no event at all, and on one that opted in no event follows the request a start makes, so nothing would carry the model and effort a start or a resume answered.
 
 ## HANDOFF findings 1–49
 

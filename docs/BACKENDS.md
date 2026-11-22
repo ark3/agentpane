@@ -124,7 +124,7 @@ Exempt and writing no session state: `initialize`'s model list; `interrupt`, who
 ### Replies and events
 
 Each fact `CodexAdapter` (`src/server/adapters/codex/adapter.ts`) and `CodexReducer` (`reducer.ts`) write from a JSON-RPC reply, laid out as under Pi's.
-"The wire captures" are the 12 Codex fixtures under `resources/fixtures/codex/` that record app-server's stdout, every one but `fork.jsonl`, which is a rollout: `codex-cli 0.147.0` for `text`, `tool-read`, `tool-edit` and `compact`, `0.153.4` for `subagent`, and `0.157.1` for the other seven.
+"The wire captures" are the 12 Codex fixtures under `resources/fixtures/codex/` that record app-server's stdout, every one but `fork.jsonl`, which is a rollout, and the four `settings-*` captures ark3/agentpane#83 added later, cited by name: `codex-cli 0.147.0` for `text`, `tool-read`, `tool-edit` and `compact`, `0.153.4` for `subagent`, and `0.157.1` for the other seven.
 They carry 15 `turn/start` replies, four of them in `compact.jsonl`, and no `thread/resume`.
 
 - **Thread id**, from the `thread/start` or `thread/resume` reply, into the adapter's `threadId`, the reducer's identity and the connection's claim; exempt, since it names what the request created or asked for.
@@ -133,8 +133,10 @@ They carry 15 `turn/start` replies, four of them in `compact.jsonl`, and no `thr
   Whether a `thread/resume` sends `thread/started` is in no capture.
   D18: first group.
 - **Model, provider and effort the reducer names**, from the `thread/start` or `thread/resume` reply's `model`, `modelProvider` and `reasoningEffort`, under the rollout's last `turn_context` (D23, the docblock on `effort`); before each `turn/start` the adapter sets them from its own choice, which is no reply.
-  Event: `thread/started` carries `thread.modelProvider`, which the reducer takes too; `thread/settings/updated` carries `model` and `effort`, and the reducer drops it.
-  It came once in the wire captures, in `plan.jsonl` (`codex-cli 0.157.1`), ahead of the `turn/start` reply, reporting that turn's `collaborationMode` with `effort: null`; on `codex-cli 0.156.0` none followed a `turn/start` overriding the effort (`docs/MANUAL_TESTING.md` OW-kokalo).
+  Event: `thread/started` carries `thread.modelProvider`, which the reducer takes too; `thread/settings/updated` carries `model`, `modelProvider` and `effort`, and the reducer drops it, since it cannot stand in for the replies (ark3/agentpane#83).
+  As of `codex-cli 0.170.0` it reached only a connection whose `initialize` set `capabilities.experimentalApi`, which the adapter's does not: on one sending `capabilities: null`, none followed `thread/start`, a `turn/start` overriding the effort, one repeating it, one naming neither, a re-attach's `thread/resume`, a `thread/fork` and its borrower's resume, or a cold `thread/resume` naming no model or naming one (`settings-1` to `settings-3`).
+  On one that set it, none followed `thread/start` either, and one came ahead of the reply of each of the two `turn/start`s sent, each changing a setting: `effort: "low"` for an effort override, and `effort: null` for collaboration mode `plan`, as in `plan.jsonl` on `0.157.1`, the one wire capture that carries it (`settings-4`; `docs/MANUAL_TESTING.md`, ark3/agentpane#83).
+  On `codex-cli 0.156.0` none followed an effort override on a connection sending the adapter's request shapes (`docs/MANUAL_TESTING.md` OW-kokalo).
   Order: none relied on.
   D18: second group, behind D23.
 - **Name at attach**, `thread.name` from the `thread/start` or `thread/resume` reply.

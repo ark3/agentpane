@@ -555,6 +555,23 @@ Costs tokens: two real model turns on `gpt-5.6-luna` without `--thread`, none wi
 Verified with: `codex-cli` 0.156.0 on the home server, 2026-09-24.
 What it showed is the same `docs/MANUAL_TESTING.md` section.
 
+## `codex_settings_updated_probe.ts`
+
+Proves: **which requests `thread/settings/updated` follows, in which order against the reply, and what it carries**, beside the `thread/start` and `thread/resume` replies `CodexAdapter` takes a thread's model and effort from (D34 point 5, ark3/agentpane#83).
+It drives `codex app-server` directly with the adapter's request shapes: on one app-server a `thread/start`, three `turn/start`s (an effort override, the same again, neither named), a re-attach's `thread/resume`, a `thread/fork` and its borrower's resume; a cold `thread/resume` naming no model, and one naming the model, each on a fresh app-server; and on a fourth whose `initialize` sets `experimentalApi`, which the adapter never does, a `thread/start`, an effort override and a `turn/start` in collaboration mode `plan`.
+
+```bash
+bun codex_settings_updated_probe.ts [--out <path>]            # writes settings-1..4 fixtures
+bun codex_settings_updated_probe.ts --no-fixtures             # --effort <e>, default low; --model <m>, default the AGENTS.md pin
+```
+
+Each app-server's stdout is written, scrubbed by key as `capture_fixtures.py` scrubs, to `resources/fixtures/codex/settings-<n>.jsonl` with its steps in `settings-<n>.meta.json`.
+It runs in a throwaway `CODEX_HOME` holding copies of `auth.json` and `config.toml`, which it removes on exit, and records rather than asserts, exiting 0 when every request answered.
+Costs tokens: five one-word turns on the AGENTS.md pin.
+
+Verified with: `codex-cli` 0.170.0 on the home server, 2026-11-22.
+What it showed is `docs/MANUAL_TESTING.md`, "`thread/settings/updated` reaches only an experimental connection, on `codex-cli 0.170.0` (ark3/agentpane#83)".
+
 ## `agentpane_prompt_events_live.ts`
 
 Proves: **what agentpane's socket carries for a prompt to an attached Claude Code session**, event by event, and how many snapshots each prompt drew between its send and its turn's end (OW-yirosu).

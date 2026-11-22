@@ -1,0 +1,138 @@
+{
+  "backend": "codex",
+  "scenario": "settings-4",
+  "covers": "an effort override and a collaborationMode override under initialize's experimental API",
+  "probe": "resources/probes/codex_settings_updated_probe.ts",
+  "prompt": "Reply with exactly the word OK and nothing else.",
+  "cli_version": "codex-cli 0.170.0",
+  "captured_at": "2026-11-22T06:49:13.030-05:00",
+  "command": "codex -m gpt-5.6-luna app-server",
+  "lines": 39,
+  "thread_id": "01a20316-d28d-74b3-9eb2-88700d95e401",
+  "fork_id": "01a20317-1ab0-7762-a664-29bdbeb296d3",
+  "experimental_thread_id": "01a20317-7501-7cd1-a57f-46abcb86e641",
+  "server_requests_seen": [],
+  "event_census": {
+    "<response>": 4,
+    "account/rateLimits/updated": 2,
+    "account/updated": 1,
+    "item/agentMessage/delta": 2,
+    "item/completed": 5,
+    "item/started": 5,
+    "mcpServer/startupStatus/updated": 2,
+    "remoteControl/status/changed": 1,
+    "thread/readState/changed": 2,
+    "thread/settings/updated": 2,
+    "thread/started": 1,
+    "thread/status/changed": 4,
+    "thread/tokenUsage/updated": 2,
+    "turn/completed": 2,
+    "turn/moderationMetadata": 2,
+    "turn/started": 2
+  },
+  "steps": [
+    {
+      "label": "initialize",
+      "sent": {
+        "model": null,
+        "effort": null
+      },
+      "reply_index": 0,
+      "reply_error": null,
+      "reply": {},
+      "settings_updated": [],
+      "lines_in_order": [
+        "<reply>",
+        "remoteControl/status/changed"
+      ]
+    },
+    {
+      "label": "thread/start (model named, experimental API)",
+      "sent": {
+        "model": "gpt-5.6-luna",
+        "effort": null
+      },
+      "reply_index": 3,
+      "reply_error": null,
+      "reply": {
+        "model": "gpt-5.6-luna",
+        "modelProvider": "openai",
+        "reasoningEffort": "medium",
+        "threadStatus": "idle"
+      },
+      "settings_updated": [],
+      "lines_in_order": [
+        "<reply>",
+        "thread/started"
+      ]
+    },
+    {
+      "label": "turn/start (model, effort low: an override, experimental API)",
+      "sent": {
+        "model": "gpt-5.6-luna",
+        "effort": "low"
+      },
+      "reply_index": 8,
+      "reply_error": null,
+      "reply": {},
+      "settings_updated": [
+        {
+          "index": 7,
+          "threadId": "01a20317-7501-7cd1-a57f-46abcb86e641",
+          "model": "gpt-5.6-luna",
+          "modelProvider": "openai",
+          "effort": "low",
+          "summary": null,
+          "collaborationMode": "default",
+          "collaborationEffort": "low",
+          "relative": "before reply"
+        }
+      ],
+      "lines_in_order": [
+        "thread/settings/updated",
+        "<reply>",
+        "thread/status/changed",
+        "turn/started",
+        "turn/moderationMetadata",
+        "thread/tokenUsage/updated",
+        "thread/readState/changed",
+        "thread/status/changed",
+        "turn/completed"
+      ]
+    },
+    {
+      "label": "turn/start (collaborationMode plan, as plan.jsonl's)",
+      "sent": {
+        "model": null,
+        "effort": null
+      },
+      "reply_index": 23,
+      "reply_error": null,
+      "reply": {},
+      "settings_updated": [
+        {
+          "index": 22,
+          "threadId": "01a20317-7501-7cd1-a57f-46abcb86e641",
+          "model": "gpt-5.6-luna",
+          "modelProvider": "openai",
+          "effort": null,
+          "summary": null,
+          "collaborationMode": "plan",
+          "collaborationEffort": null,
+          "relative": "before reply"
+        }
+      ],
+      "lines_in_order": [
+        "thread/settings/updated",
+        "<reply>",
+        "thread/status/changed",
+        "turn/started",
+        "turn/moderationMetadata",
+        "thread/tokenUsage/updated",
+        "thread/readState/changed",
+        "thread/status/changed",
+        "turn/completed"
+      ]
+    }
+  ]
+}
