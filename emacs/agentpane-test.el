@@ -1574,7 +1574,7 @@ the attach binds nothing for `previewing', and its reply names
 binds nothing for it, and its reply names the other's view (D32 point
 2): the other buffer, which hears the session under the handle, is shown
 in this one's window, the echo area naming it, and this one stays a
-preview, its draft in place, its waiters failing.  No buffer is killed,
+preview, its draft in place, its FAILED called.  No buffer is killed,
 none merges, and nothing more is sent."
   (agentpane-test--with-helper
     (agentpane-test--held-elsewhere
@@ -3149,9 +3149,10 @@ parent detaches, as after a fork that lands."
   "An edit's send from a buffer no longer attached, as a helper's death or
 a gap leaves one, holding no handle, is refused here in agentpane-mode's
 own words, sending nothing and attaching nothing, with the edit and its
-text left open: the request names the handle, and with none the server
-refused it as \"handle is required and must be a string\" (D31 point 9,
-ark3/agentpane#63)."
+text left open: the request names its view, which the helper refuses
+`not_attached' where it is bound to no handle; until ark3/agentpane#70
+it named the handle, and with none the server refused it as \"handle is
+required and must be a string\" (D31 point 9, ark3/agentpane#63)."
   (agentpane-test--editing "pi"
     (setq agentpane--attached nil
           agentpane--handle nil)
@@ -3168,9 +3169,10 @@ ark3/agentpane#63)."
 (ert-deftest agentpane-test-live-requests-from-a-detached-buffer-refuse ()
   "A stop or an error's dismissal from a buffer holding no handle, as a
 helper's death, a gap or an `ended' leaves one, is refused here in
-agentpane-mode's own words and sends nothing; with a null handle the
-server refused each as \"handle is required and must be a string\" (D31
-point 9, ark3/agentpane#63).  The dismissal keeps the error drawn."
+agentpane-mode's own words and sends nothing; the helper would refuse
+each `not_attached', and until ark3/agentpane#70, with a null handle,
+the server refused each as \"handle is required and must be a string\"
+\(D31 point 9, ark3/agentpane#63).  The dismissal keeps the error drawn."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-helper
       (agentpane-test--forking nil
@@ -3638,8 +3640,8 @@ the one request (D30)."
 (defmacro agentpane-test--sending-detached (&rest body)
   "Run BODY in a transcript buffer for the session `ref', not attached and
 holding no handle, typed \"hello\" into, with every request answered as
-`agentpane-test--forking' answers it, an attach or a prompt naming no
-handle under the handle \"h1\", and no turn watched or marked done."
+`agentpane-test--forking' answers it, an attach or a prompt not marked
+`:live' under the handle \"h1\", and no turn watched or marked done."
   (declare (indent 0))
   `(let ((ref '(:backend "codex" :id "t1")))
      (agentpane-test--watching
@@ -3761,8 +3763,8 @@ what drops it: the server owns the error (OW-lohubo)."
 (ert-deftest agentpane-test-prompt-names-the-error-held-at-the-send ()
   "A prompt carries the `errorId' of the turn error the buffer held when it
 was sent, so admitting it clears that one and no newer one (OW-jokoto),
-and from an attached buffer the handle it holds, so it goes only to the
-live session under it (D30)."
+and from an attached buffer `:live t', so the helper sends it only to the
+live session its view is bound to (D30, D32)."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-helper
       (agentpane-test--forking nil
@@ -4149,8 +4151,8 @@ on the model \"luna\".  Every request is answered as
 
 (ert-deftest agentpane-test-close-session-closes-it-onto-its-preview ()
   "`agentpane-close-session' on an idle attached session sends
-`sessions/close' under the buffer's handle, as the browser's Tools Detach
-sends its DELETE, and once it answers leaves the buffer holding no handle
+`sessions/close' naming its view, as the browser's Tools Detach sends
+`sessions/close' with its handle, and once it answers leaves the buffer holding no handle
 and unattached, and redrawn from
 its `sessions/preview', as the browser lands on the read-only preview,
 asking no `sessions/list' first (D26).  A kill after that detaches its
@@ -5567,8 +5569,8 @@ nothing until it is killed."
 (defun agentpane-test--dead-unheard (process)
   "Wait without yielding until PROCESS reads as not live, so that its
 sentinel, and anything it wrote that Emacs has not read, are still to be
-handled: the gap `agentpane-test-late-sentinel-keeps-the-replacement-helper'
-drives."
+handled: the gap `agentpane-test-no-replacement-before-the-teardown' and
+the tests after it drive."
   (let ((deadline (+ (float-time) 10)))
     (while (and (process-live-p process) (< (float-time) deadline))))
   (should-not (process-live-p process))
@@ -6294,7 +6296,8 @@ dies binds nothing when it is handed on after the teardown (OW-kifuhi)."
 (ert-deftest agentpane-test-held-attach-replies-after-a-death-attach-nothing ()
   "Two attach replies held back behind a synchronous request as their
 helper dies bind nothing when they are handed on after the teardown,
-the second to no helper the first one's waiter started (OW-kifuhi)."
+the second sending nothing through a helper started after the death
+\(OW-kifuhi)."
   (agentpane-test--held-attach-replies 2))
 
 (ert-deftest agentpane-test-attach-reply-held-after-its-detached-attaches-nothing ()
@@ -6325,7 +6328,7 @@ reply is handed on (OW-tifiva), as in wire order
   "An edit sent where the fork stops the parent's running turn carries
 `stops', so the helper drops the parent's turn-done watch as it goes
 out, and the stop's not-streaming status and a Pi parent's ended handle
-raise nothing, as `f' raises nothing for the turn it stops (OW-dunahe,
+raise nothing, the user stopping that turn by forking it (OW-dunahe,
 D32 point 6); where the fork leaves the turn running, or none runs, it
 carries none, and the turn's end still raises the indicator.  The helper
 arms the fork's own watch at the reply (D30)."

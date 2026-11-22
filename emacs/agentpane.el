@@ -491,11 +491,12 @@ reply (D26) -- as does one attached through a helper that has exited
 (defconst agentpane--spawn-timeout 90
   "Seconds to wait for a request that may spawn the session's backend:
 `sessions/attach', and since D30 `sessions/create',
-`sessions/forkAndPrompt' and a `sessions/prompt' naming a ref; every
-other command acts on a session already attached, or is refused
-\(src/server/http/socket.ts).  A `sessions/prompt' naming its handle
-still takes this too, from when its HTTP route attached first; it now
-waits only on a backend already running, and whether it wants
+`sessions/forkAndPrompt' and a `sessions/prompt' not marked `:live',
+which the helper may send by ref; every other command acts on a session
+already attached, or is refused (src/server/http/socket.ts).  A
+`sessions/prompt' marked `:live' still takes this too, from when its
+HTTP route attached first; it now waits only on a backend already
+running, and whether it wants
 jsonrpc.el's default instead, as `sessions/setModel' takes, has not been
 weighed.  Until ark3/agentpane#76 `sessions/forkPoints' took it too.
 Past this the reply is discarded even if it comes, so a request that ran
@@ -3056,8 +3057,11 @@ of the close's reply (D26, D31 point 3), leaves the buffer not attached,
 and a press then is the user asking for the session back.  An attach, or
 a prompt by ref, that reaches the server while it disposes of the
 session waits that out and starts a fresh agent (`#disposing' in
-`SessionManager.attach', src/server/http/session-manager.ts); a second
-close finds the buffer not attached, or closes what was attached since.
+`SessionManager.attach', src/server/http/session-manager.ts).  A second
+close sent before the `session/detached' is refused `not_attached', by
+the helper or the server (D35 point 3), and the echo area says so; one
+pressed after it finds the buffer not attached, or closes what was
+attached since.
 Until ark3/agentpane#71 the buffer refused all of these while its close
 was in flight (OW-dakeyi), and a close while an attach was out.
 
@@ -3586,8 +3590,8 @@ kill giving the fork's attach up in the helper; a refusal naming a fork
 with no handle then shows a buffer made for the fork's ref.  From
 a buffer holding no handle, one a helper's death or a gap detached, the
 send is refused here, sending nothing and leaving the edit standing:
-the request names the session by the handle (D31 point 9), and the
-server's refusal of a null one read as a malformed request.
+the request names the session by its view, which the helper refuses
+`not_attached' where it is bound to no handle (D32 point 1).
 
 This buffer counts as sending, `agentpane--sending', until the request
 answers, as the browser's `forkAndSubmit' holds `sending' (OW-kelede),

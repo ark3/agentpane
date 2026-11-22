@@ -377,7 +377,7 @@
  *   error the buffer held when the user sent, `null` when it held none, read
  *   at the send: admitting the prompt clears the session's error only while
  *   it is still that one, so an error raised after the send, the start of
- *   the attach a prompt naming no handle makes among them, stays
+ *   the attach a by-ref prompt makes among them, stays
  *   (OW-jokoto). Absent, the server takes whatever error it holds when the
  *   prompt arrives.
  * Every request on a live session below, from `sessions/abort` on but
@@ -473,12 +473,12 @@
  * (`sessions/forkAndPrompt`, `sessions/prompt`), so a mid-turn prompt
  * rejection reads in Emacs as it does in the browser. One that would start
  * an agent -- `sessions/attach`, `sessions/create`, a `sessions/prompt`
- * naming no handle, and the fork `sessions/forkAndPrompt` made -- is refused
+ * that goes by ref, and the fork `sessions/forkAndPrompt` made -- is refused
  * `at_capacity` when D12's cap is reached and no live session may be closed
  * for it, its `message` saying so, and `start_timeout` when the agent's
  * start outruns the server's deadline, the agent stopped and nothing left
  * (D35). `sessions/attach` and a `sessions/prompt`
- * naming no handle are refused `turn_running` when the session's turn is
+ * that goes by ref are refused `turn_running` when the session's turn is
  * still running on a backend that holds it elsewhere (D34), its `message`
  * saying so and nothing started. A request that never
  * reached the server is refused the same way, with a code of the helper's
