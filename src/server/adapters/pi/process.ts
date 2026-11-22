@@ -734,7 +734,9 @@ export class PiAdapter implements BackendAdapter {
 		// `fork` emits no message events of its own, so our held transcript is now
 		// stale; re-fetch the rewound branch -- the same cold-start path `start()`
 		// uses when resuming, and a replace for the reason its docblock gives.
-		this.state = { ...this.state, isStreaming: false };
+		// `isStreaming` is not written here: the abandoned turn's `agent_settled`
+		// clears it, and came before the stop's `abort` reply (D34 point 5,
+		// docs/BACKENDS.md); one arriving in the window is loud.
 		await this.hydrateMessages();
 		// No `start`: the fork is the file this live process is already writing.
 		return { ref: this.ref };

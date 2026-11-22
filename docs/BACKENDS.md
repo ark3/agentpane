@@ -58,10 +58,9 @@ As of the installed `pi 1.5.2`'s `docs/json.md` (read at the package, not run), 
   Order: relied on, the abandoned turn's last events arriving before the `fork` reply and nothing between it and the `get_messages` answer (D34 point 2).
   Evidence: "Fork" above, its sentence citing OW-dutute: `pi 0.87.1` and three runs on `pi 1.2.0`.
   D18: third group, **licenses absent code**, asserted since #79: an event that changes the reducer's state from the `fork` answer to the end of `hydrateMessages` raises a session error naming it, once per window (`PiAdapter.hydrateWindow`, checked in `handleLine`).
-- **`isStreaming: false` after a fork**, written by `fork()` after its replies rather than from an event.
-  Event: `agent_settled`.
-  Order: `agent_settled` came before the `abort` reply that `fork()` awaits first, in all 22 runs of `docs/MANUAL_TESTING.md` OW-yewiku (`pi 1.2.0`), and before the `fork` reply in OW-dutute (`pi 0.87.1`) and OW-tigaye (`pi 1.2.0`), so the write moves nothing on those versions; not relied on.
-  D18: first group.
+- **`isStreaming: false` after a fork**, which `fork()` does not write from its replies since #81: the abandoned turn's `agent_settled` carries it.
+  Order: relied on, `agent_settled` arriving before the `fork` reply; it came before the `abort` reply that `fork()` awaits first, in all 22 runs of `docs/MANUAL_TESTING.md` OW-yewiku (`pi 1.2.0`), and before the `fork` reply in OW-dutute (`pi 0.87.1`) and OW-tigaye (`pi 1.2.0`).
+  D18: third group, **licenses absent code**, asserted since #79: one arriving from the `fork` answer to the end of `hydrateMessages` raises the fork window's session error (`PiAdapter.hydrateWindow`), and still settles the session.
 - **Model and reasoning**, from `setModel`'s `set_model` reply.
   Event: none (as above).
   Order: the `thinking_level_changed` that `set_model` resets the level with came before its reply on `pi 0.87.1` (`docs/MANUAL_TESTING.md` OW-ruzuhu); `settingModel` holds it until the reply, and a level arriving after the reply is applied at once, so neither order is relied on (OW-zasozo).

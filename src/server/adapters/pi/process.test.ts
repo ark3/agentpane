@@ -1120,6 +1120,7 @@ describe("PiAdapter.fork", () => {
 		await Promise.resolve();
 		h.child.respondTo("get_state", { model: null, isStreaming: false, messageCount: 2 });
 		h.child.emitLine(delta("3\n"));
+		h.child.emitLine({ type: "agent_settled" });
 		// Both reached the parent's partial reply, which the hydrate then drops.
 		expect(h.adapter.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "1\n2\n3\n" }] });
 		await Promise.resolve();
@@ -1130,8 +1131,47 @@ describe("PiAdapter.fork", () => {
 
 		expect(h.adapter.getState().messages).toEqual([userMessage("Say ALPHA"), assistantMessage("ALPHA")]);
 		expect(h.adapter.getState().isStreaming).toBe(false);
-		// And the window is loud (D18, ark3/agentpane#79), once for both deltas.
+		// And the window is loud (D18, ark3/agentpane#79), once for all three events.
 		expect(h.errors).toEqual([expect.stringMatching(/^Pi sent "message_update" while agentpane was reading a fork's transcript/)]);
+	});
+
+	it("settles a streaming session from the abandoned turn's agent_settled, not from its own replies (D34 point 5)", async () => {
+		// As of `pi 1.2.0`, `agent_settled` came before the `abort` reply that
+		// `fork()` awaits first in all 22 runs of OW-yewiku, and before the `fork`
+		// reply on `pi 0.87.1` and `1.2.0` (OW-dutute, OW-tigaye), so the fork
+		// writes no `isStreaming` of its own.
+		const h = makeHarness();
+		await startAdapter(h);
+		h.child.emitLine({ type: "agent_start" });
+		h.child.emitLine({ type: "message_start", message: assistantMessage("") });
+		const seen: { streaming: boolean; change: StateChange }[] = [];
+		h.adapter.onUpdate((s, change) => seen.push({ streaming: s.isStreaming, change }));
+
+		const forked = h.adapter.fork("e1");
+		const macrotask = () => new Promise((resolve) => setTimeout(resolve, 0));
+		await macrotask();
+		h.child.respondTo("clear_queue", { steering: [], followUp: [] });
+		await macrotask();
+		h.child.emitLine({ type: "agent_settled" });
+		h.child.respondTo("abort");
+		await macrotask();
+		// Settled before any of the fork's own replies has answered.
+		expect(h.adapter.getState().isStreaming).toBe(false);
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		await Promise.resolve();
+		h.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
+		await Promise.resolve();
+		h.child.respondTo("get_messages", { messages: [] });
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [] });
+		await forked;
+
+		expect(h.adapter.getState().isStreaming).toBe(false);
+		expect(seen).toEqual([
+			{ streaming: false, change: "status" },
+			{ streaming: false, change: "transcript" },
+		]);
+		expect(h.errors).toEqual([]);
 	});
 
 	it("stops the session before it forks, with no turn running too, and drops what the stop took out of Pi's queue (D15, D30)", async () => {
