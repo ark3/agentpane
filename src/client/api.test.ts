@@ -89,7 +89,6 @@ describe("agentpane API over the socket", () => {
 	it("sends each method as its command, naming a handle or a ref as D31 point 9 has it, and unwraps the result", async () => {
 		const { api, socket } = setup();
 		socket.open();
-		const fork = { ref: { backend: "pi" as const, id: "/tmp/fork.jsonl" }, handle: null };
 		const cases: [() => Promise<unknown>, Record<string, unknown>, unknown, unknown][] = [
 			[() => api.listSessions(), { cmd: "sessions/list" }, { sessions: [summary] }, [summary]],
 			[() => api.createSession({ cwd: "/work", backend: "pi" }), { cmd: "sessions/create", cwd: "/work", backend: "pi" }, { session: live }, live],
@@ -109,7 +108,6 @@ describe("agentpane API over the socket", () => {
 				{ points: [], forkStopsTurn: true },
 				{ points: [], forkStopsTurn: true },
 			],
-			[() => api.fork("h1", { entryId: "e1" }), { cmd: "sessions/fork", handle: "h1", entryId: "e1" }, { ref: fork.ref }, fork.ref],
 			[
 				() => api.forkAndPrompt("h1", { index: 2, text: "again" }),
 				{ cmd: "sessions/forkAndPrompt", handle: "h1", index: 2, text: "again" },
@@ -130,7 +128,7 @@ describe("agentpane API over the socket", () => {
 		const methods = Object.keys(createAgentpaneApi({ openSocket: (path) => new FakeSocket(path) })).sort();
 		expect(methods).toEqual(
 			[
-				"abort", "attach", "close", "compact", "connect", "createSession", "dismissError", "editDraft", "fork",
+				"abort", "attach", "close", "compact", "connect", "createSession", "dismissError", "editDraft",
 				"forkAndPrompt", "forkPoints", "listModels", "listSessions", "preview", "prompt", "setEffort", "setModel", "setName",
 			].sort(),
 		);

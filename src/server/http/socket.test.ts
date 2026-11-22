@@ -153,7 +153,6 @@ describe("the token is the first frame (D31 point 5)", () => {
 				["sessions/setEffort", { handle, effort: "high" }],
 				["sessions/setName", { handle, name: "renamed" }],
 				["sessions/forkPoints", { handle }],
-				["sessions/fork", { handle, entryId: "e1" }],
 				["sessions/forkAndPrompt", { handle, index: 0, text: "again" }],
 				["models/list", {}],
 				["draft/edit", { text: "draft" }],
@@ -451,10 +450,13 @@ describe("queries", () => {
 			expect((await socket.ok("sessions/preview", { ref: session.ref })).turns).toEqual([]);
 		});
 
-		it("a parked fork before its attach, which the table does not hold", async () => {
-			rebuild({ claude: new FakeAdapterFactory({ forkMode: "claude" }) });
+		it("a parked fork whose start failed, which the table does not hold", async () => {
+			const options: FakeAdapterOptions = { forkPoints: [{ id: "e1", text: "first ask", index: 0 }], forkMode: "claude" };
+			rebuild({ claude: new FakeAdapterFactory(options) });
 			const { socket, handle } = await attached(CLAUDE_SESSION);
-			const { ref } = await socket.ok("sessions/fork", { handle, entryId: "e1" });
+			options.failStart = "fork would not start";
+			const { fork } = await socket.refused("sessions/forkAndPrompt", { handle, index: 0, text: "again" });
+			const ref = fork!.ref;
 			index.previews.set(sessionKey(ref), null);
 			expect(app.sessions.summaryOf(ref)).toBeNull();
 			expect((await socket.ok("sessions/preview", { ref })).turns).toEqual([]);
@@ -893,21 +895,15 @@ describe("commands that name a handle (D31 point 9)", () => {
 		expect((await socket.refused("sessions/setModel", { handle })).code).toBe("bad_request");
 	});
 
-	it("forks, answering the fork's ref", async () => {
-		build({}, { forkMode: "codex" });
-		const { socket, handle } = await attached(CODEX_SESSION);
-		const { ref } = await socket.ok("sessions/fork", { handle, entryId: "e1" });
-		expect(ref).toEqual({ backend: "codex", id: `${CODEX_SESSION.id}#fork-e1` });
-	});
-
-	it("refuses backend_refused with the backend's reason when it refuses the fork (OW-rasiwa)", async () => {
+	it("refuses backend_refused with the backend's reason when it refuses the fork, naming none (OW-rasiwa)", async () => {
 		build({
+			forkPoints: [{ id: "e1", text: "first", index: 0 }],
 			onFork() {
 				throw new BackendRefusedError("Invalid entry ID for forking");
 			},
 		});
 		const { socket, handle } = await attached();
-		const reply = await socket.refused("sessions/fork", { handle, entryId: "no-such-entry" });
+		const reply = await socket.refused("sessions/forkAndPrompt", { handle, index: 0, text: "again" });
 		expect(reply).toEqual({ type: "reply", id: reply.id, ok: false, code: "backend_refused", detail: "Invalid entry ID for forking" });
 		expect(pi.forRef(PI_SESSION)?.forks).toEqual([]);
 	});
@@ -1042,7 +1038,6 @@ describe("commands that name a handle (D31 point 9)", () => {
 			["sessions/setEffort", { effort: "low" }],
 			["sessions/setName", { name: "probe name" }],
 			["sessions/forkPoints", {}],
-			["sessions/fork", { entryId: "e1" }],
 			["sessions/forkAndPrompt", { index: 0, text: "x" }],
 		];
 		for (const [cmd, params] of commands) {
@@ -1092,7 +1087,6 @@ describe("commands that name a handle (D31 point 9)", () => {
 			["sessions/setEffort", { effort: "low" }],
 			["sessions/setName", { name: "n" }],
 			["sessions/forkPoints", {}],
-			["sessions/fork", { entryId: "e1" }],
 			["sessions/forkAndPrompt", { index: 0, text: "x" }],
 		];
 		for (const [cmd, params] of commands) {

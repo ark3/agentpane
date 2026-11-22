@@ -120,7 +120,6 @@ function fakeServer(script: Script = {}): SocketServer {
 		"sessions/list": () => ({ sessions: [summary(ref)] }),
 		"sessions/create": (_params, server) => ({ session: server.attached(ref) }),
 		"draft/edit": () => ({ text: "edited draft" }),
-		"sessions/fork": () => ({ ref: forkedRef }),
 		"sessions/forkAndPrompt": (_params, server) => ({ session: server.attached(forkedRef), disposition: "started" }),
 		...script,
 	});
@@ -2242,7 +2241,6 @@ describe("client controller", () => {
 		expect(server.on["sessions/forkAndPrompt"]).toHaveBeenCalledExactlyOnceWith({ handle: h(ref), index: 2, text: "reworded" });
 		expect(server.on["sessions/forkPoints"]).not.toHaveBeenCalledWith({ handle: h(ref) });
 		expect(server.on["sessions/abort"]).not.toHaveBeenCalled();
-		expect(server.on["sessions/fork"]).not.toHaveBeenCalled();
 		expect(server.on["sessions/attach"]).not.toHaveBeenCalled();
 		expect(server.on["sessions/prompt"]).not.toHaveBeenCalled();
 		expect(controller.getView().draft).toBe("");

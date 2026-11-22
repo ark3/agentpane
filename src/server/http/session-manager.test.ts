@@ -1140,7 +1140,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	});
 
 	it("puts no fork's container into the table for a session closed while its fork was in flight", async () => {
-		// `sessions/close` and `sessions/fork` each run as their frame arrives
+		// `sessions/close` and `sessions/forkAndPrompt` each run as their frame arrives
 		// (socket.ts), and a close does not queue behind a fork
 		// (`SessionManager.#serially`); nothing serializes them. `close()` empties the
 		// table before its first await, and the adapter announces its move long

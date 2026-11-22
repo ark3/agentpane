@@ -28,7 +28,7 @@
 
 (defconst agentpane-test--live-methods
   '(sessions/abort sessions/compact sessions/dismissError sessions/setModel
-    sessions/setEffort sessions/setName sessions/forkPoints sessions/fork
+    sessions/setEffort sessions/setName sessions/forkPoints
     sessions/forkAndPrompt)
   "The helper's methods on a live session, each of which it sends the
 server under the handle the request's view is bound to (`ViewParams' in
@@ -2328,9 +2328,8 @@ shows.  A session with no nodes never shows it."
 (defmacro agentpane-test--forking (points forked &rest body)
   "Run BODY with every request answered as the helper would: POINTS for
 `sessions/forkPoints', saying a fork stops a running turn where BODY has
-set `fork-stops', FORKED for `sessions/fork', for
-`sessions/forkAndPrompt' whatever BODY has put in `fork-prompted', else
-FORKED's summary under the handle \"h-fork\" and a started prompt, a summary of the ref
+set `fork-stops', for `sessions/forkAndPrompt' whatever BODY has put in
+`fork-prompted', else FORKED's summary under the handle \"h-fork\" and a started prompt, a summary of the ref
 asked for for `sessions/attach', under the handle \"h-ID\" for the ref's
 ID, unless BODY has put a summary of its own in `attached', the fixed nodes for `sessions/preview', and for
 `sessions/list' nil, for `sessions/prompt' whatever BODY has put in
@@ -2406,7 +2405,6 @@ them, is refused so at once and recorded nowhere
                          (reply (pcase method
                                   ('sessions/forkPoints (list :points ,points
                                                               :forkStopsTurn (if fork-stops t :json-false)))
-                                  ('sessions/fork ,forked)
                                   ('sessions/forkAndPrompt
                                    (or fork-prompted
                                        (list :session (list :ref ,forked :handle "h-fork")
@@ -2475,7 +2473,7 @@ them, is refused so at once and recorded nowhere
 (defmacro agentpane-test--with-helper (&rest body)
   "Run BODY with a helper connection that counts as running, so a buffer
 whose `agentpane--attached' is `agentpane--connection' is attached, and
-`agentpane-fork' forks there rather than attaching first."
+`agentpane-edit' edits there rather than attaching first."
   (declare (indent 0))
   `(let ((agentpane--connection 'connection))
      (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t)))
@@ -2490,291 +2488,6 @@ whose `agentpane--attached' is `agentpane--connection' is attached, and
                                 (push node nodes)
                                 (setq node (ewoc-next agentpane--ewoc node)))
                               nodes))))
-
-(ert-deftest agentpane-test-fork-at-a-fork-point ()
-  "`agentpane-fork' on the node a fork point names sends `sessions/fork'
-with that point's id, and opens the fork in a buffer of its own, attached,
-leaving this one holding its session, and on Codex still attached."
-  (let ((ref '(:backend "codex" :id "t1"))
-        (forked '(:backend "codex" :id "t2")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "turn-0" :text "Fix the bug" :index 0) (:id "turn-2" :text "More" :index 2)]
-          forked
-        (agentpane-test--with-session ref
-          (setq agentpane--attached 'connection
-                agentpane--handle "h1")
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (should (equal (assq 'sessions/fork sent)
-                         `(sessions/fork :session ,ref :view ,(agentpane-test--view buffer) :entryId "turn-0")))
-          (should (equal (assq 'sessions/attach sent)
-                         `(sessions/attach :session ,forked :view ,(agentpane-test--view (agentpane--buffer-for forked)))))
-          (let ((fork-buffer (agentpane--buffer-for forked)))
-            (should fork-buffer)
-            (should-not (eq fork-buffer buffer))
-            (should (agentpane--same-ref-p
-                     (agentpane--ref (buffer-local-value 'agentpane--session buffer)) ref))
-            (should (eq (buffer-local-value 'agentpane--attached buffer) 'connection))))))))
-
-(ert-deftest agentpane-test-fork-at-no-fork-point ()
-  "`agentpane-fork' on a node no fork point names sends no `sessions/fork'
-and says the message is not forkable."
-  (let ((ref '(:backend "codex" :id "t1")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "turn-0" :text "Fix the bug" :index 0)]
-          '(:backend "codex" :id "t2")
-        (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection
-                agentpane--handle "h1")
-          (agentpane-test--goto-index 1)
-          (agentpane-fork)
-          (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
-          (should (seq-some (lambda (text) (string-search "not forkable" text)) said)))))))
-
-(ert-deftest agentpane-test-pi-fork-detaches-the-parent ()
-  "A Pi fork, which leaves its parent detached on the server, detaches the
-parent from the helper, so the helper stops feeding a buffer that counts
-itself detached; and the parent buffer, not attached, refuses to compact
-and sends nothing, as it refuses to stop a turn, since `sessions/compact'
-answers only for an attached session.  Until ark3/agentpane#71 it
-attached first."
-  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
-        (forked '(:backend "pi" :id "/s/fork.jsonl"))
-        (agentpane--connection 'connection))
-    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t)))
-      (agentpane-test--forking
-          [(:id "entry-0" :text "Fix the bug" :index 0)]
-          forked
-        (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection
-                agentpane--handle "h1")
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (should (equal (mapcar #'car (reverse sent))
-                         '(sessions/forkPoints sessions/fork sessions/detach
-                           sessions/attach)))
-          (should (equal (assq 'sessions/detach sent)
-                         `(sessions/detach :session ,ref :view ,(agentpane-test--view buffer))))
-          (setq sent nil)
-          (with-current-buffer buffer
-            (should-error (agentpane-compact) :type 'user-error))
-          (should-not sent))))))
-
-(ert-deftest agentpane-test-pi-fork-leaves-the-parent-as-it-was ()
-  "A Pi fork leaves the parent buffer showing the transcript it showed, and
-fetches nothing to redraw it: the server sends the fork's shortened
-transcript under the fork's ref, never the parent's (OW-zovaye)."
-  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
-        (forked '(:backend "pi" :id "/s/fork.jsonl")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "entry-0" :text "Fix the bug" :index 0)]
-          forked
-        (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection
-                agentpane--handle "h1")
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (should (agentpane--buffer-for forked))
-          (should-not (assq 'sessions/preview sent))
-          (with-current-buffer buffer
-            (should-not (agentpane--attached-p))
-            (should (equal (agentpane-test--indices) '(0 1)))))))))
-
-(ert-deftest agentpane-test-pi-fork-detaches-the-parent-by-its-view ()
-  "A Pi fork detaches its parent from the helper by the parent's view
-alone, sending no handle (D32 point 1); and the fork's buffer holds the
-handle its own attach answered.  Until D32 the detach carried the token
-of every attach the parent sent (OW-nowihu)."
-  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
-        (forked '(:backend "pi" :id "/s/fork.jsonl")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "entry-0" :text "Fix the bug" :index 0)]
-          forked
-        (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection
-                agentpane--handle "h1"
-                attached (list :ref forked :handle "h2"))
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (should (equal (assq 'sessions/detach sent)
-                         `(sessions/detach :session ,ref :view ,(agentpane-test--view buffer))))
-          (should (equal (buffer-local-value 'agentpane--handle (agentpane--buffer-for forked))
-                         "h2")))))))
-
-(ert-deftest agentpane-test-pi-fork-parent-detached-before-the-reply-previews ()
-  "A `session/detached' for a Pi fork's parent that lands before the
-`sessions/fork' reply -- the server's `ended' for the parent's handle
-goes out inside the fork, ahead of its answer (D26) -- leaves the parent
-not attached once the reply lands, so `g' previews it rather than
-attaching its old branch again, the edge OW-wabiju found when a flag
-marked such a buffer to attach at `g'.  The reply sends no detach: the
-buffer no longer holds the handle the fork went from, and the helper
-unbound its view at the `ended' (`agentpane--forked-away').  Until
-ark3/agentpane#71 the reply detached it anyway."
-  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
-        (forked '(:backend "pi" :id "/s/fork.jsonl")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "entry-0" :text "Fix the bug" :index 0)]
-          forked
-        (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection
-                agentpane--handle "h1"
-                attached (list :ref forked :handle "h2")
-                hold '(sessions/fork))
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (agentpane--on-notification nil 'session/detached (list :view (agentpane-test--view buffer) :session ref :handle "h1"))
-          (funcall (cdr (pop held)) t)
-          (should-not (assq 'sessions/detach sent))
-          (with-current-buffer buffer
-            (should-not (agentpane--attached-p))
-            (setq sent nil)
-            (agentpane-refetch)
-            (should (equal sent `((sessions/preview :session ,ref))))))))))
-
-(ert-deftest agentpane-test-fork-in-flight-refuses-a-second ()
-  "A second `agentpane-fork' while one is in flight says so and sends
-nothing; a fork that failed, or finished, frees the buffer for another."
-  (let ((ref '(:backend "codex" :id "t1")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "turn-0" :text "Fix the bug" :index 0)]
-          '(:backend "codex" :id "t2")
-        (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection
-                agentpane--handle "h1")
-          (setq hold '(sessions/forkPoints))
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (should-error (agentpane-fork) :type 'user-error)
-          (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
-          (funcall (cdr (pop held)) nil)
-          (agentpane-fork)
-          (should (equal (mapcar #'car sent) '(sessions/forkPoints sessions/forkPoints)))
-          (setq hold nil)
-          (funcall (cdr (pop held)) t)
-          (with-current-buffer buffer
-            (agentpane-test--goto-index 0)
-            (agentpane-fork))
-          (should (equal (car (car sent)) 'sessions/attach))
-          (should (= 3 (seq-count (lambda (s) (eq (car s) 'sessions/forkPoints)) sent))))))))
-
-(ert-deftest agentpane-test-fork-shows-in-the-parents-window ()
-  "The fork is shown in the window that showed the parent when the fork
-began, not in whichever window is selected when its reply lands."
-  (let ((ref '(:backend "codex" :id "t1"))
-        (forked '(:backend "codex" :id "t2")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "turn-0" :text "Fix the bug" :index 0)]
-          forked
-        (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection
-                agentpane--handle "h1")
-          (delete-other-windows)
-          (switch-to-buffer buffer)
-          (let ((parent-window (selected-window))
-                (notes (get-buffer-create " *agentpane-test notes*")))
-            (setq hold '(sessions/fork))
-            (agentpane-test--goto-index 0)
-            (agentpane-fork)
-            (select-window (split-window))
-            (switch-to-buffer notes)
-            (funcall (cdr (assq 'sessions/fork held)) t)
-            (should (eq (window-buffer parent-window) (agentpane--buffer-for forked)))
-            (should (eq (window-buffer (selected-window)) notes))))))))
-
-(defun agentpane-test--fork-streaming (backend)
-  "Fork a BACKEND session at index 0 while a `session/status' says it is
-streaming, holding any abort's reply.  Return the methods sent before that
-reply is released, and those sent after, in order."
-  (let ((ref (list :backend backend :id "parent")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "entry-0" :text "Fix the bug" :index 0)]
-          (list :backend backend :id "fork")
-        (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection
-                agentpane--handle "h1")
-          (setq hold '(sessions/abort))
-          (agentpane--on-notification
-           nil 'session/status (list :view agentpane--view :session ref :handle "h1" :isStreaming t :compaction nil :model nil))
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (let ((before (mapcar #'car (reverse sent))))
-            (setq sent nil)
-            (dolist (entry held) (funcall (cdr entry) t))
-            (list before (mapcar #'car (reverse sent)))))))))
-
-(ert-deftest agentpane-test-fork-aborts-a-streaming-pi-turn ()
-  "A fork of a streaming Pi session aborts the turn and forks only once the
-abort has answered, as the browser does (D15); a streaming Codex session is
-forked with no abort."
-  (should (equal (agentpane-test--fork-streaming "pi")
-                 '((sessions/forkPoints sessions/abort)
-                   (sessions/fork sessions/detach sessions/attach))))
-  (should (equal (agentpane-test--fork-streaming "codex")
-                 '((sessions/forkPoints sessions/fork sessions/attach) nil))))
-
-(ert-deftest agentpane-test-fork-on-a-preview-attaches-first ()
-  "`agentpane-fork' on a previewed buffer, whose stored index names another
-message among the live fork points, as a Pi preview that drops a
-`custom_message' does, forks nothing: it attaches, and says to press again.
-Pressed again once the live snapshot has redrawn the buffer, it forks at
-the message it is on."
-  (let ((ref '(:backend "pi" :id "/s/parent.jsonl")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "entry-custom" :text "A custom message" :index 0)
-           (:id "entry-fix" :text "Fix the bug" :index 1)]
-          '(:backend "pi" :id "/s/fork.jsonl")
-        (agentpane-test--with-session ref
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (should (equal (mapcar #'car sent) '(sessions/attach)))
-          (should (seq-some (lambda (text) (string-search "press f again" text)) said))
-          (agentpane--on-notification
-           agentpane--connection 'session/snapshot
-           (list :view agentpane--view :session ref :handle "h-/s/parent.jsonl"
-                 :nodes (vector '(:index 0 :role "custom"
-                                  :parts [(:type "text" :text "A custom message"
-                                           :html "<p>A custom message</p>\n")])
-                                (plist-put (copy-sequence (aref agentpane-test--nodes 0))
-                                           :index 1))
-                 :isStreaming :json-false :compaction nil :model nil))
-          (agentpane-test--goto-index 1)
-          (setq sent nil)
-          (agentpane-fork)
-          (should (equal (assq 'sessions/fork sent)
-                         `(sessions/fork :session ,ref :view ,(agentpane-test--view buffer) :entryId "entry-fix"
-                                         :unwatch t))))))))
-
-(ert-deftest agentpane-test-fork-while-attaching-attaches-again ()
-  "A second `agentpane-fork' on a previewed buffer while the first one's
-attach is in flight sends an attach of its own, which the helper joins to
-the first (D32 point 4), and forks nothing; attaches that fail say
-nothing of pressing again.  Until ark3/agentpane#71 the second press was
-refused, saying the session was still attaching."
-  (let ((ref '(:backend "codex" :id "t1")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "turn-0" :text "Fix the bug" :index 0)]
-          '(:backend "codex" :id "t2")
-        (agentpane-test--with-session ref
-          (setq hold '(sessions/attach))
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (agentpane-fork)
-          (should (equal (mapcar #'car sent) '(sessions/attach sessions/attach)))
-          (funcall (cdr (pop held)) nil)
-          (funcall (cdr (pop held)) nil)
-          (should-not (seq-some (lambda (text) (string-search "press f again" text)) said))
-          (should-not (assq 'sessions/fork sent)))))))
 
 (ert-deftest agentpane-test-attach-on-a-preview-attaches-and-goes-to-the-prompt ()
   "`agentpane-attach' on a previewed buffer holding a draft sends
@@ -2819,85 +2532,6 @@ again on the attached buffer it sends nothing and moves point there."
               (agentpane-attach)
               (should-not sent)
               (should (= (point) (point-max))))))))))
-
-(ert-deftest agentpane-test-attach-during-a-fork-sends-nothing ()
-  "`agentpane-attach' on a buffer let go of while a fork of it is in
-flight, as a Pi fork's parent is once the server's `ended' has come and
-before the fork's reply, is refused and sends nothing: its attach would
-spawn the parent's old branch again."
-  (agentpane-test--detached
-    (with-current-buffer buffer
-      (setq agentpane--forking t)
-      (should-error (agentpane-attach) :type 'user-error)
-      (should-not sent))))
-
-(ert-deftest agentpane-test-refetch-during-a-fork-sends-nothing ()
-  "A refetch while a Pi fork is in flight says so and sends nothing, so no
-re-attach of the parent can reach the server after it has let go of the
-parent and respawn the parent's old branch, which the fork's reply leaves
-running with nothing listening; see `agentpane-fork'."
-  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
-        (forked '(:backend "pi" :id "/s/fork.jsonl")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "entry-0" :text "Fix the bug" :index 0)]
-          forked
-        (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection
-                agentpane--handle "h1")
-          (setq hold '(sessions/fork sessions/attach))
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (agentpane-refetch)
-          (funcall (cdr (assq 'sessions/fork held)) t)
-          (dolist (entry held)
-            (when (eq (car entry) 'sessions/attach) (funcall (cdr entry) t)))
-          (with-current-buffer buffer
-            (should-not (agentpane--attached-p)))
-          (should (seq-some (lambda (text) (string-search "fork of this session" text)) said))
-          (should (equal (mapcar #'car (reverse sent))
-                         '(sessions/forkPoints sessions/fork sessions/detach
-                           sessions/attach))))))))
-
-(ert-deftest agentpane-test-send-and-compact-during-a-pi-fork-send-nothing ()
-  "`agentpane-send' and `agentpane-compact' on a Pi fork's parent the
-helper has let go of while the fork is in flight -- the server's `ended'
-for the parent's handle goes out inside the fork, ahead of its reply
-\(D26) -- are refused and send nothing, the draft and the status left as
-they were and the buffer not left sending.  Each would attach the
-parent's ref, respawning its old branch, which the fork's reply then
-detaches, leaving that process running with nothing listening (OW-nuhayu).
-The fork's reply then sends only the fork's attach, the parent holding no
-handle to detach (`agentpane--forked-away')."
-  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
-        (forked '(:backend "pi" :id "/s/fork.jsonl")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking
-          [(:id "entry-0" :text "Fix the bug" :index 0)]
-          forked
-        (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection
-                agentpane--handle "h1"
-                hold '(sessions/fork))
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (agentpane--on-notification nil 'session/detached (list :view (agentpane-test--view buffer) :session ref :handle "h1"))
-          (setq sent nil)
-          (with-current-buffer buffer
-            (should-not (agentpane--attached-p))
-            (goto-char (point-max))
-            (insert "Carry on")
-            (should-error (agentpane-send) :type 'user-error)
-            (should-error (agentpane-compact) :type 'user-error)
-            (should-not sent)
-            (should-not agentpane--sending)
-            (should-not (plist-get agentpane--status :compaction))
-            (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
-                           "Carry on")))
-          (funcall (cdr (pop held)) t)
-          (should (equal (reverse sent)
-                         `((sessions/attach :session ,forked
-                                            :view ,(agentpane-test--view (agentpane--buffer-for forked)))))))))))
 
 ;;;; Editing an earlier message, against a stub connection
 
@@ -2978,7 +2612,7 @@ displaced and forks nothing: the next send prompts the session itself."
           (agentpane-cancel-edit)
           (should (equal (agentpane-test--draft) "a draft"))
           (agentpane-send)
-          (should-not (assq 'sessions/fork sent))
+          (should-not (assq 'sessions/forkAndPrompt sent))
           (let ((prompt (assq 'sessions/prompt sent)))
             (should (equal (plist-get (cdr prompt) :session) ref))
             (should (equal (plist-get (cdr prompt) :text) "a draft"))
@@ -3020,7 +2654,7 @@ the request answers the region holds the text being sent."
 (ert-deftest agentpane-test-edit-refused-at-the-press ()
   "`agentpane-edit' on a message no fork point names fills nothing and says
 it is not forkable; on a previewed buffer it attaches, fills nothing, and
-says to press again, as `agentpane-fork' does."
+says to press again."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-helper
       (agentpane-test--forking
@@ -3039,6 +2673,26 @@ says to press again, as `agentpane-fork' does."
           (should (seq-some (lambda (text) (string-search "not forkable" text)) said))
           (should (equal (agentpane-test--draft) ""))
           (should-not agentpane--editing))))))
+
+(ert-deftest agentpane-test-f-starts-the-edit ()
+  "`f' on a user message a fork point names takes it into the prompt
+region as an edit, as `e' does, and sends nothing but the press's
+`sessions/forkPoints': the fork goes only with the edit's send (D33
+point 1)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0)]
+          '(:backend "codex" :id "t2")
+        (agentpane-test--with-session ref
+          (agentpane--draw agentpane-test--image-nodes)
+          (setq agentpane--attached 'connection
+                agentpane--handle "h1")
+          (agentpane-test--goto-index 0)
+          (call-interactively (key-binding (kbd "f") t nil (point)))
+          (should agentpane--editing)
+          (should (equal (agentpane-test--draft) "Fix the bug"))
+          (should (equal (mapcar #'car sent) '(sessions/forkPoints))))))))
 
 (defmacro agentpane-test--editing (backend &rest body)
   "Run BODY in a buffer attached to a session on BACKEND, drawn with
@@ -3064,6 +2718,138 @@ which BODY may set; `sent' starts empty once the edit is open."
 (defun agentpane-test--count (method sent)
   "How many of the requests SENT went out as METHOD."
   (seq-count (lambda (entry) (eq (car entry) method)) sent))
+
+(ert-deftest agentpane-test-pi-fork-detaches-the-parent ()
+  "An edit's send on Pi, whose fork leaves its parent detached on the
+server, detaches the parent from the helper at the reply, so the helper
+stops feeding a buffer that counts itself detached; and the parent
+buffer, not attached, refuses to compact and sends nothing, as it refuses
+to stop a turn, since `sessions/compact' answers only for an attached
+session.  Until ark3/agentpane#71 it attached first, and until
+ark3/agentpane#75 this was tested on `f''s fork with nothing sent."
+  (agentpane-test--editing "pi"
+    (agentpane-send)
+    (should (equal (mapcar #'car (reverse sent))
+                   '(sessions/forkAndPrompt sessions/detach)))
+    (should (equal (assq 'sessions/detach sent)
+                   `(sessions/detach :session (:backend "pi" :id "parent")
+                                     :view ,(agentpane-test--view buffer))))
+    (setq sent nil)
+    (with-current-buffer buffer
+      (should-error (agentpane-compact) :type 'user-error))
+    (should-not sent)))
+
+(ert-deftest agentpane-test-pi-fork-leaves-the-parent-as-it-was ()
+  "An edit's send on Pi leaves the parent buffer showing the transcript it
+showed, and fetches nothing to redraw it: the server sends the fork's
+shortened transcript under the fork's ref, never the parent's
+\(OW-zovaye)."
+  (agentpane-test--editing "pi"
+    (agentpane-send)
+    (should (agentpane--buffer-for '(:backend "pi" :id "fork")))
+    (should-not (assq 'sessions/preview sent))
+    (with-current-buffer buffer
+      (should-not (agentpane--attached-p))
+      (should (equal (agentpane-test--indices) '(0 1))))))
+
+(ert-deftest agentpane-test-pi-fork-detaches-the-parent-by-its-view ()
+  "An edit's send on Pi detaches its parent from the helper by the
+parent's view alone, sending no handle (D32 point 1); and the fork's
+buffer holds the handle its own snapshot gave.  Until D32 the detach
+carried the token of every attach the parent sent (OW-nowihu)."
+  (agentpane-test--editing "pi"
+    (setq fork-prompted (list :session (list :ref '(:backend "pi" :id "fork") :handle "h2")
+                              :disposition "started"))
+    (agentpane-send)
+    (should (equal (assq 'sessions/detach sent)
+                   `(sessions/detach :session (:backend "pi" :id "parent")
+                                     :view ,(agentpane-test--view buffer))))
+    (should (equal (buffer-local-value 'agentpane--handle
+                                       (agentpane--buffer-for '(:backend "pi" :id "fork")))
+                   "h2"))))
+
+(ert-deftest agentpane-test-pi-fork-parent-detached-before-the-reply-previews ()
+  "A `session/detached' for a Pi fork's parent that lands before the
+`sessions/forkAndPrompt' reply -- the server's `ended' for the parent's
+handle goes out inside the fork, ahead of its answer (D26) -- leaves the
+parent not attached once the reply lands, so `g' previews it rather than
+attaching its old branch again, the edge OW-wabiju found when a flag
+marked such a buffer to attach at `g'.  The reply sends no detach: the
+buffer no longer holds the handle the fork went from, and the helper
+unbound its view at the `ended' (`agentpane--forked-away').  Until
+ark3/agentpane#71 the reply detached it anyway."
+  (agentpane-test--editing "pi"
+    (let ((ref '(:backend "pi" :id "parent")))
+      (setq hold '(sessions/forkAndPrompt))
+      (agentpane-send)
+      (agentpane--on-notification nil 'session/detached
+                                  (list :view (agentpane-test--view buffer) :session ref
+                                        :handle "h-parent"))
+      (funcall (cdr (pop held)) t)
+      (should-not (assq 'sessions/detach sent))
+      (with-current-buffer buffer
+        (should-not (agentpane--attached-p))
+        (setq sent nil)
+        (agentpane-refetch)
+        (should (equal sent `((sessions/preview :session ,ref))))))))
+
+(ert-deftest agentpane-test-fork-on-a-preview-attaches-first ()
+  "`f' on a previewed buffer, whose stored index names another message
+among the live fork points, as a Pi preview that drops a `custom_message'
+does, edits nothing: it attaches, and says to press `f' again.  Pressed
+again once the live snapshot has redrawn the buffer, it edits the message
+it is on, and the send forks at that message's live index."
+  (let ((ref '(:backend "pi" :id "/s/parent.jsonl")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-custom" :text "A custom message" :index 0)
+           (:id "entry-fix" :text "Fix the bug" :index 1)]
+          '(:backend "pi" :id "/s/fork.jsonl")
+        (agentpane-test--with-session ref
+          (switch-to-buffer buffer)
+          (agentpane-test--goto-index 0)
+          (execute-kbd-macro (kbd "f"))
+          (should (equal (mapcar #'car sent) '(sessions/attach)))
+          (should (seq-some (lambda (text) (string-search "press f again" text)) said))
+          (should-not agentpane--editing)
+          (agentpane--on-notification
+           agentpane--connection 'session/snapshot
+           (list :view agentpane--view :session ref :handle "h-/s/parent.jsonl"
+                 :nodes (vector '(:index 0 :role "custom"
+                                  :parts [(:type "text" :text "A custom message"
+                                           :html "<p>A custom message</p>\n")])
+                                (plist-put (copy-sequence (aref agentpane-test--nodes 0))
+                                           :index 1))
+                 :isStreaming :json-false :compaction nil :model nil))
+          (agentpane-test--goto-index 1)
+          (setq sent nil)
+          (execute-kbd-macro (kbd "f"))
+          (should (equal (agentpane-test--draft) "Fix the bug"))
+          (agentpane-send)
+          (should (equal (plist-get (cdr (assq 'sessions/forkAndPrompt sent)) :index) 1)))))))
+
+(ert-deftest agentpane-test-fork-while-attaching-attaches-again ()
+  "A second `f' on a previewed buffer while the first one's attach is in
+flight sends an attach of its own, which the helper joins to the first
+\(D32 point 4), and edits nothing; attaches that fail say nothing of
+pressing again.  Until ark3/agentpane#71 the second press was refused,
+saying the session was still attaching."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0)]
+          '(:backend "codex" :id "t2")
+        (agentpane-test--with-session ref
+          (switch-to-buffer buffer)
+          (setq hold '(sessions/attach))
+          (agentpane-test--goto-index 0)
+          (execute-kbd-macro (kbd "f"))
+          (execute-kbd-macro (kbd "f"))
+          (should (equal (mapcar #'car sent) '(sessions/attach sessions/attach)))
+          (funcall (cdr (pop held)) nil)
+          (funcall (cdr (pop held)) nil)
+          (should-not (seq-some (lambda (text) (string-search "press f again" text)) said))
+          (should-not agentpane--editing))))))
 
 (ert-deftest agentpane-test-edit-send-in-flight-refuses-a-second ()
   "A second send while an edit's send is in flight says so and sends
@@ -3842,19 +3628,6 @@ with nothing attached leaves the buffer not attached (D30)."
     (should-not (agentpane--attached-p))
     (should-not agentpane--sending)
     (should (equal (agentpane-test--draft) "hello"))))
-
-(ert-deftest agentpane-test-detached-send-refused-while-a-plain-fork-is-out ()
-  "A detached buffer's send attaches its session, so it is refused, sending
-nothing and leaving the buffer free, while a plain fork is in flight, as
-an attach is (`agentpane--refuse-forking').  Neither a close nor an
-edit's fork in flight refuses it here since ark3/agentpane#71: the
-server waits a close's disposal out (D32 point 5), and the helper
-refuses an attach of a session an edit forks (D32 point 4)."
-  (agentpane-test--sending-detached
-    (setq agentpane--forking t)
-    (should-error (agentpane-send) :type 'user-error)
-    (should-not sent)
-    (should-not agentpane--sending)))
 
 (ert-deftest agentpane-test-send-while-attaching-goes-out-at-once ()
   "A send while the buffer's own attach is in flight goes out at once, one
@@ -4658,8 +4431,7 @@ nothing (`agentpane-test-close-session-sent-while-an-attach-is-out')."
                           nil 'session/status
                           (list :view agentpane--view :session ref :handle "h1" :isStreaming :json-false
                                 :compaction "running" :model "luna")))
-                       (lambda (_) (setq agentpane--sending t))
-                       (lambda (_) (setq agentpane--forking t))))
+                       (lambda (_) (setq agentpane--sending t))))
     (agentpane-test--closing
       (with-current-buffer buffer
         (funcall setup ref)
@@ -4713,7 +4485,6 @@ server refuses (OW-kametu), even with a notice drawn."
                           (list :view agentpane--view :session ref :handle "h1" :isStreaming :json-false
                                 :compaction "running" :model "luna")))
                        (lambda (_) (setq agentpane--sending t))
-                       (lambda (_) (setq agentpane--forking t))
                        (lambda (ref)
                          (agentpane--on-notification
                           agentpane--connection 'session/snapshot
@@ -6172,32 +5943,37 @@ same for the helper's own answer at its socket's close."
           (should-not (agentpane-test--said-p "the helper exited" said)))))))
 
 (ert-deftest agentpane-test-fork-answered-as-its-helper-dies-is-shown ()
-  "A fork whose reply is among the last messages a dying helper wrote
-opens the fork's buffer and shows it, not attached, so a `g' can bring it
-back: the fork's attach, made in the gap before the teardown, sends
-nothing and fails at once, said once, and nothing signals from jsonrpc.el's timer.  Refused by
-`agentpane--connection' there, as until OW-hiliti, the attach signalled
-out of the reply's callback, Emacs reported `Error running timer', and
-the fork's buffer, made, was never shown."
+  "An edit's send whose reply is among the last messages a dying helper
+wrote, with no snapshot of the fork before it, shows the fork's buffer,
+made before the request, in the parent's window, holding the fork's ref
+from the reply and not attached, so a `g' can bring it back; the
+teardown keeps it, the reply having made it, and nothing signals from
+jsonrpc.el's timer.  Until OW-hiliti the plain fork's attach in the gap
+before the teardown signalled out of the reply's callback, Emacs
+reported `Error running timer', and the fork's buffer, made, was never
+shown; until ark3/agentpane#75 this was that plain fork's."
   (let ((forked '(:backend "codex" :id "t2"))
         (window (selected-window))
         fork-buffer)
     (unwind-protect
         (agentpane-test--outliving
-            (list (list :jsonrpc "2.0" :id 1 :result forked))
+            (list (list :jsonrpc "2.0" :id 1
+                        :result (list :session (list :ref forked :handle "h-fork")
+                                      :disposition "started")))
           (agentpane-test--noting
-            (setq agentpane--forking t)
-            (agentpane--fork-at ref '(:id "turn-0") window nil)
+            (set-window-buffer window buffer)
+            (setq agentpane--handle "h1")
+            (agentpane--start-edit (aref agentpane-test--nodes 0))
+            (agentpane--send-edit "Fix it properly" #'ignore)
             (agentpane-test--heard-out agentpane--connection)
             (setq fork-buffer (agentpane--buffer-for forked))
             (should fork-buffer)
             (should (eq (window-buffer window) fork-buffer))
             (with-current-buffer fork-buffer
               (should-not agentpane--attached))
-            (should-not agentpane--forking)
-            (should-not (agentpane-test--said-p "Error running timer" said))
-            (should (= 1 (seq-count (lambda (message) (string-search "sessions/attach failed" message))
-                                    said)))))
+            (should-not agentpane--sending)
+            (should-not agentpane--editing)
+            (should-not (agentpane-test--said-p "Error running timer" said))))
       (when (buffer-live-p fork-buffer)
         (kill-buffer fork-buffer)))))
 
@@ -6470,35 +6246,6 @@ reply is handed on (OW-tifiva), as in wire order
       (should (string-search "anxious continuation" (buffer-string))))
     (should-not (agentpane--attached-p))
     (should-not agentpane--handle)))
-
-(ert-deftest agentpane-test-turn-done-not-raised-by-a-pi-fork ()
-  "A plain fork of a streaming Pi session sends its abort with `unwatch',
-and every plain Pi fork sends its fork with it too, since the fork stops
-a turn not yet read streaming as well, so the helper drops the parent's
-turn-done watch before the stop, and
-neither that turn's not-streaming status nor the parent's ended handle
-raises the indicator for a turn the user stopped on purpose (OW-dunahe,
-D32 point 6); ark3/agentpane#17 retires both with this fork.  A Codex
-fork aborts nothing and keeps the parent's turn running, and so
-unwatches nothing."
-  (dolist (backend '("pi" "codex"))
-    (let ((ref (list :backend backend :id "parent")))
-      (agentpane-test--with-helper
-        (agentpane-test--forking
-            [(:id "entry-0" :text "Fix the bug" :index 0)]
-            (list :backend backend :id "fork")
-          (agentpane-test--with-session ref
-            (setq agentpane--attached agentpane--connection
-                  agentpane--handle "h1")
-            (agentpane--on-notification
-             nil 'session/status (list :view agentpane--view :session ref :handle "h1" :isStreaming t))
-            (agentpane-test--goto-index 0)
-            (agentpane-fork)
-            (should (equal (alist-get 'sessions/abort sent)
-                           (and (equal backend "pi")
-                                (list :session ref :view agentpane--view :unwatch t))))
-            (should (eq (plist-get (alist-get 'sessions/fork sent) :unwatch)
-                        (equal backend "pi")))))))))
 
 (ert-deftest agentpane-test-turn-done-across-an-edit-send ()
   "An edit sent where the fork stops the parent's running turn carries

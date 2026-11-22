@@ -309,15 +309,6 @@ const api: AgentpaneApi = {
 	async forkAndPrompt(): Promise<never> {
 		throw new Error("this harness sends no edit");
 	},
-	/**
-	 * A self-fork: this harness drives one session, and what the browser is here
-	 * for is the composer's mode row and the edit control's place in the block
-	 * action row, not the backends' fork asymmetry -- which is the server's, and
-	 * is settled live in MANUAL_TESTING.md.
-	 */
-	async fork() {
-		return REF;
-	},
 	async dismissError(_handle, dismissed) {
 		if (errorId !== dismissed) return;
 		errorId = null;

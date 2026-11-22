@@ -101,9 +101,9 @@
  * helper refuses itself arms nothing. A fork and prompt arms the fork's
  * handle at its reply, unless handled, and with `stops` abandons the
  * parent's as it goes out, as the browser reads `stopsBeforeFork`.
- * `unwatch` on `sessions/abort` and on `sessions/fork` abandons the view's
- * watch before the request goes out, for agentpane-mode's plain Pi fork,
- * until ark3/agentpane#17 retires it.
+ * Until ark3/agentpane#75 an `unwatch` bit on `sessions/abort` and on the
+ * plain fork command abandoned it for agentpane-mode's plain Pi fork, and
+ * went with that fork (D33).
  * A view's detach, a gap and a close's reply abandon the watch on the
  * handle, raising nothing (D25 point 5); the server's `ended` raises a
  * watch that has seen streaming, which the browser leaves waiting, a
@@ -859,14 +859,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 					throw error;
 				}
 			}),
-		// `unwatch`, from agentpane-mode's plain Pi fork, drops the view's
-		// turn-done watch first, the user having stopped that turn on purpose
-		// (D32 point 6); ark3/agentpane#17 retires it with that fork.
-		"sessions/abort": async ({ view, unwatch: drop }) => {
-			const handle = liveHandle(view);
-			if (drop) unwatch(handle);
-			return (await api.abort(handle)) ?? null;
-		},
+		"sessions/abort": async ({ view }) => (await api.abort(liveHandle(view))) ?? null,
 		// A view's compact still out holds its sends and a second compact,
 		// `busy`, as the browser's `compacting` holds Send and Compact from the
 		// click to the reply (D32 point 4).
@@ -914,15 +907,6 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			return null;
 		},
 		"sessions/forkPoints": async ({ view }) => api.forkPoints(liveHandle(view)),
-		// `unwatch`, from agentpane-mode's plain Pi fork, drops the view's
-		// turn-done watch first, as `sessions/abort`'s does (D32 point 6); a Pi
-		// fork stops the parent's turn, streamed or not, and its end is not
-		// news. ark3/agentpane#17 retires it with that fork.
-		"sessions/fork": async ({ session: _session, view, unwatch: drop, ...body }) => {
-			const handle = liveHandle(view);
-			if (drop) unwatch(handle);
-			return api.fork(handle, body);
-		},
 		// An attach of the fork for `forkView`, the buffer agentpane-mode made
 		// for it before sending (D32 point 3), as well as the operation (D30):
 		// the fork's snapshot, broadcast before its prompt goes out, is bound

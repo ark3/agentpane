@@ -234,11 +234,6 @@ export function openConnection(
 			const { adapter } = live(frame);
 			return { points: await adapter.listForkPoints(), forkStopsTurn: adapter.forkStopsTurn };
 		},
-		async "sessions/fork"(frame) {
-			const entryId = requireString(frame, "entryId");
-			const session = live(frame);
-			return { ref: await sessions.fork(session.ref, entryId, session.handle) };
-		},
 		async "sessions/forkAndPrompt"(frame) {
 			if (!Number.isInteger(frame.index)) throw new Refusal("bad_request", "index must be an integer");
 			const text = requireString(frame, "text");

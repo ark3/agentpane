@@ -269,7 +269,6 @@ export function socketServer(script: Script = {}): SocketServer {
 		"sessions/setEffort": ({ handle }) => (live(handle), null),
 		"sessions/setName": ({ handle }) => (live(handle), null),
 		"sessions/forkPoints": ({ handle }) => (live(handle), { points: [], forkStopsTurn: false }),
-		"sessions/fork": ({ handle }) => ({ ref: { backend: live(handle).ref.backend, id: `fork-${++forks}` } }),
 		"sessions/forkAndPrompt": ({ handle }) => ({
 			session: server.attached({ backend: live(handle).ref.backend, id: `fork-${++forks}` }),
 			disposition: "started",

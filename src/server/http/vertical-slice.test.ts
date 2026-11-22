@@ -7,7 +7,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { type ServerEvent, type SessionRef, sessionKey } from "../../shared/protocol.ts";
-import { initialClientState, reduceServerEvent, viewOf, type ClientState } from "../../client/session-state.ts";
+import { handleOf, initialClientState, reduceServerEvent, viewOf, type ClientState } from "../../client/session-state.ts";
 import { type App, createApp } from "./app.ts";
 import type { AppDeps } from "./deps.ts";
 import {
@@ -129,6 +129,7 @@ describe("offline vertical slice", () => {
 		const parent: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/parent.jsonl" };
 		const fork: SessionRef = { backend: "pi", id: `${parent.id}#fork-e1` };
 		const pi = new FakeAdapterFactory({
+			forkPoints: [{ id: "e1", text: "hello", index: 0 }],
 			onSubmit(adapter, text) {
 				adapter.append(userMessage(text));
 				adapter.append(assistantMessage("parent reply"));
@@ -145,15 +146,18 @@ describe("offline vertical slice", () => {
 		await forker.ok("sessions/prompt", { handle: session.handle, text: "hello" });
 		expect(onlooker.transcript(parent)).toHaveLength(2);
 
-		const forked = await forker.ok("sessions/fork", { handle: session.handle, entryId: "e1" });
-		expect(forked.ref).toEqual(fork);
+		const forked = await forker.ok("sessions/forkAndPrompt", { handle: session.handle, index: 0, text: "again" });
+		expect(forked.session.ref).toEqual(fork);
 		// The list invalidation the fork emits.
 		expect(onlooker.typed("sessions-changed").length).toBeGreaterThanOrEqual(1);
 
 		const state = reduceEvents(parent, onlooker.events);
 		expect(state.selected).toEqual(parent);
 		expect(viewOf(state, parent)).toBeUndefined();
-		expect(viewOf(state, fork)).toBeUndefined();
+		// The fork's prompt reaches this socket too, but under the fork's own
+		// handle, never the parent's.
+		expect(handleOf(state, fork)).toBe(forked.session.handle);
+		expect(forked.session.handle).not.toBe(session.handle);
 		// And the reason it holds: nothing was renamed, a second conversation was
 		// created under a handle of its own, so no event re-keys anyone.
 		expect(onlooker.events.map((event) => event.type)).not.toContain("renamed");

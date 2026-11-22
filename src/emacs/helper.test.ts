@@ -273,7 +273,6 @@ describe("requests", () => {
 			"sessions/setEffort": () => null,
 			"sessions/setName": () => null,
 			"sessions/forkPoints": () => ({ points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }),
-			"sessions/fork": () => ({ ref: codex }),
 			"sessions/dismissError": () => null,
 		});
 		await bindView(io, pi, 1);
@@ -294,7 +293,6 @@ describe("requests", () => {
 			["sessions/setName", { session: pi, view, name: "probe name" }, null, ["sessions/setName", { handle, name: "probe name" }]],
 			// The whole answer, so agentpane-mode can label a fork from it (D30).
 			["sessions/forkPoints", { session: pi, view }, { points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }, ["sessions/forkPoints", { handle }]],
-			["sessions/fork", { session: pi, view, entryId: "e1" }, codex, ["sessions/fork", { handle, entryId: "e1" }]],
 			// Named by id, so the server clears it only while it is still the one held (OW-desufa, OW-jokoto).
 			["sessions/dismissError", { session: pi, view, errorId: "e4" }, null, ["sessions/dismissError", { handle, errorId: "e4" }]],
 		] as const;
@@ -316,7 +314,6 @@ describe("requests", () => {
 			["sessions/setEffort", { session: pi, view, effort: "low" }],
 			["sessions/setName", { session: pi, view, name: "n" }],
 			["sessions/forkPoints", { session: pi, view }],
-			["sessions/fork", { session: pi, view, entryId: "e1" }],
 			["sessions/dismissError", { session: pi, view, errorId: "e4" }],
 			["sessions/forkAndPrompt", { session: pi, view, forkView: 4, index: 0, text: "again" }],
 		] as const;
@@ -1601,11 +1598,10 @@ describe("turn ends (D32 point 6)", () => {
 		]);
 	});
 
-	it("drops a view's watch at its detach, at unwatch on an abort, and at a gap, each raising nothing", async () => {
+	it("drops a view's watch at its detach and at a gap, each raising nothing, where one left standing raises", async () => {
 		const { io, server } = start({
 			"sessions/attach": attaching({ summary: summary(pi) }, { summary: summary(codex) }, { summary: summary(pi, "h3") }),
 			"sessions/prompt": () => ({ disposition: "started" }),
-			"sessions/abort": () => ({ queued: [] }),
 		});
 		await bindView(io, pi, 1);
 		await bindView(io, codex, 2);
@@ -1617,49 +1613,24 @@ describe("turn ends (D32 point 6)", () => {
 		server.emit(status(pi, "h3", 2, true));
 		await io.until(12);
 		io.send({ jsonrpc: "2.0", id: 5, method: "sessions/detach", params: { session: pi, view: 1 } });
-		io.send({ jsonrpc: "2.0", id: 6, method: "sessions/abort", params: { session: codex, view: 2, unwatch: true } });
-		await io.until(14);
+		await io.until(13);
 		// The gap: seq 4 where 3 was due.
 		server.emit(status(pi, "h3", 4, false));
 		server.emit(status(pi, h(pi), 3, false));
 		server.emit(status(codex, h(codex), 3, false));
-		await io.until(18);
+		await io.until(17);
 		expect(io.notifications().filter((message) => message["method"] === "session/detached")).toMatchObject([{ params: { view: 3, handle: "h3" } }]);
 		// Attached again under the same handle, which a gap leaves live, a
 		// turn seen streaming and then idle is not the one watched (D25 point 5).
 		await bindView(io, pi, 3);
 		server.emit(status(pi, "h3", 2, true));
 		server.emit(status(pi, "h3", 3, false));
-		await io.until(23);
+		await io.until(22);
 		expect(ended(io)).toEqual([
 			[h(pi), false, undefined],
-			[h(codex), false, 2],
+			[h(codex), true, 2],
 			["h3", false, 3],
 		]);
-	});
-
-	// agentpane-mode's plain Pi fork, pressed after a prompt and before its
-	// turn read streaming: the fork's own stop brings the turn's statuses and
-	// the parent's ended, none of which is news (until ark3/agentpane#17).
-	it("drops a view's watch at unwatch on a plain fork, so the stop the fork brings raises nothing", async () => {
-		const { io, server } = start({
-			...attachScript(pi),
-			"sessions/prompt": () => new Promise<never>(() => {}),
-			"sessions/fork": (_params, server) => {
-				server.emit(status(pi, h(pi), 2, true));
-				server.emit(status(pi, h(pi), 3, false));
-				server.emit({ type: "ended", session: pi, handle: h(pi) });
-				return { ref: codex };
-			},
-		});
-		await bindView(io, pi, 1);
-		prompt(io, 2);
-		await tick();
-		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/fork", params: { session: pi, view: 1, entryId: "e1", unwatch: true } });
-		await io.until(7);
-		expect(sent(server)).toContainEqual(["sessions/fork", { handle: h(pi), entryId: "e1" }]);
-		expect(io.response(3)).toEqual({ jsonrpc: "2.0", id: 3, result: codex });
-		expect(ended(io)).toEqual([[h(pi), false, 1]]);
 	});
 
 	it("raises a watch seen streaming at the server's ended, ahead of the detached", async () => {

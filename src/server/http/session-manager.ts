@@ -826,9 +826,9 @@ export class SessionManager {
 
 	/**
 	 * Run one of a session's mutating verbs once every verb queued on it before
-	 * has settled (D24, OW-sewewe). Six verbs join: `submit`, `fork`,
-	 * `setModel`, `setEffort`, `setName` and `compact`, and `forkAndPrompt`
-	 * joins as a fork and then as a `submit` on the fork. Every command runs
+	 * has settled (D24, OW-sewewe). Five verbs join: `submit`, `setModel`,
+	 * `setEffort`, `setName` and `compact`, and `forkAndPrompt` joins as a
+	 * `fork`, its first half, and then as a `submit` on the fork. Every command runs
 	 * as its frame arrives, beside any still running, and any number of
 	 * clients can drive one session, so without this two of them overlap on
 	 * one adapter -- two
@@ -852,8 +852,10 @@ export class SessionManager {
 	 *    so all it could wait behind is a settings call, a compaction or a fork,
 	 *    and a stop must not wait out a Pi compaction. Left out, it also stays
 	 *    what it was for the second abort a client sent ahead of a Pi fork
-	 *    until ark3/agentpane#51, which agentpane-mode's `f` still sends
-	 *    (OW-relehi): harmless, since the fork abandons the turn (D15).
+	 *    until ark3/agentpane#51, which agentpane-mode's `f` sent until
+	 *    ark3/agentpane#75 (OW-relehi), and for the stop a "Stop and edit"
+	 *    sends at the press, ahead of the fork its send makes: harmless, since
+	 *    the fork abandons the turn (D15).
 	 *  - `listForkPoints`. A read: it changes nothing a verb here depends on,
 	 *    and its answer can be stale by the time a client acts on it whether or
 	 *    not it waits.
@@ -1004,7 +1006,10 @@ export class SessionManager {
 	}
 
 	/**
-	 * Fork a session from a past entry. Like `submit`, this goes through the
+	 * Fork a session from a past entry, as `forkAndPrompt`'s first half does
+	 * through `#forkOn`. Since ark3/agentpane#75 took the plain fork off the
+	 * wire (D33) no command reaches this one, and it stays as the seam the
+	 * tests of forking drive. Like `submit`, this goes through the
 	 * manager rather than straight at the adapter because it queues
 	 * (`#serially`), and because two of the backends hand back something the
 	 * attach that follows needs (`#pendingForks`). The backends are asymmetric:

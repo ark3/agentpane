@@ -447,14 +447,6 @@ export interface EditDraftResponse {
 	text: string;
 }
 
-/** `sessions/fork` */
-export interface ForkRequest {
-	entryId: string;
-}
-export interface ForkResponse {
-	ref: SessionRef;
-}
-
 /**
  * `sessions/forkAndPrompt` -- an edit of an earlier
  * message, as one server operation (D30): fork the session at the user
@@ -667,7 +659,6 @@ export interface Commands {
 	"sessions/setEffort": { params: HandleParams & SetEffortRequest; result: null };
 	"sessions/setName": { params: HandleParams & SetNameRequest; result: null };
 	"sessions/forkPoints": { params: HandleParams; result: ForkPointsResponse };
-	"sessions/fork": { params: HandleParams & ForkRequest; result: ForkResponse };
 	"sessions/forkAndPrompt": { params: HandleParams & ForkAndPromptRequest; result: ForkAndPromptResponse };
 	"models/list": { params: { backend?: BackendId }; result: ModelsResponse };
 	"draft/edit": { params: EditDraftRequest; result: EditDraftResponse };

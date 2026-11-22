@@ -34,14 +34,14 @@
 ;; window showed its transcript, until one does.  In a transcript buffer
 ;; `n' and `p' step between nodes, `TAB' toggles the fold at point, `g'
 ;; refetches, `a' attaches a previewed transcript, sending nothing, and
-;; moves point to the prompt region, as the browser's Attach does, `f'
-;; forks at the user message at point into a buffer of its own -- on a
-;; previewed transcript it attaches first, and forks at the next press --
+;; moves point to the prompt region, as the browser's Attach does,
 ;; `o' opens a child thread the subagent call at point names, previewing
 ;; it as the picker's `RET' does, as the browser's Open thread does,
-;; `e' takes the user message at point back into the prompt region to edit,
-;; as the browser's pencil does, so that `C-RET' forks at that message and
-;; sends the edited text and the message's images into the fork, and
+;; `e' or `f' takes the user message at point back into the prompt region
+;; to edit, as the browser's pencil does, so that `C-RET' forks at that
+;; message and sends the edited text and the message's images into the
+;; fork, opened in a buffer of its own -- on a previewed transcript it
+;; attaches first, and edits at the next press -- and
 ;; `C-c C-k' abandons the edit -- `C-c C-e' does as `e' does on the last
 ;; user message, wherever point is, and on a streaming Pi turn stops the
 ;; turn too, as the browser's Edit last message and Stop and edit do --
@@ -384,7 +384,6 @@ handle to it again."
 
 (defvar agentpane--handle)
 (defvar agentpane--sending)
-(defvar agentpane--forking)
 (defvar agentpane--fork-sent)
 
 (defun agentpane--helper-gone (connection)
@@ -411,12 +410,11 @@ It also resets, in every transcript buffer, what a request in flight
 holds there, since a request the helper did not answer before it exited,
 as a crash leaves one, will never be answered (D32 point 7):
 `agentpane--sending', with the text it held back released
-\(`agentpane--release-queued'), the plain fork's `agentpane--forking',
-and `agentpane--fork-sent'.  A request the helper
-answered at its socket's close has run its FAILED already, among what
-the helper wrote last.  Until D32 agentpane-mode recorded every request
-it sent and answered those still out here, as the death, one tick later
-\(OW-mopuyi)."
+\(`agentpane--release-queued'), and `agentpane--fork-sent'.  A request
+the helper answered at its socket's close has run its FAILED already,
+among what the helper wrote last.  Until D32 agentpane-mode recorded
+every request it sent and answered those still out here, as the death,
+one tick later (OW-mopuyi)."
   (setq agentpane--connection nil)
   (dolist (buffer (buffer-list))
     (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
@@ -425,7 +423,6 @@ it sent and answered those still out here, as the death, one tick later
     (when (buffer-local-value 'agentpane--session buffer)
       (with-current-buffer buffer
         (setq agentpane--sending nil
-              agentpane--forking nil
               agentpane--fork-sent nil)
         (agentpane--release-queued)))
     ;; Made for a create or a fork that no snapshot has filled, it
@@ -495,9 +492,9 @@ reply (D26) -- as does one attached through a helper that has exited
 `sessions/attach', and since D30 `sessions/create',
 `sessions/forkAndPrompt' and a `sessions/prompt' naming a ref; every
 other command acts on a session already attached, or is refused
-\(src/server/http/socket.ts).  A `sessions/prompt' naming its handle,
-`sessions/forkPoints' and `sessions/fork' still take this too, from when
-their HTTP routes attached first; each now waits only on a backend already
+\(src/server/http/socket.ts).  A `sessions/prompt' naming its handle and
+`sessions/forkPoints' still take this too, from when their HTTP routes
+attached first; each now waits only on a backend already
 running, and whether they want jsonrpc.el's default instead, as
 `sessions/setModel' takes, has not been weighed.
 Past this the reply is discarded even if it comes, so a spawn that ran long
@@ -2019,7 +2016,7 @@ as `C-RET', fall through to `agentpane-transcript-mode-map'.")
     (define-key map (kbd "<tab>") #'agentpane-toggle)
     (define-key map (kbd "g") #'agentpane-refetch)
     (define-key map (kbd "a") #'agentpane-attach)
-    (define-key map (kbd "f") #'agentpane-fork)
+    (define-key map (kbd "f") #'agentpane-edit)
     (define-key map (kbd "e") #'agentpane-edit)
     (define-key map (kbd "o") #'agentpane-open-thread)
     (define-key map (kbd "C-c C-e") #'agentpane-edit-last)
@@ -2193,7 +2190,6 @@ node stays on it, or goes to the next drawn one when it is elided."
             (plist-get ref :backend) (plist-get ref :id)
             (or (plist-get summary :cwd) ""))))
 
-(defvar agentpane--forking)
 (defvar agentpane--editing)
 
 (defun agentpane-refetch ()
@@ -2221,19 +2217,18 @@ on a buffer whose attach is out sends an attach the helper joins to it
 \(D32 point 4).  Until ark3/agentpane#71 a buffer still attaching sent
 nothing, nor one with a close in flight, which the server's wait for the
 close's disposal now covers (D32 point 5).
-One with a fork in flight sends nothing; see `agentpane-fork'.  Nor one
-whose session is not made yet \(`agentpane--made-before').  Each says
-why in the echo area rather than signalling, since opening a session
-from the picker refetches its buffer, and an error would leave it
-unshown."
+One whose session is not made yet \(`agentpane--made-before') sends
+nothing, and says why in the echo area rather than signalling, since
+opening a session from the picker refetches its buffer, and an error
+would leave it unshown.  Until ark3/agentpane#75 one with a plain fork
+in flight did too; an attach while an edit's fork of the session is out
+the helper refuses (D32 point 4)."
   (interactive)
   (unless agentpane--session
     (user-error "Not an agentpane transcript buffer"))
   (cond
    ((not (agentpane--made-p))
     (message "agentpane: this session is not made yet; its snapshot draws it"))
-   (agentpane--forking
-    (message "agentpane: a fork of this session is in flight; refetch once it lands"))
    (agentpane--attached
     (agentpane--attach))
    (t
@@ -2437,33 +2432,6 @@ The turn-done watch is the helper's, which says a turn ended by
   (and agentpane--attached (eq agentpane--attached agentpane--connection)
        (jsonrpc-running-p agentpane--attached)))
 
-(defun agentpane--refuse-forking (&optional failed)
-  "Signal a user error, sending nothing, while this buffer counts a plain
-fork in flight (`agentpane--forking', `agentpane-fork''s), calling
-FAILED first, if given, so that a flag its caller set before asking does
-not outlive the refusal, as `agentpane--request' calls FAILED when
-sending exits non-locally.  Otherwise return nil.
-
-It guards an attach, never a command on a buffer already attached, as a
-Codex or Claude Code parent stays through its fork.  A Pi fork's parent
-the server lets go of inside the fork, broadcasting `ended' for its handle
-ahead of the fork's reply (`#forkOnto' in
-src/server/http/session-manager.ts), is left not attached by the
-`session/detached' the helper passes on (`agentpane--let-go'), and an
-attach sent then makes the server resume the parent's old branch from the
-index, a process the fork's reply orphans when it detaches the parent
-\(`agentpane--fork-at').  So it sits in the attach every command reaches,
-rather than in each command: until OW-nuhayu only `agentpane-attach',
-the fork commands, `agentpane-refetch' and `agentpane-close-session'
-refused, and `agentpane-send' and `agentpane-compact' attached.
-An edit's fork and prompt is guarded by the helper instead, which
-refuses an attach, or a prompt by ref, of the session it forks, from any
-view, while it is out (D32 point 4); until ark3/agentpane#71 this
-refused it here too, for its own buffer alone."
-  (when agentpane--forking
-    (when failed (funcall failed))
-    (user-error "A fork of this session is already in flight")))
-
 (defun agentpane--attach (&optional then failed)
   "Attach this buffer's session through `sessions/attach', then call THEN,
 or FAILED if the attach fails.
@@ -2491,10 +2459,11 @@ ark3/agentpane#71 the buffer queued the waiters itself, since two in
 flight answered separately and the first to fail ended the wait while
 the other was still out (OW-yibimi).
 
-None while a plain fork is in flight: FAILED is called and a user error
-signalled instead; see `agentpane--refuse-forking'.  The helper refuses
-one, `forking', while an edit's fork of the session is out."
-  (agentpane--refuse-forking failed)
+The helper refuses one, `forking', while an edit's fork of the session
+is out, from any view (D32 point 4), so no attach reaches the server
+after it has let go of a Pi fork's parent inside the fork, where it
+would resume the parent's old branch.  Until ark3/agentpane#75 a plain
+fork in flight refused one here too."
   (agentpane--request 'sessions/attach
                       (list :session (agentpane--ref agentpane--session)
                             :view agentpane--view)
@@ -2527,9 +2496,7 @@ buffer, as `agentpane--attach' does, and signals, running nothing there.
 With an asynchronous attach in flight, as when `agentpane-set-model'
 follows a first prompt's attach, the helper joins this one to it and
 answers it with that one's answer (D32 point 4), so no second attach goes
-beside it; until ark3/agentpane#71 this refused instead.  It refuses
-while a plain fork is in flight; see `agentpane--refuse-forking'."
-  (agentpane--refuse-forking)
+beside it; until ark3/agentpane#71 this refused instead."
   (let ((holder (plist-get (jsonrpc-request (agentpane--connection) 'sessions/attach
                                             (list :session (agentpane--ref agentpane--session)
                                                   :view agentpane--view)
@@ -2644,7 +2611,7 @@ fork's attach up (`agentpane--kill-fork-sent').  Nothing reads it as the
 request being out: the helper refuses an attach of the session forked
 while it is (D32 point 4), and `agentpane--sending' is this buffer's
 record of its send.  Until ark3/agentpane#71 it refused this buffer's
-attaches too (`agentpane--refuse-forking').")
+attaches too.")
 
 (defvar-local agentpane--held-queued nil
   "The prompts this buffer's stops took out of Pi's queue (D16), in the
@@ -2716,9 +2683,9 @@ the snapshot under the view attaching this buffer as an attach's does
 \(`agentpane--attach-by'), the helper writing the reply, or a refusal
 naming the session it attached, after it.  A refusal still leaves the
 buffer attached where the server attached the session before refusing
-the prompt.  A plain fork in flight refuses that one here, as it refuses
-an attach (`agentpane--refuse-forking'); the helper refuses it,
-`forking', while an edit's fork of the session is out.
+the prompt.  The helper refuses that one, `forking', while an edit's fork
+of the session is out (D32 point 4); until ark3/agentpane#75 a plain
+fork in flight refused it here too.
 A reply, or a refusal's `attached', naming another view landed on the
 handle that view's buffer holds (D32 point 2): the helper bound nothing
 here, and that buffer is shown in this one's windows, the echo area
@@ -2802,8 +2769,6 @@ went.  A buffer killed before the answer says nothing."
                       (agentpane--release-queued)))
             (prior (and agentpane--error agentpane--error-id))
             (handled (lambda (answer) (equal (plist-get answer :disposition) "handled"))))
-        (unless live
-          (agentpane--refuse-forking))
         (agentpane--hold-handled nil)
         (setq agentpane--sending t)
         (if live
@@ -2858,15 +2823,16 @@ went.  A buffer killed before the answer says nothing."
 point to the end of the prompt region, as the browser's Attach button opens
 a previewed session and focuses the prompt.  Point moves in the buffer and
 in the window the press came from, if that still shows it, and in no other
-window, which may be reading history, as `agentpane-fork' shows its fork
-in the window the press came from.  An attach that fails moves nothing.
+window, which may be reading history, as an edit's send shows its fork
+in the window the send came from (`agentpane--send-edit').  An attach
+that fails moves nothing.
 An attached buffer attaches nothing and only moves point; any other
 moves it once its own attach answers, which the helper joins to one
 still out (`agentpane--attach').
-One not attached is refused while a fork is in flight, as every attach
-is: a Pi fork's parent the server has already let go of would be attached
-again, spawning its old branch, which the fork's reply then detaches; see
-`agentpane--refuse-forking'."
+One not attached is refused by the helper while an edit's fork of the
+session is in flight, as every attach is: a Pi fork's parent the server
+has already let go of would be attached again, spawning its old branch
+\(D32 point 4)."
   (interactive)
   (with-current-buffer (agentpane--transcript)
     (let* ((window (get-buffer-window))
@@ -3044,7 +3010,7 @@ it was."
       (user-error "This session is not attached; there is nothing to close"))
      ((or agentpane--streaming (plist-get agentpane--status :compaction))
       (user-error "This session is running a turn; close it once the turn ends"))
-     ((or agentpane--sending agentpane--forking)
+     (agentpane--sending
       (user-error "A request to this session is in flight; close it once it answers")))
     (let ((handle agentpane--handle))
       (agentpane--request
@@ -3187,7 +3153,7 @@ rather than attached first, as `agentpane-set-model' would."
       (user-error "This session is not attached; attach it to rename it"))
      ((or agentpane--streaming (plist-get agentpane--status :compaction))
       (user-error "This session is running a turn; rename it once the turn ends"))
-     ((or agentpane--sending agentpane--forking)
+     (agentpane--sending
       (user-error "A request to this session is in flight; rename it once it answers"))
      ((and (equal (plist-get (agentpane--ref agentpane--session) :backend) "codex")
            (not (ewoc-collect (agentpane--ewoc)
@@ -3250,122 +3216,11 @@ a session not attached, it attaches it synchronously too, as
                                 :view agentpane--view :effort effort)
                           #'ignore t))))
 
-(defvar-local agentpane--forking nil
-  "Non-nil while a fork this buffer began is in flight.")
-
-(defun agentpane-fork ()
-  "Fork this buffer's session at the user message at point, and open the fork
-in a transcript buffer of its own, attached.  The fork holds the history
-before that message, without the message itself: every backend's fork point
-excludes the user message it names.  This buffer stays as it was.
-
-The points are fetched through `sessions/forkPoints' each time and matched
-by the transcript index each names, never counted or kept: a Codex steer
-puts two user messages in one turn, which is one point, so the set moves
-under the transcript (OW-roveze).  A message no point names is not
-forkable, and nothing is forked, as the browser offers no Edit there.
-
-A Pi fork of a streaming session stops the turn whether or not anything
-aborts it, so the turn is aborted first, the loss made deliberate; that
-abort is the client's under D15, and the Pi adapter's fork stops the
-session again, usually taking nothing out (ark3/agentpane#47).  An
-edit's send sends no abort of its own (`agentpane--send-edit', D30).  It goes after the points are
-matched, so a message that is not forkable costs the turn nothing.  That
-abort carries `unwatch', so the helper drops the turn-done watch on the
-parent's handle before it goes, and the stop raises nothing: its last
-status and the parent's `ended' arrive before the fork's reply, and the
-parent's window may show something else by then (D32 point 6).
-A Pi turn the buffer has not yet read streaming is not aborted, but the
-fork's own stop ends it, so a Pi fork carries `unwatch' too, every time,
-and the helper drops the watch before the fork goes out; ark3/agentpane#17
-retires both with this fork.  Until D32 the watch was agentpane-mode's,
-and ended here alike.  An abort that fails leaves
-that turn running unwatched, the one the user asked to stop.  Codex
-and Claude Code keep a parent turn running through a fork, and are not
-aborted.  A Pi fork also moves the parent's live process onto the fork, a
-container of its own under a handle of its own, and takes the parent's
-container out of the server's table (D24, `SessionManager' in
-src/server/http/session-manager.ts), so the parent's handle hears nothing
-more but the `ended' that says so (D26).  The helper passes that on as a
-`session/detached', which lands before the fork's reply and lets go of
-the handle (`agentpane--let-go').  At the reply this buffer counts
-itself detached, so `g' previews it rather than attaching the parent's
-old branch again, as it would in any buffer not attached; detaches the
-parent from the helper, dropping its view's binding
-\(`agentpane--detach'), which a helper that has let go of the handle
-holds none of already, and the turn-done watch on it; and its next command
-that needs the session attaches it again, under whatever handle that
-attach answers.
-The fork's buffer takes the fork's handle from its own attach.  Codex
-and Claude Code leave the parent attached.
-
-The parent buffer keeps the live transcript it was showing, unredrawn:
-what the server emits of the fork's shortened transcript goes out under
-the fork's handle and ref, never the parent's (OW-zovaye, OW-nikogo).
-A detached buffer usually shows the store's projection instead, which for
-Pi can omit messages the live one keeps, but nothing here trusts an index
-from it: a fork from it attaches and forks nothing, and a send attaches
-and redraws.  While the fork is in flight `agentpane-refetch' sends
-nothing, and nothing attaches this buffer (`agentpane--refuse-forking'):
-on the attached parent a refetch attaches again, and an attach reaching
-the server after `#forkOnto' has let go of a Pi parent resumes the
-parent's old branch.  Such an attach can be out as the fork goes: a
-`g' on the attached parent, then this.  The reply detaches the parent
-only while it still holds the handle the fork was sent from
-\(`agentpane--forked-away'), so where that attach's snapshot bound it to
-another handle first, it stays attached there, as the helper holds it,
-the respawn running with this buffer listening.  Until
-ark3/agentpane#71 the reply detached it whatever it held, and where the
-attach's snapshot came after the reply and before the helper read the
-detach, the parent counted itself attached while the helper held no
-binding (OW-nowihu).
-
-One fork at a time per buffer, as the browser allows one send at a time
-\(OW-kelede): a second press while one is in flight sends nothing.  The fork
-is shown in the window that showed this buffer when the fork began, if it
-is still live, rather than in whichever window is selected when the reply
-lands.
-
-A buffer not attached, only previewed, is attached and forks nothing: once
-the attach answers, the echo area says the transcript now shows the live
-session and to press `f' again at the message to fork.  Its indices are the
-stored projection's, and the fork points are the live adapter's, which
-alone answers `sessions/forkPoints', and the two can name different
-messages: a Pi preview drops the `custom_message' entries and roles such as
-`bashExecution' that `get_messages' keeps (read from `pi 0.87.1''s
-source), and nothing makes the Claude Code store and live projections
-agree (OW-gekiki).  So trusting the index could fork at another message.
-Refusing, as the browser does by offering no Edit on a preview, would
-cost the user an `agentpane-attach' before pressing `f'; attaching here
-takes that step in place.  Attaching redraws the buffer from the live
-transcript through the attach's snapshot, so the index at point becomes a
-live one, and the second press lets the user confirm the message after
-that redraw, which may have moved it.  The message follows that redraw:
-the helper writes the attach's reply only after the snapshot that answers
-it (`sessions/attach' in src/emacs/helper.ts), and `agentpane--attach'
-calls THEN only once that snapshot has attached the buffer.  This covers
-the parent of a Pi fork too, which is left detached.  A second press
-while that attach is out sends an attach the helper joins to it (D32
-point 4), and says the same once it answers; until ark3/agentpane#71 it
-refused, saying the session was still attaching."
-  (interactive)
-  (when agentpane--forking
-    (user-error "A fork of this session is already in flight"))
-  (unless (agentpane-index-at-point)
-    (user-error "No message at point"))
-  (if (agentpane--attached-p)
-      (agentpane--fork-points (agentpane-index-at-point))
-    (agentpane--attach
-     (lambda ()
-       (message "agentpane: the transcript now shows the live session; \
-press f again at the message to fork")))))
-
-(defun agentpane--fork-point (index then &optional failed what)
+(defun agentpane--fork-point (index then what)
   "Fetch this attached buffer's fork points, and call THEN with the one
 naming INDEX and whether the answer says a fork of the session stops a
-running turn (D30); when none does, call FAILED, if given, and say the message,
-which WHAT names, \"the message at point\" when nil, is not forkable.
-See `agentpane-fork'."
+running turn (D30); when none does, say the message, which WHAT names,
+is not forkable.  See `agentpane-edit'."
   (agentpane--request
    'sessions/forkPoints (list :session (agentpane--ref agentpane--session)
                               :view agentpane--view)
@@ -3374,87 +3229,69 @@ See `agentpane-fork'."
                             (plist-get answer :points))))
        (if point
            (funcall then point (eq (plist-get answer :forkStopsTurn) t))
-         (when failed (funcall failed))
-         (message "agentpane: %s is not forkable" (or what "the message at point")))))
-   t failed agentpane--spawn-timeout))
-
-(defun agentpane--fork-points (index &optional then failed)
-  "Fork this attached buffer's session at the fork point naming INDEX, and
-call THEN, if given, in the fork's buffer once its attach has gone out,
-or FAILED, if given, here should the points, the abort or the fork fail,
-or no point name INDEX.  See `agentpane-fork'."
-  (let* ((parent (agentpane--ref agentpane--session))
-         (pi-backend (equal (plist-get parent :backend) "pi"))
-         (window (get-buffer-window))
-         (failed (lambda ()
-                   (setq agentpane--forking nil)
-                   (when failed (funcall failed)))))
-    (setq agentpane--forking t)
-    (agentpane--fork-point
-     index
-     (lambda (point _stops)
-       (if (and pi-backend agentpane--streaming)
-           (progn
-             ;; The prompts this stop takes out of Pi's queue, its result's
-             ;; `:queued', are dropped here, as the server's own stop inside
-             ;; the fork drops them (`PiAdapter.fork', D16, OW-wisifo), and
-             ;; so are lost: a cleared steer
-             ;; is in no session file, where one delivered a moment sooner
-             ;; stays in the parent's.  They were steered into the turn the
-             ;; fork abandons.  Taking them out still
-             ;; matters, since whether Pi's queue survives a fork was never
-             ;; measured.  Under `agentpane-edit-last' the press's own abort
-             ;; has usually emptied it already, and what that one takes out
-             ;; is the prompt region's to receive once the edit has ended
-             ;; (`agentpane-abort', OW-seleri).
-             (agentpane--request 'sessions/abort (list :session parent :view agentpane--view
-                                                       :unwatch t)
-                                 (lambda (_) (agentpane--fork-at parent point window failed then))
-                                 t failed))
-         (agentpane--fork-at parent point window failed then)))
-     failed)))
-
-(defun agentpane--fork-at (parent point window failed &optional then)
-  "Fork the session PARENT at the fork POINT, and open the fork attached in a
-buffer of its own, shown in WINDOW if it is still live; FAILED runs if the
-fork fails, and THEN, if given, in the fork's buffer once its attach has
-gone out.  See `agentpane-fork'."
-  (let ((handle agentpane--handle))
-    (agentpane--request
-     'sessions/fork (append (list :session parent :view agentpane--view
-                                  :entryId (plist-get point :id))
-                            (and (equal (plist-get parent :backend) "pi")
-                                 (list :unwatch t)))
-     (lambda (forked)
-       (setq agentpane--forking nil)
-       (agentpane--forked-away handle)
-       (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
-              (buffer (agentpane--transcript-buffer summary)))
-         (with-current-buffer buffer
-           (agentpane--draw [] (agentpane--transcript-header summary))
-           (agentpane--attach)
-           (when then (funcall then)))
-         (if (window-live-p window)
-             (set-window-buffer window buffer)
-           (pop-to-buffer buffer '(display-buffer-same-window)))))
-     t failed agentpane--spawn-timeout)))
+         (message "agentpane: %s is not forkable" what))))
+   t nil agentpane--spawn-timeout))
 
 (defun agentpane-edit ()
   "Take the user message at point back into the prompt region to edit, as the
 browser's pencil does: its text replaces the prompt region's, and the
 separator above it says which message is being edited.  The next send from
-this buffer or its composer forks at that message, as `agentpane-fork'
-does, and prompts the fork with the text sent and the message's images,
-leaving this buffer holding its session.  `C-c C-k'
-\(`agentpane-cancel-edit') abandons the edit and forks nothing.
+this buffer or its composer forks at that message and prompts the fork
+with the text sent and the message's images, opening the fork in a
+transcript buffer of its own (`agentpane--send-edit'), and leaving this
+buffer holding its session.  The fork holds the history before that
+message, without the message itself: every backend's fork point excludes
+the user message it names.  `C-c C-k' \(`agentpane-cancel-edit')
+abandons the edit and forks nothing.  Bound to `e' and to `f': the edit
+is agentpane-mode's only fork, as it is the browser's (D33).  Until
+ark3/agentpane#75 `f' forked with nothing sent, by a plain fork command
+the wire no longer has.
 
 A message no fork point names is not editable (DESIGN D20).  The points
-are fetched and matched at the press, as `agentpane-fork' matches them, so
-such a message is refused here rather than at the send, and the server
-matches the index again at the send, refusing rather than forking
-elsewhere should the set have moved meanwhile (D30).  On a buffer only previewed the press attaches
-and edits nothing, as `agentpane-fork''s does and for its reason: a
-preview's index can name another message than the live one (OW-gekiki).
+are fetched through `sessions/forkPoints' and matched at the press by the
+transcript index each names, never counted: a Codex steer puts two user
+messages in one turn, which is one point, so the set moves under the
+transcript (OW-roveze).  Such a message is refused here rather than at
+the send, and the server matches the index again at the send, refusing
+rather than forking elsewhere should the set have moved meanwhile (D30).
+
+A buffer not attached, only previewed, is attached and edits nothing:
+once the attach answers, the echo area says the transcript now shows the
+live session and to press the key pressed again.  Its indices are the
+stored projection's, and the fork points are the live adapter's, which
+alone answers `sessions/forkPoints', and the two can name different
+messages: a Pi preview drops the `custom_message' entries and roles such
+as `bashExecution' that `get_messages' keeps (read from `pi 0.87.1''s
+source), and nothing makes the Claude Code store and live projections
+agree (OW-gekiki).  So trusting the index could fork at another message.
+Refusing, as the browser does by offering no Edit on a preview, would
+cost the user an `agentpane-attach' first; attaching here takes that
+step in place.  Attaching redraws the buffer from the live transcript
+through the attach's snapshot, so the index at point becomes a live one,
+and the second press lets the user confirm the message after that
+redraw, which may have moved it.  The message follows that redraw: the
+helper writes the attach's reply only after the snapshot that answers it
+\(`sessions/attach' in src/emacs/helper.ts), and `agentpane--attach'
+calls its THEN only once that snapshot has attached the buffer.  This
+covers the parent of a Pi fork too, which is left detached.  A second
+press while that attach is out sends an attach the helper joins to it
+\(D32 point 4), and says the same once it answers.
+
+A Pi fork moves the parent's live process onto the fork, a container of
+its own under a handle of its own, and takes the parent's container out
+of the server's table (D24, `SessionManager' in
+src/server/http/session-manager.ts), so the parent's handle hears nothing
+more but the `ended' that says so (D26).  The helper passes that on as a
+`session/detached', which lands before the send's reply and lets go of
+the handle (`agentpane--let-go').  At the reply this buffer counts itself
+detached, so `g' previews it rather than attaching the parent's old
+branch again, and detaches the parent from the helper, dropping its
+view's binding, while it still holds the handle the send went from
+\(`agentpane--forked-away').  Codex and Claude Code leave the parent
+attached.  Either way the parent buffer keeps the live transcript it was
+showing, unredrawn: what the server emits of the fork's shortened
+transcript goes out under the fork's handle and ref, never the parent's
+\(OW-zovaye, OW-nikogo).
 
 Pressed on another message while an edit is open, the edit moves there,
 and the draft put back on abandoning it is still the one the first press
@@ -3469,13 +3306,13 @@ send is still out, which that send ends only while it is the edit it
 sent.  Refused where the edit opens, once the points answer, rather
 than at the press, since a send can go out while they are fetched."
   (interactive)
-  (when agentpane--forking
-    (user-error "A fork of this session is already in flight"))
   (let* ((at (agentpane--locate))
-         (node (and at (ewoc-data at))))
+         (node (and at (ewoc-data at)))
+         (keys (this-command-keys)))
     (unless (equal (plist-get node :role) "user")
       (user-error "No user message at point"))
-    (agentpane--edit node "e" "the message at point")))
+    (agentpane--edit node (if (seq-empty-p keys) "e" (key-description keys))
+                     "the message at point")))
 
 (defun agentpane-edit-last ()
   "Take the last user message back into the prompt region to edit, as the
@@ -3516,8 +3353,6 @@ edit's."
   (interactive)
   (let ((composer (and (derived-mode-p 'agentpane-composer-mode) (current-buffer))))
     (with-current-buffer (agentpane--transcript)
-      (when agentpane--forking
-        (user-error "A fork of this session is already in flight"))
       (agentpane--draw-recorded (current-buffer))
       (let ((at (ewoc-nth (agentpane--ewoc) -1)))
         (while (and at (not (equal (plist-get (ewoc-data at) :role) "user")))
@@ -3546,7 +3381,7 @@ KEY is the command's key and WHAT names the message, for the echo area."
 being sent; press %s once it has answered to edit %s" key what)
                                (agentpane--start-edit node stops)
                                (when then (funcall then))))
-                           nil what))
+                           what))
    (t (agentpane--attach
        (lambda ()
          (message "agentpane: the transcript now shows the live session; \
@@ -3659,9 +3494,8 @@ turn-done watch on this buffer's handle as it goes out, raising nothing,
 since the stop's last status, and a Pi parent's `ended', arrive before
 the reply (D32 point 6).  A Pi fork moves the
 parent's live process onto the fork, so at the reply, or at a refusal
-naming a fork, this buffer detaches as `agentpane--fork-at' detaches a Pi
-fork's parent, if it still holds the handle the send went from
-\(`agentpane--forked-away').
+naming a fork, this buffer detaches, if it still holds the handle the
+send went from (`agentpane--forked-away'); see `agentpane-edit'.
 
 A refusal that names a fork, created before its prompt failed, ends the
 edit and moves to the fork, so that sending again prompts that fork
@@ -3696,8 +3530,6 @@ ahead of the draft as `agentpane-cancel-edit' leaves them, and never into
 the text the fork is prompted with (`agentpane-abort'); freeing the
 buffer releases the stopped prompts too, for a send whose edit was
 cancelled while it was in flight."
-  (when agentpane--forking
-    (user-error "A fork of this session is already in flight"))
   (unless agentpane--handle
     (user-error "This session is not attached; attach it to send the edit"))
   (let* ((edit agentpane--editing)
@@ -3758,7 +3590,7 @@ while it still holds HANDLE: the server's `ended' for it, ahead of the
 fork's reply, has usually let go of it already (`agentpane--let-go'), and
 a buffer attached since under another handle holds a binding the helper
 made after the fork, which a detach here would drop while the buffer
-counted itself attached.  See `agentpane-fork'."
+counted itself attached.  See `agentpane-edit'."
   (when (and handle
              (equal agentpane--handle handle)
              (equal (plist-get (agentpane--ref agentpane--session) :backend) "pi"))
@@ -4272,7 +4104,7 @@ from one listing to the next to mark a turn's end, is the helper's
 Nothing moves a mark from a fork's parent to the fork, here or in the
 browser: a fork is another session, and a mark belongs to the session
 whose turn it observed.  The fork takes the parent's window
-\(`agentpane--fork-at'), so a Codex or Claude Code turn still running on
+\(`agentpane--send-edit'), so a Codex or Claude Code turn still running on
 the parent ends off screen and marks the parent, as the browser marks
 it when that turn ends with the fork selected; that turn did end
 unseen, in a buffer the user can still open.

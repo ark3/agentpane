@@ -40,7 +40,6 @@ import {
 	type ForkAndPromptRequest,
 	type ForkAndPromptResponse,
 	type ForkPointsResponse,
-	type ForkRequest,
 	type ModelInfo,
 	type PromptRequest,
 	type PromptResponse,
@@ -189,8 +188,6 @@ export interface AgentpaneApi {
 	 * Beside them, whether a fork of the session stops a running turn (D30).
 	 */
 	forkPoints(handle: string): Promise<ForkPointsResponse>;
-	/** Fork at `entryId`; the ref it answers with is the new conversation, and the original survives. */
-	fork(handle: string, body: ForkRequest): Promise<SessionRef>;
 	/**
 	 * Fork at the user message `body.index` names, attach the fork and prompt
 	 * it, as one server operation (D30). A refusal after the fork exists
@@ -377,9 +374,6 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		},
 		forkPoints(handle) {
 			return request("sessions/forkPoints", { handle });
-		},
-		async fork(handle, body) {
-			return (await request("sessions/fork", { handle, ...body })).ref;
 		},
 		forkAndPrompt(handle, body) {
 			return request("sessions/forkAndPrompt", { handle, ...body });

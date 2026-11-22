@@ -484,7 +484,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	 * returns, and the session index therefore cannot find it.
 	 *
 	 * The cut is validated here rather than left to that start: this is what a
-	 * `sessions/fork` answers, and a fork point the parent's store does not
+	 * `sessions/forkAndPrompt` forks by, and a fork point the parent's store does not
 	 * carry must fail the request, not a later attach.
 	 */
 	async fork(entryId: string): Promise<ForkResult> {

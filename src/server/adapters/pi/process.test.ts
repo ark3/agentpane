@@ -681,7 +681,7 @@ describe("PiAdapter stop (D16, OW-wisifo)", () => {
 		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
 		const types = () => h.child.sent().map((c) => c.type);
 
-		// "Stop and edit" stops at the click, and agentpane-mode's `f` again ahead of its fork.
+		// "Stop and edit" stops at the click, and another client's Stop overlaps it.
 		const first = h.adapter.abort();
 		const second = h.adapter.abort();
 		const prompt = h.adapter.submit("after both");

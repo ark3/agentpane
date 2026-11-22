@@ -116,6 +116,9 @@
  * request still out when the socket closes is answered `-32001` before
  * the helper exits, where it got no reply and agentpane-mode's teardown
  * answered it as the helper's death.
+ * ark3/agentpane#75 raised it a twenty-eighth, under D33: `sessions/fork`
+ * goes, agentpane-mode forking only by an edit, and with it the `unwatch`
+ * on `sessions/abort` and on that fork.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -380,15 +383,11 @@
  * from a view bound to none the helper refuses `not_attached` itself.
  * `session` goes nowhere.
  *
- * - `sessions/abort` -- `{ session, view, unwatch? }` -> `null` for a stop that took nothing
+ * - `sessions/abort` -- `{ session, view }` -> `null` for a stop that took nothing
  *   out of the backend's queue, or `{ queued }` for one that did: the
  *   server's own `AbortResponse`, the text of each prompt steered into the turn
  *   and not yet delivered, which only Pi holds, for the buffer that stopped
  *   it to take back (D16, OW-wisifo). No notification carries them.
- *   `unwatch` (boolean, absent meaning false) drops the turn-done watch on
- *   the view's handle before the abort goes out, so the stop raises
- *   nothing: agentpane-mode's plain Pi fork sends it, and
- *   ark3/agentpane#17 retires it with that fork.
  * - `sessions/compact` -- `{ session, view }` -> `null`. While it is out,
  *   a `sessions/prompt`, a `sessions/forkAndPrompt` or a second
  *   `sessions/compact` from `view` is refused `busy`, as the browser's
@@ -407,7 +406,7 @@
  * - `sessions/detach` -- `{ session, view }` -> `null`. Stops
  *   showing a session, and does nothing else: nothing goes to the server, and the
  *   session goes on running on the server. Sent when a buffer is killed,
- *   and for a Pi fork's parent. Every attach from `view` still out is given
+ *   and for a Pi fork's parent at an edit's send. Every attach from `view` still out is given
  *   up: its reply still goes out, and no snapshot answers it. The view's
  *   binding goes, and the notifications under its handle stop. Until D32 it
  *   carried `tokens`, every attach its buffer and every buffer it absorbed
@@ -433,12 +432,6 @@
  *   a fork of the session stops a turn running when it lands, which is what
  *   "Stop and fork" reads (D30). Until ark3/agentpane#47 the result was the
  *   array alone.
- * - `sessions/fork` -- `{ session, view, entryId, unwatch? }` -> the fork's ref.
- *   `unwatch` (boolean, absent meaning false) drops the turn-done watch on
- *   the view's handle before the fork goes out, as `sessions/abort`'s does:
- *   agentpane-mode's plain Pi fork sends it every time, since a Pi fork
- *   stops the parent's turn whether or not it read streaming, and
- *   ark3/agentpane#17 retires it with that fork.
  * - `sessions/forkAndPrompt` -- `{ session, view, index, text, images?,
  *   forkView, stops? }` -> `{ session, disposition }`. An edit of an earlier message as one
  *   server operation (D30): fork at the user message whose transcript
@@ -594,7 +587,6 @@
  *   before the helper exits (D31 point 6). It raises nothing, and goes,
  *   at a `seq` gap, at the view's `sessions/detach`, at a close's reply,
  *   at the end of the helper's input (D25 points 4 and 5), and with
- *   `unwatch` on `sessions/abort` or `sessions/fork`, or
  *   `sessions/forkAndPrompt`'s `stops`.
  *   The watch on a handle and what has been seen are agentpane-mode's to
  *   draw: it marks the session's row unless a window shows the session,
@@ -620,7 +612,6 @@ import type {
 	ForkAndPromptRequest,
 	ForkAndPromptResponse,
 	ForkPointsResponse,
-	ForkRequest,
 	ModelInfo,
 	PromptRequest,
 	PromptResponse,
@@ -651,7 +642,7 @@ export interface HelperRequests {
 		params: ViewParams & Omit<PromptRequest, "handle"> & { live?: boolean };
 		result: Naming<{ disposition?: "handled" }> | null;
 	};
-	"sessions/abort": { params: ViewParams & { unwatch?: boolean }; result: AbortResponse | null };
+	"sessions/abort": { params: ViewParams; result: AbortResponse | null };
 	"sessions/compact": { params: ViewParams; result: null };
 	"sessions/close": { params: ViewParams; result: null };
 	"sessions/dismissError": { params: ViewParams & DismissErrorRequest; result: null };
@@ -660,7 +651,6 @@ export interface HelperRequests {
 	"sessions/setEffort": { params: ViewParams & { effort: string }; result: null };
 	"sessions/setName": { params: ViewParams & { name: string }; result: null };
 	"sessions/forkPoints": { params: ViewParams; result: ForkPointsResponse };
-	"sessions/fork": { params: ViewParams & ForkRequest & { unwatch?: boolean }; result: SessionRef };
 	"sessions/forkAndPrompt": { params: ViewParams & ForkAndPromptRequest & { forkView: number; stops?: boolean }; result: Naming<ForkAndPromptResponse> };
 }
 

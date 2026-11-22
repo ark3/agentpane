@@ -236,9 +236,6 @@ const api: AgentpaneApi = {
 	async forkAndPrompt(): Promise<never> {
 		throw new Error("this harness sends no edit");
 	},
-	async fork(handle: string) {
-		return refFor(handle.slice("h-".length));
-	},
 	async dismissError() {},
 	connect(next: EventHandlers): EventConnection {
 		handlers = next;
