@@ -180,6 +180,7 @@ The reasoning matters more than the conclusion: if a premise turns out to be wro
 - [D30](decisions/D30.md). A chain of requests that must all complete is one server operation
 - [D31](decisions/D31.md). One WebSocket carries commands, replies and events
 - [D32](decisions/D32.md). agentpane-mode's buffers are views the Emacs helper routes by, and the helper holds what a view has in flight
+- [D33](decisions/D33.md). agentpane-mode forks only by an edit, as the browser does, and marks the messages it can fork at
 
 ## The backend adapter contract
 
