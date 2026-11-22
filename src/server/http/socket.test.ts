@@ -144,7 +144,7 @@ describe("the token is the first frame (D31 point 5)", () => {
 				["sessions/create", { cwd: WORKSPACE, backend: "pi" }],
 				["sessions/preview", { ref: PI_SESSION }],
 				["sessions/attach", { ref: CODEX_SESSION }],
-				["sessions/close", { ref: PI_SESSION }],
+				["sessions/close", { handle }],
 				["sessions/prompt", { handle, text: "hello" }],
 				["sessions/prompt", { ref: CODEX_SESSION, text: "hello" }],
 				["sessions/abort", { handle }],
@@ -638,17 +638,6 @@ describe("commands that name a ref", () => {
 		expect(sessions.map((s) => sessionKey(s.ref))).toEqual([sessionKey(PI_SESSION), sessionKey(CLAUDE_SESSION), sessionKey(CODEX_SESSION)]);
 	});
 
-	it("closes a session by its ref, writing its end before the reply", async () => {
-		const { socket, handle } = await attached();
-		const id = socket.send("sessions/close", { ref: PI_SESSION });
-		await socket.reply(id);
-
-		expect(socket.shape).toEqual(["ended", "sessions-changed", `reply:${id}`]);
-		expect(socket.events[0]).toMatchObject({ type: "ended", handle });
-		expect(pi.forRef(PI_SESSION)?.disposed).toBe(true);
-		expect(app.sessions.isAttached(PI_SESSION)).toBe(false);
-	});
-
 	it("prompts by ref, attaching the session, and names it in the reply after its snapshot (D30)", async () => {
 		const socket = await connected();
 		socket.clear();
@@ -713,6 +702,17 @@ describe("commands that name a ref", () => {
 });
 
 describe("commands that name a handle (D31 point 9)", () => {
+	it("closes a session by its handle, writing its end before the reply", async () => {
+		const { socket, handle } = await attached();
+		const id = socket.send("sessions/close", { handle });
+		await socket.reply(id);
+
+		expect(socket.shape).toEqual(["ended", "sessions-changed", `reply:${id}`]);
+		expect(socket.events[0]).toMatchObject({ type: "ended", handle });
+		expect(pi.forRef(PI_SESSION)?.disposed).toBe(true);
+		expect(app.sessions.isAttached(PI_SESSION)).toBe(false);
+	});
+
 	it("prompts the live session under the handle", async () => {
 		const { socket, handle } = await attached();
 		expect(await socket.ok("sessions/prompt", { handle, text: "hi", priorErrorId: null })).toEqual({ disposition: "started" });
@@ -1072,11 +1072,27 @@ describe("commands that name a handle (D31 point 9)", () => {
 			["sessions/setName", { name: "probe name" }],
 			["sessions/forkPoints", {}],
 			["sessions/forkAndPrompt", { index: 0, text: "x" }],
+			["sessions/close", {}],
 		];
 		for (const [cmd, params] of commands) {
 			expect([cmd, (await socket.refused(cmd, { handle: "never-minted", ...params })).code]).toEqual([cmd, "not_attached"]);
 		}
 		expect([pi.created, codex.created]).toEqual([[], []]);
+	});
+
+	it("refuses a close of a handle that has ended, and closes nothing live under another (D35 point 3)", async () => {
+		const { socket, handle } = await attached();
+		await socket.ok("sessions/close", { handle });
+		const { session } = await socket.ok("sessions/attach", { ref: PI_SESSION });
+		const fresh = pi.forRef(PI_SESSION)!;
+		socket.clear();
+
+		const reply = await socket.refused("sessions/close", { handle });
+
+		expect(reply.code).toBe("not_attached");
+		expect(socket.shape).toEqual([`reply:${reply.id}`]);
+		expect(fresh.disposed).toBe(false);
+		expect(app.sessions.summaryOf(PI_SESSION)?.handle).toBe(session.handle);
 	});
 
 	it("respawns nothing for a prompt or a model that arrives while a close is out", async () => {
@@ -1089,7 +1105,7 @@ describe("commands that name a handle (D31 point 9)", () => {
 			await dispose();
 		};
 
-		const closing = socket.send("sessions/close", { ref: PI_SESSION });
+		const closing = socket.send("sessions/close", { handle });
 		await vi.waitFor(() => expect(app.sessions.isAttached(PI_SESSION)).toBe(false));
 		// Answered while the disposal is still held, so both arrive inside the close's window.
 		const prompt = await socket.refused("sessions/prompt", { handle, text: "hello" });
@@ -1106,7 +1122,7 @@ describe("commands that name a handle (D31 point 9)", () => {
 	it("refuses every one of them for a handle a close ended, across a re-attach, and runs nothing", async () => {
 		build({ forkPoints: [{ id: "e1", text: "first", index: 0 }] });
 		const { socket, handle } = await attached();
-		await socket.ok("sessions/close", { ref: PI_SESSION });
+		await socket.ok("sessions/close", { handle });
 		const { session } = await socket.ok("sessions/attach", { ref: PI_SESSION });
 		expect(session.handle).not.toBe(handle);
 		const fresh = pi.forRef(PI_SESSION);
@@ -1138,7 +1154,7 @@ describe("commands that name a handle (D31 point 9)", () => {
 		const { socket, handle } = await attached();
 		const first = socket.send("sessions/setModel", { handle, model: "pi-1" });
 		const second = socket.send("sessions/setName", { handle, name: "late" });
-		const closing = socket.send("sessions/close", { ref: PI_SESSION });
+		const closing = socket.send("sessions/close", { handle });
 		await socket.reply(closing);
 		held.resolve();
 		await socket.reply(first);

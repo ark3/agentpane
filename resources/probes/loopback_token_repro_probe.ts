@@ -233,9 +233,11 @@ async function main(): Promise<number> {
 			for (const pid of pids) launchedWorkers.add(pid);
 			found = { sessions: listing.sessions.length, pi_pids: pids };
 			evidence.found_with_the_token = { at: now(), sessions: listing.sessions.map((row) => ({ ref: row.ref, status: row.status })), pi_pids: pids };
-			// Close what a command started, so no agent is left running.
+			// Close what a command started, so no agent is left running: each
+			// live row, by its handle (D35 point 3).
 			for (const row of listing.sessions) {
-				const closed = await owner.request("sessions/close", { ref: row.ref });
+				if (row.handle === undefined) continue;
+				const closed = await owner.request("sessions/close", { handle: row.handle });
 				closeOk &&= closed.ok;
 			}
 			if (pids.length) {

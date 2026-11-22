@@ -279,9 +279,10 @@ async function forkAtLastPoint(
  * was (`codex_unsubscribe_probe.py`). So the attach has to come back to that
  * same child; a fresh app-server would be refused.
  */
-async function closeAndReattach(socket: AgentpaneSocket, ref: SessionRef, holder: SessionRef): Promise<{ step: Step; handle?: string }> {
-	const step: Step = { at: now(), closed: ref, still_open: holder };
-	const close = await socket.request("sessions/close", { ref });
+async function closeAndReattach(socket: AgentpaneSocket, { ref, handle }: { ref: SessionRef; handle: string }, holder: SessionRef): Promise<{ step: Step; handle?: string }> {
+	const step: Step = { at: now(), closed: ref, closed_handle: handle, still_open: holder };
+	// By its handle, as every client closes (D35 point 3).
+	const close = await socket.request("sessions/close", { handle });
 	step.close_reply = close.ok ? "ok" : close.code;
 	// The close is answered before the adapter has finished letting go;
 	// nothing observable marks that, so this waits rather than races it.
@@ -353,7 +354,7 @@ async function runBackend(backend: BackendId, workspace: string, port: number, t
 			// thread ("already has an active writer"), and the only other
 			// candidate holder is the parent's own app-server process -- which
 			// this closes, so a fork that attaches afterwards names it.
-			const close = await socket.request("sessions/close", { ref });
+			const close = await socket.request("sessions/close", { handle });
 			await sleep(2);
 			const retry = await socket.request("sessions/attach", { ref: forked.fork_ref as SessionRef }, 120);
 			steps.attach_fork_after_closing_parent = {
@@ -366,7 +367,7 @@ async function runBackend(backend: BackendId, workspace: string, port: number, t
 
 		if (forked.result === "pass") {
 			let forkRef = forked.attached_ref as SessionRef;
-			const forkHandle = forked.attached_handle as string;
+			let forkHandle = forked.attached_handle as string;
 
 			// 3. Re-attach, now that the fork's own store file exists.
 			const again = await socket.request("sessions/attach", { ref: forkRef }, 120);
@@ -374,6 +375,7 @@ async function runBackend(backend: BackendId, workspace: string, port: number, t
 				reply: again.ok ? "ok" : again.code,
 				detail: again.ok ? { ref: again.result.session.ref, handle: again.result.session.handle, same_handle: again.result.session.handle === forkHandle } : again.detail,
 			};
+			if (again.ok) forkHandle = again.result.session.handle;
 
 			// 4. Fork the fork at ITS most recent turn.
 			steps.fork_of_fork = await forkAtLastPoint(socket, { ref: forkRef, handle: forkHandle }, "Reply with exactly the word FOUR and nothing else.", fork);
@@ -381,10 +383,10 @@ async function runBackend(backend: BackendId, workspace: string, port: number, t
 			// 5. Close one side of the pair and re-attach it while the other
 			//    still holds the shared child (OW-voyezi).
 			if (backend === "codex") {
-				const parentSide = await closeAndReattach(socket, ref, forkRef);
+				const parentSide = await closeAndReattach(socket, { ref, handle }, forkRef);
 				steps.reattach_parent_after_closing_it = parentSide.step;
 				if (parentSide.handle) handle = parentSide.handle;
-				steps.reattach_fork_after_closing_it = (await closeAndReattach(socket, forkRef, ref)).step;
+				steps.reattach_fork_after_closing_it = (await closeAndReattach(socket, { ref: forkRef, handle: forkHandle }, ref)).step;
 			}
 		}
 

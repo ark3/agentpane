@@ -87,6 +87,13 @@ function holdDispose(adapter: FakeAdapter): () => void {
 	return () => held.resolve();
 }
 
+/** Close the session `ref` names by its container's handle, as a client's close does (D35 point 3). */
+function closeLive(ref: SessionRef): Promise<void> {
+	const handle = sessions.summaryOf(ref)?.handle;
+	if (handle === undefined) throw new Error(`no container under ${sessionKey(ref)}`);
+	return sessions.close(handle);
+}
+
 describe("attach", () => {
 	it("spawns once even when two attaches race", async () => {
 		const [a, b] = await Promise.all([sessions.attach(REF), sessions.attach(REF)]);
@@ -373,12 +380,12 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		expect(sessions.isAttached(virtualRef)).toBe(true);
 	});
 
-	it("closes a renamed session under either id", async () => {
+	it("closes a renamed session by its handle, leaving neither id resolving", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
 		await sessions.attach(REF);
 
-		await sessions.close(REF);
+		await closeLive(REF);
 
 		expect(sessions.liveRefs()).toEqual([]);
 		expect(sessions.canonicalRef(REF)).toEqual(REF);
@@ -472,23 +479,6 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			expect(sessions.liveRefs()).toEqual([real]);
 		});
 
-		it("stops the one startup when closed under the new name", async () => {
-			const { factory, wire, attaching, release } = await attachParkedAfterRename();
-
-			await sessions.close(real);
-			release();
-
-			await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
-			expect(factory.created).toHaveLength(1);
-			expect(factory.created[0]?.disposed).toBe(true);
-			// Nothing but the close's `ended`, under a handle no snapshot ever gave
-			// a client, so none holds a view for it to end (D26).
-			expect(naming(real, wire).map((event) => event.type)).toEqual(["ended"]);
-			expect(sessions.liveRefs()).toEqual([]);
-			expect(sessions.summaryOf(REF)).toBeNull();
-			expect(sessions.summaryOf(real)).toBeNull();
-		});
-
 		it("sends what the adapter emits during start under the new ref", async () => {
 			const { wire, release, attaching } = await attachParkedAfterRename((adapter) => adapter.append(userMessage("hello")));
 
@@ -528,104 +518,6 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 				expect(sessions.holds(name)).toBe(false);
 			}
 			expect((await sessions.list()).map((summary) => summary.ref)).toEqual([REF]);
-		});
-
-		it("holds back an attach under either name while a start that failed after the rename reaps its adapter (OW-yufazo)", async () => {
-			let releaseDispose: (() => void) | undefined;
-			const reaping = deferred();
-			const factory = renamingInsideStart(async (adapter) => {
-				if (releaseDispose) return;
-				releaseDispose = holdDispose(adapter);
-				reaping.resolve();
-				throw new Error("get_messages failed");
-			});
-			index.summaries = [storedSession(REF, WORKSPACE), storedSession(real, WORKSPACE)];
-			sessions = new SessionManager({ index, adapters: { pi: factory } }, broadcaster);
-
-			const failing = sessions.attach(REF);
-			await reaping.promise;
-			await settle();
-			const closing = sessions.close(real);
-			const throughReal = sessions.attach(real);
-			const throughRef = sessions.attach(REF);
-			await settle();
-
-			expect(factory.created).toHaveLength(1);
-
-			releaseDispose?.();
-			await closing;
-			await expect(failing).rejects.toThrow("get_messages failed");
-			const replacement = await throughReal;
-			expect(await throughRef).toBe(replacement);
-			expect(factory.created).toEqual([expect.anything(), replacement]);
-			expect(factory.created[0]?.disposals).toBe(1);
-			expect(sessions.liveRefs()).toEqual([real]);
-		});
-
-		it("resumes the stored session, not the id the failed start announced, for an attach held back by a close during its reaping (OW-yufazo)", async () => {
-			// The index has never heard of `real`: the failed start announced it and stored nothing.
-			let releaseDispose: (() => void) | undefined;
-			const reaping = deferred();
-			const factory = renamingInsideStart(async (adapter) => {
-				if (releaseDispose) return;
-				releaseDispose = holdDispose(adapter);
-				reaping.resolve();
-				throw new Error("get_messages failed");
-			});
-			sessions = new SessionManager({ index, adapters: { pi: factory } }, broadcaster);
-
-			const failing = sessions.attach(REF);
-			await reaping.promise;
-			await settle();
-			const closing = sessions.close(real);
-			const throughReal = sessions.attach(real);
-			releaseDispose?.();
-			await closing;
-
-			await expect(failing).rejects.toThrow("get_messages failed");
-			expect(await throughReal).toBe(factory.created[1]);
-			expect(factory.created[1]?.startOptions).toEqual({ cwd: WORKSPACE, resumeId: REF.id });
-		});
-
-		it("holds back an attach under the name a created session's failed start took, once closed under its own during the reaping (OW-kamave)", async () => {
-			// The failure takes the created container out of the table with
-			// `real` (D30); the startup still answers to it until it is retired.
-			let releaseDispose: (() => void) | undefined;
-			const reaping = deferred();
-			const factory = renamingInsideStart(async (adapter) => {
-				if (releaseDispose) return;
-				releaseDispose = holdDispose(adapter);
-				reaping.resolve();
-				throw new Error("get_messages failed");
-			});
-			index.summaries = [storedSession(REF, WORKSPACE), storedSession(real, WORKSPACE)];
-			sessions = new SessionManager({ index, adapters: { pi: factory }, newId: () => "created" }, broadcaster);
-			const virtualRef = CREATED;
-
-			const failing = sessions.create(WORKSPACE, "pi");
-			await reaping.promise;
-			await settle();
-			let closed = false;
-			const closing = sessions.close(virtualRef).then(() => {
-				closed = true;
-			});
-			// How it ends is not this card's: it resumes under the virtual ref the
-			// disposal carries, although `real` is in the index.
-			const throughReal = Promise.allSettled([sessions.attach(real)]);
-			await settle();
-			await settle();
-
-			expect(closed).toBe(false);
-			expect(factory.created).toHaveLength(1);
-			expect(factory.created[0]?.disposed).toBe(false);
-
-			releaseDispose?.();
-			await closing;
-			await expect(failing).rejects.toThrow("get_messages failed");
-			await throughReal;
-			expect(factory.created).toHaveLength(1);
-			expect(factory.created[0]?.disposals).toBe(1);
-			expect(sessions.liveRefs()).toEqual([]);
 		});
 	});
 });
@@ -769,23 +661,6 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect(retried.startOptions).toEqual({ cwd: WORKSPACE, forkOf: { parentId: "parent", entryId: "e1" } });
 	});
 
-	it("discards the recipe for a fork the caller deleted before ever attaching it", async () => {
-		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
-		const claude = new FakeAdapterFactory({ forkMode: "claude" });
-		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
-		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
-		await sessions.attach(claudeRef);
-		const forked = await sessions.fork(claudeRef, "e1");
-
-		await sessions.close(forked);
-
-		// A close then an attach is reachable straight off the socket. A recipe that
-		// survived the close would spawn a sandboxed agent for a session the
-		// caller has already thrown away.
-		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
-		expect(claude.created).toHaveLength(1);
-	});
-
 	it("stops reaching the recipe once the fork has its own child, including on a spelling the rename left behind", async () => {
 		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
 		// The CLI is authoritative about its own store, so a Claude session can
@@ -802,96 +677,13 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		const renamed: SessionRef = { backend: "claude", id: "fork-real" };
 		expect(sessions.canonicalRef(forked)).toEqual(renamed);
 
-		await sessions.close(renamed);
+		await closeLive(renamed);
 
-		// The pre-rename spelling is the one key `close()` could not know to
-		// clear. A recipe still parked under it would fork the PARENT a second
-		// time and hand the caller that as the session it asked for.
+		// A recipe still parked under the pre-rename spelling would fork the
+		// PARENT a second time and hand the caller that as the session it asked
+		// for.
 		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
 		expect(claude.created).toHaveLength(2);
-	});
-
-	it("discards the recipe parked under a name the fork's start renamed away from, when closed under the new one", async () => {
-		// OW-hojefo's Codex first-message fork parks its recipe under a
-		// `virtual:` ref and renames to its thread inside `start()`. A close
-		// under the thread id during that start must not leave the recipe parked
-		// under the old name, or the next attach of it starts the fork again.
-		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
-		const claude = new FakeAdapterFactory({ forkMode: "claude" });
-		const gate = deferred();
-		const renamedInside = deferred();
-		const create = claude.create.bind(claude);
-		claude.create = (ref) => {
-			const adapter = create(ref);
-			if (ref.id.includes("#fork-")) {
-				const start = adapter.start.bind(adapter);
-				adapter.start = async (opts) => {
-					await start(opts);
-					adapter.materialiseAs("fork-thread");
-					renamedInside.resolve();
-					await gate.promise;
-				};
-			}
-			return adapter;
-		};
-		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
-		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
-		await sessions.attach(claudeRef);
-		const forked = await sessions.fork(claudeRef, "e1");
-		const attaching = sessions.attach(forked);
-		await renamedInside.promise;
-
-		await sessions.close({ backend: "claude", id: "fork-thread" });
-		gate.resolve();
-		await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
-
-		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
-		expect(claude.created).toHaveLength(2);
-	});
-
-	it("discards the recipe of a fork whose start renamed it and failed, when closed under the new name during the reaping (OW-kamave)", async () => {
-		// The failure takes the fork's container out of the table, so the close
-		// finds none: only the startup still answers to both names.
-		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
-		const claude = new FakeAdapterFactory({ forkMode: "claude" });
-		let releaseDispose: (() => void) | undefined;
-		const reaping = deferred();
-		const create = claude.create.bind(claude);
-		claude.create = (ref) => {
-			const adapter = create(ref);
-			if (ref.id.includes("#fork-") && !releaseDispose) {
-				adapter.start = async () => {
-					adapter.materialiseAs("fork-thread");
-					releaseDispose = holdDispose(adapter);
-					reaping.resolve();
-					throw new Error("fork refused");
-				};
-			}
-			return adapter;
-		};
-		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
-		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
-		await sessions.attach(claudeRef);
-		const forked = await sessions.fork(claudeRef, "e1");
-		const failing = sessions.attach(forked);
-		await reaping.promise;
-		await settle();
-
-		let closed = false;
-		const closing = sessions.close({ backend: "claude", id: "fork-thread" }).then(() => {
-			closed = true;
-		});
-		await settle();
-		expect(closed).toBe(false);
-		releaseDispose?.();
-		await closing;
-		await expect(failing).rejects.toThrow("fork refused");
-
-		// A recipe left parked would fork the parent again for a session the
-		// caller has closed.
-		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
-		expect(claude.created).toHaveLength(2);
-		expect(claude.created.filter((adapter) => adapter.startOptions?.forkOf)).toEqual([]);
 	});
 
 	// What a ref-changing fork leaves behind for the PARENT (OW-kekoji). The
@@ -1126,15 +918,15 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect(listed.map((s) => sessionKey(s.ref))).toEqual([sessionKey(codexRef)]);
 	});
 
-	it("leaves the fork's live adapter alone when the parent's ref is closed", async () => {
-		// `close()` is what `sessions/close` calls (socket.ts). The parent is
-		// detached, so the call finds nothing and returns silently -- the
-		// command is still admitted -- and the agent the fork is driving lives on.
+	it("refuses a close of the parent's handle after a Pi fork, and leaves the fork's live adapter alone", async () => {
+		// The parent's handle ended at the fork, so a client still holding it
+		// is refused, and the agent the fork is driving lives on.
 		await sessions.attach(REF);
 		const parentAdapter = pi.forRef(REF);
+		const parentHandle = sessions.summaryOf(REF)!.handle;
 
 		const forked = await sessions.fork(REF, "e1");
-		await expect(sessions.close(REF)).resolves.toBeUndefined();
+		await expect(sessions.close(parentHandle)).rejects.toBeInstanceOf(HandleEndedError);
 
 		expect(parentAdapter?.disposed).toBe(false);
 		expect(sessions.isAttached(forked)).toBe(true);
@@ -1171,7 +963,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		};
 
 		const forking = sessions.fork(REF, "e1");
-		await sessions.close(REF);
+		await closeLive(REF);
 		gate.resolve();
 		const forked = await forking;
 
@@ -1226,7 +1018,6 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
 		const virtualRef = await sessions.create(WORKSPACE, "pi");
 		await sessions.submit(virtualRef, "first");
-		const parentAdapter = renaming.forRef(virtualRef);
 
 		const forked = await sessions.fork(virtualRef, "e1");
 
@@ -1236,8 +1027,6 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect(sessions.canonicalRef(virtualRef)).toEqual(virtualRef);
 		expect(sessions.canonicalRef(virtualRef)).not.toEqual(forked);
 		expect(sessions.adapterFor(virtualRef)).toBeUndefined();
-		await sessions.close(virtualRef);
-		expect(parentAdapter?.disposed).toBe(false);
 	});
 
 	it("rejects a fork on a session with no live adapter", async () => {
@@ -1455,7 +1244,7 @@ describe("a prompt names a handle or a ref (D30)", () => {
 	it("refuses a handle that a close ended, though the session was attached again under another", async () => {
 		await sessions.attach(REF);
 		const ended = sessions.summaryOf(REF)!.handle;
-		await sessions.close(REF);
+		await closeLive(REF);
 		const again = (await sessions.attach(REF)) as FakeAdapter;
 		expect(sessions.summaryOf(REF)!.handle).not.toBe(ended);
 
@@ -1473,7 +1262,7 @@ describe("a prompt names a handle or a ref (D30)", () => {
 		const first = sessions.submit(REF, "first", undefined, null, handle);
 		const second = sessions.submit(REF, "second", undefined, null, handle);
 		await settle();
-		const closing = sessions.close(REF);
+		const closing = closeLive(REF);
 		held.resolve();
 
 		await first;
@@ -1630,7 +1419,7 @@ describe("a container keyed by a handle", () => {
 		};
 		const forked = await sessions.fork(REF, "e1");
 
-		await sessions.close(forked);
+		await closeLive(forked);
 		const frames: ServerEvent[] = [];
 		broadcaster.addClient((event) => frames.push(event));
 		adapter.append(userMessage("after the close"));
@@ -1649,7 +1438,7 @@ describe("a container keyed by a handle", () => {
 		const handle = handleOf(REF);
 		expect(handle).toEqual(expect.any(String));
 
-		await sessions.close(real);
+		await closeLive(real);
 
 		for (const name of [REF, real]) {
 			expect(sessions.summaryOf(name)).toBeNull();
@@ -1704,7 +1493,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		const forked = await sessions.fork(parentRef, "e1");
 		const forkAdapter = (await sessions.attach(forked)) as FakeAdapter;
 
-		await sessions.close(parentRef);
+		await closeLive(parentRef);
 
 		expect(child.kills).toBe(0);
 		expect(child.holders).toBe(1);
@@ -1717,7 +1506,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		const forked = await sessions.fork(parentRef, "e1");
 		await sessions.attach(forked);
 
-		await sessions.close(forked);
+		await closeLive(forked);
 
 		expect(child.kills).toBe(0);
 		await sessions.submit(parentRef, "still here");
@@ -1732,22 +1521,6 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		await sessions.disposeAll();
 
 		expect(child.holders).toBe(0);
-		expect(child.kills).toBe(1);
-	});
-
-	it("releases a fork nobody ever attached, so the parent\'s child can still die", async () => {
-		// The share is taken at fork time, not at attach, so an abandoned fork
-		// pins the parent\'s process. `close()` on the fork\'s ref is the browser
-		// path out of that, and shutdown is the other.
-		await sessions.attach(parentRef);
-		const forked = await sessions.fork(parentRef, "e1");
-		expect(child.holders).toBe(2);
-
-		await sessions.close(forked);
-		expect(child.holders).toBe(1);
-		expect(child.kills).toBe(0);
-
-		await sessions.close(parentRef);
 		expect(child.kills).toBe(1);
 	});
 
@@ -1774,7 +1547,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		// And the parked entry is gone: the index has never heard of the fork, so
 		// a retry gets the honest 404 rather than a dead adapter.
 		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
-		await sessions.close(parentRef);
+		await closeLive(parentRef);
 		expect(child.kills).toBe(1);
 	});
 
@@ -1794,7 +1567,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		const forked = await sessions.fork(parentRef, "e1");
 
 		const attaching = sessions.attach(forked);
-		await sessions.close(parentRef);
+		await closeLive(parentRef);
 		expect(child.kills).toBe(0);
 		gate.resolve();
 
@@ -1834,69 +1607,6 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 			return built;
 		};
 	}
-
-	it("refuses the attach of a fork closed while it was starting, and disposes its adapter once", async () => {
-		const gate = deferred();
-		codex = new FakeAdapterFactory({
-			forkMode: "shared",
-			sharedChild: child,
-			forkOptions: { holdStart: gate.promise },
-		});
-		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
-		await sessions.attach(parentRef);
-		const forkAdapter = capturingForks();
-		const forked = await sessions.fork(parentRef, "e1");
-		const release = holdDispose(forkAdapter());
-
-		const attaching = sessions.attach(forked);
-		await settle();
-		const closing = sessions.close(forked);
-		// The fork's start completes while the close is still disposing.
-		gate.resolve();
-		for (let i = 0; i < 4; i++) await settle();
-		release();
-		await closing;
-
-		await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
-		expect(sessions.isAttached(forked)).toBe(false);
-		expect(forkAdapter().disposals).toBe(1);
-	});
-
-	it("spawns nothing on a closed fork's thread while its parked adapter is still being disposed", async () => {
-		// The fork is on disk, as Codex's is, so an attach that finds no parked
-		// entry can resume it through the index on an adapter of its own.
-		index.summaries.push(storedSession(forkRef, WORKSPACE));
-		await sessions.attach(parentRef);
-		const forkAdapter = capturingForks();
-		const forked = await sessions.fork(parentRef, "e1");
-		const release = holdDispose(forkAdapter());
-
-		const closing = sessions.close(forked);
-		const attaching = sessions.attach(forked);
-		await settle();
-		await settle();
-
-		expect(codex.created).toHaveLength(1);
-
-		release();
-		await closing;
-		const reopened = await attaching;
-		expect(codex.created).toHaveLength(2);
-		expect(reopened).toBe(codex.created[1]);
-		expect(forkAdapter().disposals).toBe(1);
-	});
-
-	it("says nothing at the close of a parked fork, which has no handle for a client to hold (D26)", async () => {
-		await sessions.attach(parentRef);
-		const forkAdapter = capturingForks();
-		const forked = await sessions.fork(parentRef, "e1");
-		const events = broadcastEvents();
-
-		await sessions.close(forked);
-
-		expect(forkAdapter().disposals).toBe(1);
-		expect(events).toEqual([]);
-	});
 
 	it("disposes a starting fork's adapter once when shutdown lands during its attach", async () => {
 		const gate = deferred();
@@ -1945,7 +1655,7 @@ describe("lifecycle", () => {
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
 		const virtualRef = await sessions.create(WORKSPACE, "pi", "openrouter/deepseek/deepseek-v4.1-flash:high");
 		await sessions.submit(virtualRef, "first");
-		await sessions.close(real);
+		await closeLive(real);
 
 		await sessions.attach(real);
 
@@ -1984,7 +1694,7 @@ describe("lifecycle", () => {
 		sessions = new SessionManager({ index, adapters: { pi: brittle } }, broadcaster);
 		await sessions.attach(REF);
 
-		await expect(sessions.close(REF)).resolves.toBeUndefined();
+		await expect(closeLive(REF)).resolves.toBeUndefined();
 		expect(sessions.isAttached(REF)).toBe(false);
 	});
 
@@ -2006,7 +1716,7 @@ describe("lifecycle", () => {
 			await dispose();
 		};
 
-		const closing = sessions.close(REF);
+		const closing = closeLive(REF);
 		const throughAlias = sessions.attach(REF);
 		const throughCanonical = sessions.attach(canonical);
 		// Give an unguarded attach enough turns to reach the synchronous create().
@@ -2033,7 +1743,7 @@ describe("lifecycle", () => {
 		const release = holdDispose(adapter);
 		const events = broadcastEvents();
 
-		const closing = sessions.close(REF);
+		const closing = closeLive(REF);
 		await settle();
 
 		const said = [{ type: "ended", session: REF, handle }, { type: "sessions-changed" }];
@@ -2049,7 +1759,7 @@ describe("lifecycle", () => {
 		if (!adapter) throw new Error("no adapter");
 		const release = holdDispose(adapter);
 
-		const closing = sessions.close(REF);
+		const closing = closeLive(REF);
 		let shutDown = false;
 		const shutdown = sessions.disposeAll().then(() => {
 			shutDown = true;
@@ -2065,29 +1775,27 @@ describe("lifecycle", () => {
 		expect(adapter.disposals).toBe(1);
 	});
 
-	it("keeps a closing adapter's replacement waiting through a second close of the same session", async () => {
-		// Two clients can each send the close. The second finds nothing in the
-		// table and has nothing to let go of, and must leave the first's
-		// disposal holding the attach back.
+	it("refuses a second close of one handle while the first is disposing, and keeps the replacement waiting (OW-loromi)", async () => {
+		// Two clients can each send the close. The second finds no live session
+		// under the handle, as any close of an ended handle does, and leaves the
+		// first's disposal holding the attach back.
 		await sessions.attach(REF);
 		const first = pi.created[0];
 		if (!first) throw new Error("no adapter");
-		const gate = deferred();
-		const dispose = first.dispose.bind(first);
-		first.dispose = async () => {
-			await gate.promise;
-			await dispose();
-		};
+		const handle = sessions.summaryOf(REF)!.handle;
+		const release = holdDispose(first);
 
-		const closing = sessions.close(REF);
-		await sessions.close(REF);
+		const closing = sessions.close(handle);
+		await expect(sessions.close(handle)).rejects.toBeInstanceOf(HandleEndedError);
 		const attaching = sessions.attach(REF);
 		await settle();
 
 		expect(pi.created).toHaveLength(1);
+		expect(first.disposed).toBe(false);
 
-		gate.resolve();
+		release();
 		await closing;
+		expect(first.disposals).toBe(1);
 		expect(await attaching).toBe(pi.created[1]);
 	});
 
@@ -2124,7 +1832,7 @@ describe("lifecycle", () => {
 			await dispose();
 		};
 
-		const closing = sessions.close(canonical);
+		const closing = closeLive(canonical);
 		const throughAliasA = sessions.attach(aliasA);
 		const throughAliasB = sessions.attach(aliasB);
 		for (let i = 0; i < 4; i++) await Promise.resolve();
@@ -2182,7 +1890,7 @@ describe("lifecycle", () => {
 			await disposeFirst();
 		};
 
-		const closingFirst = sessions.close(canonical);
+		const closingFirst = closeLive(canonical);
 		const throughAlias = sessions.attach(alias);
 		firstDisposal.resolve();
 		await closingFirst;
@@ -2197,7 +1905,7 @@ describe("lifecycle", () => {
 			await secondDisposal.promise;
 			await disposeSecond();
 		};
-		const closingSecond = sessions.close(canonical);
+		const closingSecond = closeLive(canonical);
 
 		releaseRefreshedLookup.resolve();
 		for (let i = 0; i < 4; i++) await Promise.resolve();
@@ -2336,7 +2044,7 @@ describe("holds, what sessions/preview asks before it answers gone (D26 point 5)
 		const adapter = (await sessions.attach(REF)) as FakeAdapter;
 		const release = holdDispose(adapter);
 
-		const closing = sessions.close(REF);
+		const closing = closeLive(REF);
 		await settle();
 		expect(adapter.disposed).toBe(false);
 		expect(sessions.holds(REF)).toBe(false);
@@ -2354,25 +2062,6 @@ describe("teardown racing a startup", () => {
 	// later has nothing left that will ever reap it. Both real adapters take a
 	// round trip inside `start()` -- Codex's `initialize`, Pi's `get_state` --
 	// so this window is milliseconds wide on every single attach.
-
-	it("disposes an adapter that was still starting when its session closed", async () => {
-		const gate = deferred();
-		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
-		sessions = new SessionManager({ index, adapters: { pi: slow }, newId: () => "created" }, broadcaster);
-		const ref = CREATED;
-
-		const attaching = sessions.create(WORKSPACE, "pi");
-		await settle();
-		expect(slow.created).toHaveLength(1);
-
-		await sessions.close(ref);
-		gate.resolve();
-		await expect(attaching).rejects.toThrow();
-
-		expect(slow.created[0]?.disposed).toBe(true);
-		expect(sessions.isAttached(ref)).toBe(false);
-		expect(sessions.liveRefs()).toEqual([]);
-	});
 
 	it("disposes an adapter that was still starting when the server shut down", async () => {
 		const gate = deferred();
@@ -2418,34 +2107,6 @@ describe("teardown racing a startup", () => {
 		expect(pi.created).toHaveLength(0);
 	});
 
-	it("does not resurrect a closed session when the adapter renames itself on start", async () => {
-		// A rename writes the new id into the table as a name of the container.
-		// Run against a session that has already been closed, it puts a name
-		// back -- a closed conversation reappearing in the list under an id the
-		// client never asked for.
-		const gate = deferred();
-		const RENAMED = "/home/u/.pi/agent/sessions/real.jsonl";
-		const renaming = new FakeAdapterFactory({
-			holdStart: gate.promise,
-			materialiseOnStart: RENAMED,
-		});
-		sessions = new SessionManager({ index, adapters: { pi: renaming }, newId: () => "created" }, broadcaster);
-		const ref = CREATED;
-
-		const attaching = sessions.create(WORKSPACE, "pi");
-		await settle();
-		await sessions.close(ref);
-		gate.resolve();
-		await expect(attaching).rejects.toThrow();
-
-		expect(sessions.liveRefs()).toEqual([]);
-		// Only what the store already held, under its own id: neither the closed
-		// virtual session nor the id the dying adapter adopted on its way out.
-		const listed = await sessions.list({ cwd: WORKSPACE });
-		expect(listed.map((s) => s.ref.id)).toEqual([REF.id]);
-		expect(sessions.canonicalRef({ backend: "pi", id: RENAMED }).id).toBe(RENAMED);
-	});
-
 	it("refuses to spawn once shutdown has begun", async () => {
 		// The HTTP server keeps serving while `disposeAll()` runs -- it is stopped
 		// after, not before -- and disposeAll walks the startup table exactly once.
@@ -2469,56 +2130,6 @@ describe("teardown racing a startup", () => {
 
 		// Only the one that was already running; the latecomer never spawned.
 		expect(slow.created).toHaveLength(1);
-	});
-
-	it("closes a session whose startup then fails on its own", async () => {
-		// Not a test of the shared disposal -- against the unfixed code this
-		// passes, because close() disposed nothing and the failure path was the
-		// only caller. Exactly-once is pinned by the shutdown case above, which
-		// does go red. What this covers is that the two unwinding paths running
-		// back to back leave nothing registered.
-		const gate = deferred();
-		const flaky = new FakeAdapterFactory({
-			holdStart: gate.promise,
-			failStart: "sbox: no git root",
-		});
-		sessions = new SessionManager({ index, adapters: { pi: flaky }, newId: () => "created" }, broadcaster);
-		const ref = CREATED;
-
-		const attaching = sessions.create(WORKSPACE, "pi");
-		await settle();
-		await sessions.close(ref);
-		gate.resolve();
-		await expect(attaching).rejects.toThrow();
-
-		expect(flaky.created[0]?.disposals).toBe(1);
-		expect(sessions.isAttached(ref)).toBe(false);
-		expect(sessions.liveRefs()).toEqual([]);
-	});
-
-	it("starts afresh for an attach that follows a close of a session still in its index lookup", async () => {
-		const lookup = deferred();
-		const held: SessionIndex = {
-			list: (query) => index.list(query),
-			get: async (ref) => {
-				await lookup.promise;
-				return index.get(ref);
-			},
-			preview: (ref) => index.preview(ref),
-		};
-		sessions = new SessionManager({ index: held, adapters: { pi } }, broadcaster);
-
-		const first = sessions.attach(REF);
-		await settle();
-		const closing = sessions.close(REF);
-		const second = sessions.attach(REF);
-		lookup.resolve();
-		await closing;
-
-		await expect(first).rejects.toBeInstanceOf(UnknownSessionError);
-		const adapter = await second;
-		expect(pi.created).toEqual([adapter]);
-		expect(sessions.isAttached(REF)).toBe(true);
 	});
 
 	describe("an attach that waited out the close of a session with two names (OW-yufazo)", () => {
@@ -2547,59 +2158,9 @@ describe("teardown racing a startup", () => {
 			if (!adapter) throw new Error("no adapter");
 			const releaseDispose = holdDispose(adapter);
 			holding = true;
-			const closing = sessions.close(C);
+			const closing = closeLive(C);
 			return { closing, releaseDispose, releaseLookup: () => lookup.resolve() };
 		}
-
-		it("is stopped by a close under the spelling it asked for, while in its index lookup", async () => {
-			const { closing, releaseDispose, releaseLookup } = await closeHeld();
-			const attaching = sessions.attach(REF);
-			releaseDispose();
-			await closing;
-			await settle();
-
-			await sessions.close(REF);
-			releaseLookup();
-
-			await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
-			expect(pi.created).toHaveLength(1);
-			expect(sessions.isAttached(C)).toBe(false);
-			expect(sessions.liveRefs()).toEqual([]);
-		});
-
-		it("is stopped by a close under the spelling it asked for, while still waiting out the disposal", async () => {
-			const { closing, releaseDispose, releaseLookup } = await closeHeld();
-			const attaching = sessions.attach(REF);
-			await settle();
-
-			await sessions.close(REF);
-			releaseDispose();
-			releaseLookup();
-			await closing;
-
-			await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
-			expect(pi.created).toHaveLength(1);
-			expect(sessions.isAttached(C)).toBe(false);
-			expect(sessions.liveRefs()).toEqual([]);
-		});
-
-		it("is stopped by a close under the spelling it asked for when it joined another attach's startup", async () => {
-			const { closing, releaseDispose, releaseLookup } = await closeHeld();
-			const throughC = sessions.attach(C);
-			const throughRef = sessions.attach(REF);
-			releaseDispose();
-			await closing;
-			await settle();
-
-			await sessions.close(REF);
-			releaseLookup();
-
-			await expect(throughC).rejects.toBeInstanceOf(UnknownSessionError);
-			await expect(throughRef).rejects.toBeInstanceOf(UnknownSessionError);
-			expect(pi.created).toHaveLength(1);
-			expect(sessions.isAttached(C)).toBe(false);
-			expect(sessions.liveRefs()).toEqual([]);
-		});
 
 		it("keeps the spelling it asked for as a name of the container it attached", async () => {
 			const { closing, releaseDispose, releaseLookup } = await closeHeld();
@@ -2610,190 +2171,7 @@ describe("teardown racing a startup", () => {
 			await attaching;
 
 			expect(sessions.isAttached(REF)).toBe(true);
-			await sessions.close(REF);
-			expect(sessions.liveRefs()).toEqual([]);
-		});
-	});
-
-	it("stops the startup an unseen alias's attach collapsed into, when closed under that alias", async () => {
-		const canonical: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/ws/a.jsonl" };
-		const aliasA: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl" };
-		const aliasB: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/other/../ws/a.jsonl" };
-		const summary = storedSession(canonical, WORKSPACE);
-		const canonicalizingIndex: SessionIndex = {
-			list: async () => [summary],
-			get: async () => summary,
-			preview: async () => [],
-		};
-		const gate = deferred();
-		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
-		sessions = new SessionManager({ index: canonicalizingIndex, adapters: { pi: slow } }, broadcaster);
-
-		const throughA = sessions.attach(aliasA);
-		await settle();
-		const throughB = sessions.attach(aliasB);
-		await settle();
-		await sessions.close(aliasB);
-		gate.resolve();
-
-		await expect(throughA).rejects.toBeInstanceOf(UnknownSessionError);
-		await expect(throughB).rejects.toBeInstanceOf(UnknownSessionError);
-		expect(slow.created).toHaveLength(1);
-		expect(slow.created[0]?.disposed).toBe(true);
-		expect(sessions.isAttached(canonical)).toBe(false);
-		expect(sessions.liveRefs()).toEqual([]);
-	});
-
-	it("leaves another attach's startup under the canonical name when a failed start reaps its adapter (OW-yufazo)", async () => {
-		// REF canonicalises to C. The attach under C is still in its index
-		// lookup when REF's start fails, so the name is that attach's to be
-		// found by, not the failed one's.
-		const C: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/c.jsonl" };
-		const summary = storedSession(C, WORKSPACE);
-		const lookupOfC = deferred();
-		const canonicalizingIndex: SessionIndex = {
-			list: async () => [summary],
-			get: async (ref) => {
-				if (sessionKey(ref) === sessionKey(C)) await lookupOfC.promise;
-				return summary;
-			},
-			preview: async () => [],
-		};
-		const disposing = deferred();
-		const releaseDispose = deferred();
-		const create = pi.create.bind(pi);
-		pi.create = (ref) => {
-			const adapter = create(ref);
-			if (pi.created.length === 1) {
-				adapter.start = async () => {
-					throw new Error("start failed");
-				};
-				const dispose = adapter.dispose.bind(adapter);
-				adapter.dispose = async () => {
-					disposing.resolve();
-					await releaseDispose.promise;
-					await dispose();
-				};
-			}
-			return adapter;
-		};
-		sessions = new SessionManager({ index: canonicalizingIndex, adapters: { pi } }, broadcaster);
-
-		const throughRef = sessions.attach(REF);
-		const throughC = sessions.attach(C);
-		await disposing.promise;
-		const closing = sessions.close(C);
-		lookupOfC.resolve();
-		releaseDispose.resolve();
-		await closing;
-
-		await expect(throughRef).rejects.toThrow("start failed");
-		await expect(throughC).rejects.toBeInstanceOf(UnknownSessionError);
-		expect(pi.created).toHaveLength(1);
-		expect(sessions.liveRefs()).toEqual([]);
-	});
-
-	describe("a close under a name an attach still in its index lookup holds (OW-kamave)", () => {
-		// The lookup of C is held, so an attach under C is still in it when
-		// another startup's container comes to answer to C as well.
-		const C: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/c.jsonl" };
-
-		/** An index resolving every ref to C, whose lookup of C itself waits for the returned release. */
-		function canonicalisingToC(): { held: SessionIndex; releaseLookup: () => void } {
-			const summary = storedSession(C, WORKSPACE);
-			const lookupOfC = deferred();
-			const held: SessionIndex = {
-				list: async () => [summary],
-				get: async (ref) => {
-					if (sessionKey(ref) === sessionKey(C)) await lookupOfC.promise;
-					return summary;
-				},
-				preview: async () => [],
-			};
-			return { held, releaseLookup: () => lookupOfC.resolve() };
-		}
-
-		it("stops it as well as the startup of the container REF's lookup built under C", async () => {
-			const { held, releaseLookup } = canonicalisingToC();
-			const gate = deferred();
-			const slow = new FakeAdapterFactory({ holdStart: gate.promise });
-			sessions = new SessionManager({ index: held, adapters: { pi: slow } }, broadcaster);
-
-			const throughRef = sessions.attach(REF);
-			const throughC = sessions.attach(C);
-			await settle();
-			expect(slow.created).toHaveLength(1);
-
-			await sessions.close(C);
-			releaseLookup();
-			gate.resolve();
-
-			await expect(throughRef).rejects.toBeInstanceOf(UnknownSessionError);
-			await expect(throughC).rejects.toBeInstanceOf(UnknownSessionError);
-			expect(slow.created).toHaveLength(1);
-			expect(slow.created[0]?.disposed).toBe(true);
-			expect(sessions.liveRefs()).toEqual([]);
-		});
-
-		it("stops it when that container's startup has already published", async () => {
-			const { held, releaseLookup } = canonicalisingToC();
-			sessions = new SessionManager({ index: held, adapters: { pi } }, broadcaster);
-
-			const throughRef = sessions.attach(REF);
-			const throughC = sessions.attach(C);
-			await throughRef;
-
-			await sessions.close(C);
-			releaseLookup();
-
-			await expect(throughC).rejects.toBeInstanceOf(UnknownSessionError);
-			expect(pi.created).toHaveLength(1);
-			expect(pi.created[0]?.disposed).toBe(true);
-			expect(sessions.liveRefs()).toEqual([]);
-		});
-
-		it("stops it when the name came to another container by a rename inside that container's start", async () => {
-			const R: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/r.jsonl" };
-			index.summaries = [storedSession(REF, WORKSPACE), storedSession(R, WORKSPACE)];
-			const lookupOfR = deferred();
-			const held: SessionIndex = {
-				list: (query) => index.list(query),
-				get: async (ref) => {
-					if (sessionKey(ref) === sessionKey(R)) await lookupOfR.promise;
-					return index.get(ref);
-				},
-				preview: (ref) => index.preview(ref),
-			};
-			const gate = deferred();
-			const renamed = deferred();
-			const factory = new FakeAdapterFactory();
-			const create = factory.create.bind(factory);
-			factory.create = (ref) => {
-				const adapter = create(ref);
-				const start = adapter.start.bind(adapter);
-				adapter.start = async (opts) => {
-					await start(opts);
-					adapter.materialiseAs(R.id);
-					renamed.resolve();
-					await gate.promise;
-				};
-				return adapter;
-			};
-			sessions = new SessionManager({ index: held, adapters: { pi: factory } }, broadcaster);
-
-			const throughR = sessions.attach(R);
-			await settle();
-			const throughRef = sessions.attach(REF);
-			await renamed.promise;
-
-			await sessions.close(R);
-			lookupOfR.resolve();
-			gate.resolve();
-
-			await expect(throughRef).rejects.toBeInstanceOf(UnknownSessionError);
-			await expect(throughR).rejects.toBeInstanceOf(UnknownSessionError);
-			expect(factory.created).toHaveLength(1);
-			expect(factory.created[0]?.disposed).toBe(true);
+			await closeLive(REF);
 			expect(sessions.liveRefs()).toEqual([]);
 		});
 	});
@@ -2905,55 +2283,6 @@ describe("teardown racing a startup", () => {
 			expect(factory.created).toHaveLength(1);
 			expect(sessions.liveRefs()).toEqual([]);
 		});
-	});
-
-	it("starts afresh for an attach that follows a close of a session whose start outlives its disposal", async () => {
-		// The fake's `dispose()` does not release `holdStart`, so the closed
-		// startup is still unsettled when the next attach arrives.
-		const gate = deferred();
-		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
-		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
-
-		const first = sessions.attach(REF);
-		await settle();
-		await sessions.close(REF);
-		const second = sessions.attach(REF);
-		gate.resolve();
-
-		await expect(first).rejects.toBeInstanceOf(UnknownSessionError);
-		expect(await second).toBe(slow.created[1]);
-		expect(sessions.isAttached(REF)).toBe(true);
-	});
-
-	it("resolves shutdown only once a close has disposed the adapter that was starting", async () => {
-		// `disposeAll()` resolving is the server's licence to exit, and a close
-		// still inside the kill's grace has not finished letting go.
-		const gate = deferred();
-		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
-		sessions = new SessionManager({ index, adapters: { pi: slow }, newId: () => "created" }, broadcaster);
-		const ref = CREATED;
-		const attaching = sessions.create(WORKSPACE, "pi");
-		await settle();
-		const adapter = slow.created[0];
-		if (!adapter) throw new Error("no adapter");
-		const release = holdDispose(adapter);
-
-		const closing = sessions.close(ref);
-		let shutDown = false;
-		const shutdown = sessions.disposeAll().then(() => {
-			shutDown = true;
-		});
-		await settle();
-		await settle();
-
-		expect(shutDown).toBe(false);
-
-		release();
-		await shutdown;
-		await closing;
-		expect(adapter.disposed).toBe(true);
-		gate.resolve();
-		await expect(attaching).rejects.toThrow();
 	});
 
 	it("disposes an adapter once when shutdown lands between its publication and its attach's return", async () => {
@@ -3102,7 +2431,7 @@ describe("turn boundaries", () => {
 		gated.forRef(REF)!.emitError("turn failed");
 		const submitted = sessions.submit(REF, "again").catch(() => {});
 		await admitting;
-		await sessions.close(REF);
+		await closeLive(REF);
 		const events = collectEvents();
 
 		admit();
@@ -3342,7 +2671,7 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 
 	it("re-attaches the parent on the child its fork is still holding", async () => {
 		await attachedPair();
-		await sessions.close(parentRef);
+		await closeLive(parentRef);
 
 		await expect(sessions.attach(parentRef)).resolves.toBeDefined();
 
@@ -3354,7 +2683,7 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 
 	it("re-attaches the fork on the child its parent is still holding", async () => {
 		await attachedPair();
-		await sessions.close(forkRef);
+		await closeLive(forkRef);
 
 		await expect(sessions.attach(forkRef)).resolves.toBeDefined();
 
@@ -3384,8 +2713,8 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 
 	it("spawns again once the last holder has killed the child", async () => {
 		await attachedPair();
-		await sessions.close(parentRef);
-		await sessions.close(forkRef);
+		await closeLive(parentRef);
+		await closeLive(forkRef);
 
 		// Nothing holds the threads now, so borrowing the dead child would be the
 		// worse bug: every request on it would go unanswered.
@@ -3668,7 +2997,7 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		adapter.emitError("turn failed");
 		adapter.emitNotice(notice);
 
-		await sessions.close(REF);
+		await closeLive(REF);
 		await sessions.attach(REF);
 
 		expect(snapshots(connect())).toEqual([expect.objectContaining({ error: null, notices: [] })]);
@@ -3938,7 +3267,7 @@ describe("the idle reaper (D12)", () => {
 
 	it("leaves no timer behind a close or a shutdown", async () => {
 		await sessions.attach(REF);
-		await sessions.close(REF);
+		await closeLive(REF);
 		expect(timers.pending).toEqual([]);
 
 		await sessions.attach(REF);

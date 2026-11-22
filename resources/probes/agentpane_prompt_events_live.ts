@@ -123,7 +123,7 @@ socket.onEvent = (event) => {
 const version = Bun.spawnSync(["claude", "--version"]).stdout.toString().trim();
 log("create sent");
 const created = await socket.ok("sessions/create", { cwd: workspace, backend: "claude", model: MODEL }, 120);
-const { handle, ref } = created.session;
+const { handle } = created.session;
 log(`create answered, handle ${handle}`);
 
 const counts: number[] = [];
@@ -146,7 +146,7 @@ for (const text of PROMPTS) {
 	counts.push(events.slice(from).filter((event) => event.type === "snapshot").length);
 }
 
-await socket.request("sessions/close", { ref });
+await socket.request("sessions/close", { handle });
 await socket.close();
 server.kill("SIGTERM");
 await server.exited;

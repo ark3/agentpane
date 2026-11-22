@@ -167,7 +167,7 @@ export function openConnection(
 			return { session };
 		},
 		async "sessions/close"(frame) {
-			await sessions.close(requireRef(frame));
+			await sessions.close(live(frame).handle);
 			return null;
 		},
 		async "sessions/prompt"(frame) {

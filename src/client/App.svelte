@@ -341,7 +341,10 @@
 	 * the owner lifted on 2026-09-16: a virtual session is a workspace choice
 	 * with nothing on disk, so there is no transcript to lose, and what that
 	 * exemption guarded against was a reaper removing a session the user had
-	 * just created -- which a deliberate click is not.
+	 * just created -- which a deliberate click is not. Such a session lists as
+	 * `attached`; a row whose status is `virtual` has been a create mid-start
+	 * since D30, which a close names no handle for and is not offered (D35
+	 * point 3).
 	 *
 	 * The rest is kept because `close()` kills mid-turn, and on Claude Code a
 	 * kill mid-turn loses the whole reply (OW-japuzo). `view.sending` is in it
@@ -359,7 +362,7 @@
 	 * fresh as the last listing.
 	 */
 	const detachable = $derived(
-		(selectedSummary?.status === "attached" || selectedSummary?.status === "virtual") &&
+		selectedSummary?.status === "attached" &&
 			!streamingNow &&
 			!view.sending &&
 			!view.compacting &&

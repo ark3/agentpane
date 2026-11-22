@@ -606,7 +606,7 @@ export interface HandleParams {
 	handle: string;
 }
 
-/** What a command with no handle to name names: attach, preview, close, and a prompt from a detached view. */
+/** What a command with no handle to name names: attach, preview, and a prompt from a detached view. */
 export interface RefParams {
 	ref: SessionRef;
 }
@@ -634,8 +634,10 @@ export type PromptParams = Omit<PromptRequest, "handle"> & (
  * `SOCKET_CLOSE.unauthorized`. Its reply follows the opening snapshots, so a
  * client knows it is connected even when nothing is live.
  *
- * Close still names a ref, since one can arrive while an attach is starting,
- * before any handle exists; whether it keeps that is ark3/agentpane#27's.
+ * Close names a handle like every other command on a live session, and is
+ * refused `not_attached` where that handle has ended (D35 point 3): it never
+ * reaches a start, which ends by publishing, failing, timing out or the
+ * server's shutdown.
  *
  * A command that would start an agent -- `sessions/attach`,
  * `sessions/create`, a `sessions/prompt` naming a ref, and the fork
@@ -655,7 +657,7 @@ export interface Commands {
 	"sessions/create": { params: CreateSessionRequest; result: CreateSessionResponse };
 	"sessions/preview": { params: RefParams; result: SessionPreviewResponse };
 	"sessions/attach": { params: RefParams; result: AttachSessionResponse };
-	"sessions/close": { params: RefParams; result: null };
+	"sessions/close": { params: HandleParams; result: null };
 	"sessions/prompt": { params: PromptParams; result: PromptResponse };
 	"sessions/abort": { params: HandleParams; result: AbortResponse };
 	"sessions/compact": { params: HandleParams; result: null };

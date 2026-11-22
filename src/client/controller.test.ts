@@ -1403,7 +1403,7 @@ describe("client controller", () => {
 
 		await controller.detach();
 		await settle();
-		expect(server.on["sessions/close"]).toHaveBeenCalledWith({ ref: ref });
+		expect(server.on["sessions/close"]).toHaveBeenCalledWith({ handle: h(ref) });
 
 		const detachedView = controller.getView();
 		expect(detachedView.state.sessions[h(ref)]).toBeUndefined();
@@ -1816,7 +1816,7 @@ describe("client controller", () => {
 		await settle();
 
 		const detachedView = controller.getView();
-		expect(server.on["sessions/close"]).toHaveBeenCalledWith({ ref: createdRef });
+		expect(server.on["sessions/close"]).toHaveBeenCalledWith({ handle: h(createdRef) });
 		expect(server.on["sessions/preview"]).toHaveBeenCalledExactlyOnceWith({ ref: createdRef });
 		expect(detachedView.state.selected).toBeNull();
 		expect(detachedView.preview).toBeNull();
@@ -1884,7 +1884,7 @@ describe("client controller", () => {
 		await settle();
 
 		const detachedView = controller.getView();
-		expect(server.on["sessions/close"]).toHaveBeenCalledWith({ ref: forkedRef });
+		expect(server.on["sessions/close"]).toHaveBeenCalledWith({ handle: h(forkedRef) });
 		expect(server.on["sessions/preview"]).toHaveBeenCalledExactlyOnceWith({ ref: forkedRef });
 		expect(detachedView.state.selected).toBeNull();
 		expect(detachedView.preview).toBeNull();
@@ -3536,7 +3536,7 @@ describe("client controller", () => {
 			await settle();
 
 			const landed = controller.getView();
-			expect(server.on["sessions/close"]).toHaveBeenCalledWith({ ref: ref });
+			expect(server.on["sessions/close"]).toHaveBeenCalledWith({ handle: h(ref) });
 			expect(server.on["sessions/preview"]).toHaveBeenCalledExactlyOnceWith({ ref: ref });
 			expect(landed.state.selected).toBeNull();
 			expect(landed.preview).toBeNull();

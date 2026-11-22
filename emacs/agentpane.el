@@ -3037,16 +3037,16 @@ not its `sessions/detach'.
 
 Refused, sending nothing, wherever the browser offers no Detach
 \(`detachable' in src/client/App.svelte): a session this buffer has not
-attached, for there is nothing of its own to close -- a session
-`agentpane-new-session' creates is attached at once, so the browser's
-virtual one is an attached buffer here; one streaming or compacting,
+attached, for there is nothing of its own to close -- one whose create
+is still starting among them, which the browser lists `virtual' and
+offers no Detach for (D35 point 3); one streaming or compacting,
 since a kill mid-turn loses the reply, on Claude Code all of it
 \(OW-japuzo); and one with a prompt or a fork in flight, both of which the
 browser's `sending' covers.  Compacting counts from the server's first
 status that carries it (`agentpane-compact').
-The close names the buffer's view; the helper closes the session by its
-ref, and the server's `ended' for the handle, written ahead of the
-close's reply, unbinds the view (`sessions/close' in
+The close names the buffer's view; the helper closes the session by the
+handle the view is bound to, and the server's `ended' for that handle,
+written ahead of the close's reply, unbinds the view (`sessions/close' in
 src/emacs/protocol.ts).  Until D32 it carried the token of every attach
 this buffer had sent or taken from a buffer it absorbed (OW-nowihu).
 

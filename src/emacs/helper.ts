@@ -916,13 +916,13 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			}
 			return null;
 		},
-		// By ref, as ever. The view's binding goes at the `ended` the close
-		// brings, which the server writes ahead of the reply (D31 point 3),
-		// and so does the turn-done watch on its handle; whatever still stands
-		// on the handle the view held as the close went out goes at the reply.
-		"sessions/close": async ({ session, view }) => {
-			const handle = views.get(view);
-			await api.close(session);
+		// By the handle the view is bound to (D35 point 3). The view's binding
+		// goes at the `ended` the close brings, which the server writes ahead
+		// of the reply (D31 point 3), and so does the turn-done watch on its
+		// handle; whatever still stands on that handle goes at the reply.
+		"sessions/close": async ({ view }) => {
+			const handle = liveHandle(view);
+			await api.close(handle);
 			unwatch(handle);
 			return null;
 		},

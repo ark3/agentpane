@@ -307,13 +307,9 @@ export interface AgentpaneController {
 	 * preview (OW-tewave), which is where a click on that row would have put
 	 * them: the pane reads detached, and `publish` fetches the preview
 	 * (OW-forinu), which for a session with nothing on disk answers `gone` and
-	 * lands on the startup view instead (D26 point 6). No-op with nothing
-	 * selected.
-	 *
-	 * Not held to a live pane, as the other session verbs are: after a gap the
-	 * server still holds the session with no view in this tab, and a detach is
-	 * still the way to close it. The browser offers Detach only in the composer,
-	 * so only on a live pane, today.
+	 * lands on the startup view instead (D26 point 6). It closes by the handle
+	 * of the selected session's live view (D35 point 3), and is a no-op without
+	 * one, as the other session verbs are.
 	 *
 	 * The caller decides *when* this is offered -- the composer's Tools menu
 	 * gates it on the exemption predicate D12 wrote for its reaper, because
@@ -1562,8 +1558,8 @@ export function createController(
 			}
 		},
 		async detach() {
-			const selected = view.state.selected;
-			if (!selected) return;
+			const handle = handleOf(view.state, view.state.selected);
+			if (handle === undefined) return;
 			// Captured rather than bumped: a detach is not a selection change, and
 			// bumping would retract a preview or attach the user started before
 			// clicking it; a close that fails after one of those is not its error
@@ -1571,7 +1567,7 @@ export function createController(
 			const intent = selectionIntent;
 			publish({ error: null });
 			try {
-				await api.close(selected);
+				await api.close(handle);
 			} catch (error: unknown) {
 				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
 			}

@@ -292,8 +292,7 @@ describe("requests", () => {
 			// The prompts the stop took out of Pi's queue come back to the caller (OW-wisifo).
 			["sessions/abort", { session: pi, view }, { queued: ["first steer", "second steer"] }, ["sessions/abort", { handle }]],
 			["sessions/compact", { session: pi, view }, null, ["sessions/compact", { handle }]],
-			// A close names the ref (ark3/agentpane#27).
-			["sessions/close", { session: pi, view }, null, ["sessions/close", { ref: pi }]],
+			["sessions/close", { session: pi, view }, null, ["sessions/close", { handle }]],
 			["sessions/setModel", { session: pi, view, model: "m" }, null, ["sessions/setModel", { handle, model: "m" }]],
 			["sessions/setEffort", { session: pi, view, effort: "low" }, null, ["sessions/setEffort", { handle, effort: "low" }]],
 			["sessions/setName", { session: pi, view, name: "probe name" }, null, ["sessions/setName", { handle, name: "probe name" }]],
@@ -314,6 +313,7 @@ describe("requests", () => {
 		const requests = [
 			["sessions/abort", { session: pi, view }],
 			["sessions/compact", { session: pi, view }],
+			["sessions/close", { session: pi, view }],
 			["sessions/setModel", { session: pi, view, model: "m" }],
 			["sessions/setEffort", { session: pi, view, effort: "low" }],
 			["sessions/setName", { session: pi, view, name: "n" }],

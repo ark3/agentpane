@@ -381,7 +381,7 @@
  *   (OW-jokoto). Absent, the server takes whatever error it holds when the
  *   prompt arrives.
  * Every request on a live session below, from `sessions/abort` on but
- * `sessions/close` and `sessions/detach`, takes `{ session, view }`, and the
+ * `sessions/detach`, takes `{ session, view }`, and the
  * helper sends the server the handle the view is bound to, which the server
  * refuses `not_attached` once it has ended, so a request that crosses a
  * close and a re-attach cannot land on the new session (D31 point 9); one
@@ -400,9 +400,9 @@
  *   before the reply the session's `compaction` says one runs, until it
  *   ends (D32 point 4).
  * - `sessions/close` -- `{ session, view }` -> `null`. Kills the
- *   subprocess of the session `session` names; the server's `ended` for its
- *   handle, written ahead of the reply, unbinds the view and stops this
- *   session's notifications.
+ *   subprocess of the session under the handle `view` is bound to (D35
+ *   point 3); the server's `ended` for that handle, written ahead of the
+ *   reply, unbinds the view and stops this session's notifications.
  * - `sessions/dismissError` -- `{ session, view, errorId }` -> `null`. Clears the
  *   session's turn error, so later `session/snapshot`s carry `error: null`,
  *   but only while `errorId` (string) still names the error the server

@@ -164,11 +164,10 @@ export interface AgentpaneApi {
 	 * (OW-tewave). The on-disk transcript survives, so the session comes back as
 	 * `detached` in the next listing -- unless nothing had reached disk, as for
 	 * a session created or forked here before its first turn, which leaves the
-	 * listing altogether (`SessionSummary.onDisk`). Names a ref, since a close
-	 * can arrive while an attach is starting, before any handle exists
-	 * (ark3/agentpane#27).
+	 * listing altogether (`SessionSummary.onDisk`). Names the handle of the
+	 * live session, refused `not_attached` once it has ended (D35 point 3).
 	 */
-	close(ref: SessionRef): Promise<void>;
+	close(handle: string): Promise<void>;
 	listModels(backend: SessionRef["backend"]): Promise<ModelInfo[]>;
 	setModel(handle: string, model: string): Promise<void>;
 	setEffort(handle: string, effort: string): Promise<void>;
@@ -357,8 +356,8 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		async compact(handle) {
 			await request("sessions/compact", { handle });
 		},
-		async close(ref) {
-			await request("sessions/close", { ref });
+		async close(handle) {
+			await request("sessions/close", { handle });
 		},
 		async listModels(backend) {
 			return (await request("models/list", { backend })).models;

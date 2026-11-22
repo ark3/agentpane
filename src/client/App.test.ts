@@ -898,7 +898,7 @@ describe("App", () => {
 		});
 	});
 
-	it("the composer's Detach tool detaches an attached selection, and is offered for a virtual one too (OW-tewave)", async () => {
+	it("the composer's Detach tool detaches an attached selection, and is not offered for a virtual one, a create mid-start (OW-tewave, D35 point 3)", async () => {
 		const idle = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, errorId: null };
 		const controller = new FakeController(view({
 			state: state({
@@ -915,8 +915,8 @@ describe("App", () => {
 		expect(controller.detached).toBe(1);
 		unmount();
 
-		// Virtual is deliberately offered (owner, 2026-09-16): nothing on disk
-		// means no transcript to lose, so D12's virtual exemption does not apply.
+		// A row listed `virtual` is a create still starting (D30), which a close
+		// names no handle for.
 		const virtualController = new FakeController(view({
 			state: state({
 				selected: piSession,
@@ -926,7 +926,7 @@ describe("App", () => {
 		}));
 		render(App, { props: { controller: virtualController } });
 
-		expect(screen.getByRole("menuitem", { name: "Detach", hidden: true })).toBeEnabled();
+		expect(screen.getByRole("menuitem", { name: "Detach", hidden: true })).toBeDisabled();
 	});
 
 	it("offers Rename only on an attached session that is not mid-turn (OW-bumonu)", () => {

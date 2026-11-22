@@ -257,12 +257,9 @@ export function socketServer(script: Script = {}): SocketServer {
 			if (live(handle).errorId === errorId) server.emit({ type: "error-cleared", ...next(handle) });
 			return null;
 		},
-		"sessions/close": ({ ref }) => {
-			const handle = server.handleAt(ref);
-			if (handle !== undefined) {
-				server.emit({ type: "ended", session: live(handle).ref, handle });
-				server.emit({ type: "sessions-changed" });
-			}
+		"sessions/close": ({ handle }) => {
+			server.emit({ type: "ended", session: live(handle).ref, handle });
+			server.emit({ type: "sessions-changed" });
 			return null;
 		},
 		"sessions/setModel": ({ handle }) => (live(handle), null),
