@@ -474,7 +474,9 @@
  * an agent -- `sessions/attach`, `sessions/create`, a `sessions/prompt`
  * naming no handle, and the fork `sessions/forkAndPrompt` made -- is refused
  * `at_capacity` when D12's cap is reached and no live session may be closed
- * for it, its `message` saying so. `sessions/attach` and a `sessions/prompt`
+ * for it, its `message` saying so, and `start_timeout` when the agent's
+ * start outruns the server's deadline, the agent stopped and nothing left
+ * (D35). `sessions/attach` and a `sessions/prompt`
  * naming no handle are refused `turn_running` when the session's turn is
  * still running on a backend that holds it elsewhere (D34), its `message`
  * saying so and nothing started. A request that never

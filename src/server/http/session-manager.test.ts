@@ -22,10 +22,12 @@ import {
 	HandleEndedError,
 	NotAForkPointError,
 	SessionManager,
+	StartTimeoutError,
 	UnknownBackendError,
 	UnknownSessionError,
 	idleTimeoutMs,
 	maxSessions,
+	startTimeoutMs,
 } from "./session-manager.ts";
 import type { SessionIndex } from "./deps.ts";
 import {
@@ -3942,6 +3944,65 @@ describe("the idle reaper (D12)", () => {
 		await sessions.attach(REF);
 		await sessions.disposeAll();
 		expect(timers.pending).toEqual([]);
+	});
+});
+
+describe("a start's deadline (D35 point 2)", () => {
+	let timers: FakeTimers;
+
+	beforeEach(() => {
+		timers = new FakeTimers();
+	});
+
+	it("refuses an attach whose start never resolves, reaping its adapter once and holding nothing", async () => {
+		const hung = new FakeAdapterFactory({ holdStart: new Promise<void>(() => {}) });
+		sessions = new SessionManager({ index, adapters: { pi: hung }, setTimer: timers.set }, broadcaster);
+
+		const attaching = sessions.attach(REF);
+		await settle();
+		expect(timers.pending).toEqual([startTimeoutMs]);
+		timers.runOut();
+
+		await expect(attaching).rejects.toThrow(StartTimeoutError);
+		expect(hung.created).toHaveLength(1);
+		expect(hung.created[0]?.disposals).toBe(1);
+		expect(sessions.holds(REF)).toBe(false);
+		expect(sessions.liveHandles()).toEqual([]);
+	});
+
+	it("reaps a start that resolves after its deadline and never publishes it", async () => {
+		const gate = deferred();
+		const late = new FakeAdapterFactory({ holdStart: gate.promise });
+		sessions = new SessionManager({ index, adapters: { pi: late }, setTimer: timers.set }, broadcaster);
+		const events = broadcastEvents();
+
+		const attaching = sessions.attach(REF);
+		await settle();
+		timers.runOut();
+		gate.resolve();
+
+		await expect(attaching).rejects.toThrow(StartTimeoutError);
+		await settle();
+		expect(late.created[0]?.started).toBe(true);
+		expect(late.created[0]?.disposals).toBe(1);
+		expect(sessions.liveHandles()).toEqual([]);
+		expect(sessions.holds(REF)).toBe(false);
+		expect(events.filter((event) => event.type === "snapshot")).toEqual([]);
+	});
+
+	it("cancels the deadline of a start that resolves in time", async () => {
+		const gate = deferred();
+		pi = new FakeAdapterFactory({ holdStart: gate.promise });
+		sessions = new SessionManager({ index, adapters: { pi }, setTimer: timers.set }, broadcaster);
+
+		const attaching = sessions.attach(REF);
+		await settle();
+		expect(timers.pending).toEqual([startTimeoutMs]);
+		gate.resolve();
+		await attaching;
+
+		// Only D12's idle clock is left.
+		expect(timers.pending).toEqual([idleTimeoutMs]);
 	});
 });
 

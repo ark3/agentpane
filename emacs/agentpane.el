@@ -488,7 +488,7 @@ since the server's `ended' for it goes out inside the fork, ahead of the
 reply (D26) -- as does one attached through a helper that has exited
 \(D25); see `agentpane--let-go'.")
 
-(defconst agentpane--spawn-timeout 60
+(defconst agentpane--spawn-timeout 90
   "Seconds to wait for a request that may spawn the session's backend:
 `sessions/attach', and since D30 `sessions/create',
 `sessions/forkAndPrompt' and a `sessions/prompt' naming a ref; every
@@ -498,15 +498,19 @@ still takes this too, from when its HTTP route attached first; it now
 waits only on a backend already running, and whether it wants
 jsonrpc.el's default instead, as `sessions/setModel' takes, has not been
 weighed.  Until ark3/agentpane#76 `sessions/forkPoints' took it too.
-Past this the reply is discarded even if it comes, so a spawn that ran long
-but succeeded reads as a failure and leaves the buffer unattached though
-its session is live.  jsonrpc.el's default is 10s, and the one attach
-measured took 1.138s, a re-attach on `pi 0.85.1' on 2026-09-16, driven at
-the HTTP route of the time (docs/MANUAL_TESTING.md, OW-jamoyi); no cold
-spawn has been timed.  60s is what `agentpane-new-session''s synchronous
-create, which attaches too, allows, where waiting blocks Emacs; here it blocks
-nothing, and a hung helper costs only a minute before a refused second
-send is accepted again.")
+Past this the reply is discarded even if it comes, so a request that ran
+long but succeeded reads as a failure and leaves the buffer unattached
+though its session is live.  jsonrpc.el's default is 10s, and the one
+attach measured took 1.138s, a re-attach on `pi 0.85.1' on 2026-09-16,
+driven at the HTTP route of the time (docs/MANUAL_TESTING.md, OW-jamoyi);
+no cold spawn has been timed.  90s outlasts the server's own deadline on
+a start, 60s (`startTimeoutMs' in src/server/http/session-manager.ts,
+D35), so a start that hangs reaches the buffer as the server's
+`start_timeout' refusal, which leaves nothing running, and not as a
+timeout here, which cannot say whether the server acted.
+`agentpane-new-session''s synchronous create takes it too, where waiting
+blocks Emacs; elsewhere it blocks nothing, and a hung helper costs a
+minute and a half before a refused second send is accepted again.")
 
 (defun agentpane--request (method params callback &optional always failed timeout erred)
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.

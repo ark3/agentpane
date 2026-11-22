@@ -81,9 +81,9 @@ export interface AppDeps {
 	/** ISO clock, injectable for the same reason. */
 	now?: () => string;
 	/**
-	 * A one-shot timer, answering its cancel: D12's idle clock runs on it, so a
-	 * test fires the reaper without waiting fifteen minutes. `setTimeout` in
-	 * production.
+	 * A one-shot timer, answering its cancel: D12's idle clock and D35's
+	 * deadline on a start run on it, so a test fires either without waiting
+	 * for it. `setTimeout` in production.
 	 */
 	setTimer?: (run: () => void, ms: number) => () => void;
 	/** Unexpected command failures. Defaults to stderr in production. */

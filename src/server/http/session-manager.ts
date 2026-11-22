@@ -45,6 +45,12 @@ import type { AppDeps, SessionIndex } from "./deps.ts";
 export const maxSessions = 16;
 /** D12's idle timeout: a session with no attach, prompt, turn end or compaction end for this long is closed (`#active`). */
 export const idleTimeoutMs = 15 * 60 * 1000;
+/**
+ * D35's deadline on a start: an adapter whose `start()` has not settled this
+ * long after it was called is reaped and its start refused with
+ * `StartTimeoutError` (`#start`). A first cut: no start times were measured.
+ */
+export const startTimeoutMs = 60 * 1000;
 
 export class UnknownBackendError extends Error {
 	constructor(readonly backend: string) {
@@ -133,6 +139,14 @@ export class AtCapacityError extends Error {
 			`at capacity: all ${maxSessions} live sessions are busy (streaming, compacting, starting, or not yet prompted); detach one and try again`,
 		);
 		this.name = "AtCapacityError";
+	}
+}
+
+/** An adapter's `start()` outran `startTimeoutMs`, and the adapter was reaped (D35 point 2). */
+export class StartTimeoutError extends Error {
+	constructor(readonly ref: SessionRef) {
+		super(`the agent for ${sessionKey(ref)} did not start within ${startTimeoutMs / 1000}s, and was stopped`);
+		this.name = "StartTimeoutError";
 	}
 }
 
@@ -1435,7 +1449,14 @@ export class SessionManager {
 				this.broadcaster.notice(owner, notice);
 			});
 			if (offNotice) bound.subscriptions.push(offNotice);
-			await adapter.start(
+			// D35's deadline. A start that misses it falls into the failure path
+			// below and is reaped there; should its `start()` resolve later,
+			// nothing awaits it any more, so it is never published.
+			let cancelDeadline = (): void => {};
+			const deadline = new Promise<never>((_, reject) => {
+				cancelDeadline = this.#setTimer(() => reject(new StartTimeoutError(ref)), startTimeoutMs);
+			});
+			const started = adapter.start(
 				forkStart?.start ?? {
 					cwd: bound.cwd,
 					// Only a session the backend itself stored can be resumed; a
@@ -1455,6 +1476,11 @@ export class SessionManager {
 					...(bound.model ? { model: bound.model } : {}),
 				},
 			);
+			try {
+				await Promise.race([started, deadline]);
+			} finally {
+				cancelDeadline();
+			}
 			// Teardown ran while we were starting. Publishing the adapter now
 			// would hand a live agent to a container shutdown or `close()` has
 			// already taken out of the table. Fall through to the same reaping the

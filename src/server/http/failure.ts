@@ -13,6 +13,7 @@ import {
 	HandleEndedError,
 	NotAForkPointError,
 	ServerShuttingDownError,
+	StartTimeoutError,
 	UnknownBackendError,
 	UnknownSessionError,
 } from "./session-manager.ts";
@@ -61,6 +62,7 @@ export function classifyFailure(thrown: unknown): Failure {
 	if (err instanceof UnknownBackendError) return known("no_backend");
 	if (err instanceof ServerShuttingDownError) return known("server_shutting_down");
 	if (err instanceof AtCapacityError) return known("at_capacity");
+	if (err instanceof StartTimeoutError) return known("start_timeout");
 	if (err instanceof BackendRefusedError) return known("backend_refused");
 	if (err instanceof TurnRunningError) return known("turn_running");
 	if (err instanceof EffortNotOfferedError) return known("bad_request");

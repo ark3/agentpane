@@ -18,13 +18,14 @@ import {
 import { BackendRefusedError, TurnRunningError } from "../adapters/types.ts";
 import { type App, createApp } from "./app.ts";
 import type { AppDeps } from "./deps.ts";
-import { AtCapacityError, maxSessions } from "./session-manager.ts";
+import { AtCapacityError, maxSessions, StartTimeoutError, startTimeoutMs } from "./session-manager.ts";
 import {
 	assistantMessage,
 	deferred,
 	FakeAdapterFactory,
 	type FakeAdapterOptions,
 	FakeSessionIndex,
+	FakeTimers,
 	storedSession,
 	userMessage,
 } from "./testing/fakes.ts";
@@ -526,6 +527,20 @@ describe("commands that name a ref", () => {
 		const reply = await socket.refused("sessions/attach", { ref: PI_SESSION });
 		expect([reply.code, reply.detail]).toEqual(["server_shutting_down", "server is shutting down; not spawning a new agent"]);
 		expect(pi.created).toHaveLength(0);
+	});
+
+	it("refuses start_timeout an attach whose start outruns its deadline (D35 point 2)", async () => {
+		const timers = new FakeTimers();
+		rebuild({ pi: new FakeAdapterFactory({ holdStart: new Promise<void>(() => {}) }) }, { setTimer: timers.set });
+		const socket = await connected();
+
+		const refused = socket.refused("sessions/attach", { ref: PI_SESSION });
+		await vi.waitFor(() => expect(timers.pending).toEqual([startTimeoutMs]));
+		timers.runOut();
+
+		const reply = await refused;
+		expect([reply.code, reply.detail]).toEqual(["start_timeout", new StartTimeoutError(PI_SESSION).message]);
+		expect(logged).toEqual([]);
 	});
 
 	it("refuses at_capacity an attach past the cap when every live session is exempt (D12)", async () => {
