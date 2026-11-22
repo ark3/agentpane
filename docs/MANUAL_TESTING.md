@@ -5310,6 +5310,24 @@ So the one earlier sighting, in `plan.jsonl`, came on a connection that set the 
 **The event cannot stand in for the replies, and the reducer keeps taking them.**
 The adapter's connection gets no event at all, and on one that opted in no event follows the request a start makes, so nothing would carry the model and effort a start or a resume answered.
 
+## A socket's close with the watch in the helper (ark3/agentpane#72, ark3/agentpane#92)
+
+Run on the home server on 2026-11-22, on its system `bun 1.4.0` and Emacs 31.1 with its bundled jsonrpc.el 1.0.29, against this checkout once the drop probe's stand-in sent the session's status streaming over the socket at the prompt.
+`emacs_helper_drop_probe.el` drove the real `runHelper` through `emacs_helper_drop_stand_in.ts`, whose socket closes 500 ms after it opens, so no backend took part, no model was called and no state directory was used.
+
+```bash
+emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
+  -l resources/probes/emacs_helper_drop_probe.el \
+  --eval '(ert-run-tests-batch-and-exit "agentpane-probe-")'
+```
+
+**Before the change both cases printed `RAISED 0 of 3`.**
+The probe fed `session/status :isStreaming t` straight into Emacs, which since ark3/agentpane#72 raises nothing at its own teardown, and the stand-in sent no streaming status over the socket, so the helper's watch never saw the turn.
+
+**After it, the helper's `session/turnEnded` raised the indicator 3 of 3, busy and idle, three times.**
+Each of three invocations printed `busy: RAISED 3 of 3` and `idle: RAISED 3 of 3`, the echo area reading `[jsonrpc] Server exited with status 0` and then "agentpane: sessions/prompt failed: the connection to the agentpane server closed before it answered", the helper's own message.
+With the stand-in's status sent as `isStreaming: false` instead, one invocation printed `RAISED 0 of 3` in both cases, so the raise came from the helper's watch and not from agentpane-mode.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.

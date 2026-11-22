@@ -1,11 +1,14 @@
 ;;; emacs_helper_drop_probe.el --- A prompt in flight at a socket's close -*- lexical-binding: t; -*-
 
-;; Proves (OW-hiliti): a prompt in flight when the helper's socket closes,
-;; whose turn this Emacs saw streaming, keeps its turn-done watch for the
-;; helper's teardown, which ends the turn and raises the indicator
-;; (OW-zedawo).  Drives the real `runHelper' through
-;; `emacs_helper_drop_stand_in.ts', whose socket closes 500 ms after it
-;; opens; until D31 it was an event stream that dropped.  `busy' waits
+;; Proves (OW-hiliti): when the helper's socket closes with a prompt in
+;; flight whose turn the server reported streaming, the helper sends its
+;; turn-done watch as `session/turnEnded', watched, before it exits, and
+;; agentpane-mode raises the indicator from it (D32 point 6).  Drives the
+;; real `runHelper' through `emacs_helper_drop_stand_in.ts', which meets
+;; the prompt with the session's status streaming over the socket and
+;; closes the socket 500 ms after it opens; until D31 it was an event
+;; stream that dropped, and until ark3/agentpane#72 agentpane-mode kept
+;; the watch itself and raised it at its own teardown.  `busy' waits
 ;; without yielding until the helper has exited, so its last messages, its
 ;; sentinel and its teardown are all handled after it; `idle' lets Emacs
 ;; handle each as it comes.
@@ -30,9 +33,10 @@
   (string-to-number (or (getenv "PROBE_RUNS") "3")))
 
 (defun agentpane-probe--drop-once (busy)
-  "Send a prompt through the stand-in helper, see its turn stream, let the
-socket close, and return whether the teardown raised the indicator, and
-what the echo area said, as a cons.  BUSY as in the file's commentary."
+  "Send a prompt through the stand-in helper, whose server reports its turn
+streaming, let the socket close, and return whether the helper's
+`session/turnEnded' raised the indicator, and what the echo area said, as
+a cons.  BUSY as in the file's commentary."
   (agentpane-test--watching
     (let ((agentpane--connection nil)
           (ref '(:backend "codex" :id "t1")))
@@ -52,11 +56,6 @@ what the echo area said, as a cons.  BUSY as in the file's commentary."
               (goto-char (point-max))
               (insert "hello")
               (agentpane-send)
-              ;; The server admitted the prompt and broadcast its turn
-              ;; streaming; the prompt's own reply has not come.
-              (agentpane--on-notification connection 'session/status
-                                          (list :view agentpane--view :session ref :handle "h1"
-                                                :isStreaming t))
               (when busy
                 (agentpane-test--dead-unheard (jsonrpc--process connection)))
               (agentpane-test--heard-out connection)

@@ -612,8 +612,8 @@ What it showed is `docs/MANUAL_TESTING.md`, "What each backend says while a live
 
 ## `emacs_helper_drop_probe.el`
 
-Proves: **a prompt in flight when the Emacs helper's socket closes keeps its turn-done watch for the helper's teardown**, which ends a turn seen streaming and raises the indicator (OW-zedawo, OW-hiliti).
-It drives the real `runHelper` through `emacs_helper_drop_stand_in.ts`, whose socket answers the `hello` and every listing, holds every other command unanswered, and closes 500 ms after it opens; until D31 it was an event stream that dropped, beside a `fetch` that held every `POST` open.
+Proves: **when the Emacs helper's socket closes with a prompt in flight whose turn the server reported streaming, the helper raises the turn as `session/turnEnded` before it exits, and agentpane-mode raises the indicator from it** (OW-hiliti, D32 point 6).
+It drives the real `runHelper` through `emacs_helper_drop_stand_in.ts`, whose socket answers the `hello` and every listing, sends the session's status streaming at the prompt and holds every other command unanswered, and closes 500 ms after it opens; until D31 it was an event stream that dropped, beside a `fetch` that held every `POST` open, and until ark3/agentpane#72 agentpane-mode kept the watch itself and raised it at its own teardown (OW-zedawo).
 Its `busy` case waits without yielding until the helper has exited, so the helper's last messages, its sentinel and its teardown are all handled afterwards; its `idle` case lets Emacs handle each as it comes.
 
 ```bash
@@ -626,8 +626,8 @@ Run from the repository root; `PROBE_RUNS` sets the runs per case (3).
 Each case prints `RAISED k of n` and each run's echo-area messages, and passes only when every run raised.
 No live model calls, no network beyond the loopback pipe.
 
-Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19.
-What it showed is `docs/MANUAL_TESTING.md`, "A request the helper's teardown aborts gets no reply, and only a refusal abandons a prompt's watch (OW-hiliti)", and "Both clients over the socket (ark3/agentpane#53)".
+Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30; again over the socket (ark3/agentpane#53), 2026-11-19; again with the watch in the helper (ark3/agentpane#72, ark3/agentpane#92), 2026-11-22, raising 3 of 3 busy and idle.
+What it showed is `docs/MANUAL_TESTING.md`, "A request the helper's teardown aborts gets no reply, and only a refusal abandons a prompt's watch (OW-hiliti)", "Both clients over the socket (ark3/agentpane#53)", and "A socket's close with the watch in the helper (ark3/agentpane#72, ark3/agentpane#92)".
 
 ## `emacs_helper_server_death_probe.el`
 
