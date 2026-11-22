@@ -457,12 +457,10 @@ export class CodexAdapter implements BackendAdapter {
 	 * cross-thread guard short-circuits while its `threadId` is null and its
 	 * `thread/started` arm binds to whatever thread it sees first, so a borrower
 	 * that joined the stream unseeded would accept the PARENT's notifications
-	 * until its own `thread/resume` came back -- seeding the fork's transcript
-	 * with the parent's live deltas, which is exactly the D15/OW-gojado case of
-	 * forking a streaming parent. Seeding after `thread/resume` instead of
-	 * joining late is deliberate too: joining late drops whatever the fork's own
-	 * thread said in the meantime, which `CodexReducer.hydrate` keeps under the
-	 * paged-in history (OW-vijuyi).
+	 * until its own `thread/resume` came back -- taking the parent's turn state,
+	 * its streaming flag among them, which `CodexReducer.hydrate` leaves alone
+	 * when it replaces the transcript; that is exactly the D15/OW-gojado case of
+	 * forking a streaming parent.
 	 */
 	private adoptConnection(connection: CodexConnection, threadId: string, cwd: string): void {
 		this.connection = connection;

@@ -1381,10 +1381,12 @@ describe("hydrate (cold start)", () => {
 	});
 });
 
-describe("hydrate over a settled stream (OW-vijuyi)", () => {
-	it("keeps the live copy of an item that completed before the history was paged in, once", () => {
+describe("hydrate over a settled stream (ark3/agentpane#86)", () => {
+	it("replaces the live copy of an item that completed before the history was paged in with the listed one", () => {
 		// A borrowed attach hears its thread before its resume is answered, so an
-		// item that completes in that window arrives live and is listed too.
+		// item that completes in that window arrives live and is listed too. The
+		// two differ in their timestamp: the live copy's is `completedAtMs`, the
+		// listed one's its turn's `startedAt`.
 		const user: ThreadItem = { type: "userMessage", id: "u1", clientId: null, content: [{ type: "text", text: "hi", text_elements: [] }] };
 		const answer: ThreadItem = { type: "agentMessage", id: "a1", text: "hello", phase: "final_answer", memoryCitation: null, delivery: null, questions: null };
 		const r = new CodexReducer({ now: () => 1 });
@@ -1409,7 +1411,7 @@ describe("hydrate over a settled stream (OW-vijuyi)", () => {
 
 		const messages = r.getState().messages as AssistantMessage[];
 		expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
-		expect(messages[1]).toMatchObject({ content: [{ type: "text", text: "hello" }], timestamp: 5_000 });
+		expect(messages[1]).toMatchObject({ content: [{ type: "text", text: "hello" }], timestamp: 1_700_000_000_000 });
 		expect(r.getState().isStreaming).toBe(false);
 	});
 });

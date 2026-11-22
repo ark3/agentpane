@@ -183,37 +183,27 @@ export class CodexReducer {
 
 	/**
 	 * Replay a thread's turns, paged in with `thread/turns/list` at
-	 * `itemsView: "full"`, into a transcript: the whole of it on a cold start
-	 * (D3), and merged with the live stream on a borrowed attach. A listed
-	 * item takes the same path as a live one.
+	 * `itemsView: "full"`, into a transcript that replaces whatever the reducer
+	 * held, as `PiAdapter.hydrateMessages` does (D24): on a cold start (D3) and
+	 * on a borrowed attach alike. A listed item takes the same path as a live
+	 * one.
 	 *
-	 * The merge (OW-vijuyi). A borrowed attach hears its thread from
-	 * `CodexAdapter.adoptConnection` on, so an item can arrive before the
-	 * history is paged in. The listing owns what went before the attach, and
-	 * the stream what came after it: an item the stream opened with
-	 * `item/started`, or completed, keeps its live slot in place of the listed
-	 * copy, and a live slot the listing lacks follows the history. Only a
-	 * settled transcript is merged: a re-attach whose thread reads `active` is
+	 * A borrowed attach hears its thread from `CodexAdapter.adoptConnection`
+	 * on, so an item can arrive before the history is paged in, but only a
+	 * settled thread is hydrated: a re-attach whose thread reads `active` is
 	 * refused before any page is read (`CodexAdapter.startBorrowed`, D34), and
-	 * a fork's thread runs no turn at its first attach.
+	 * a fork's thread runs no turn at its first attach. So the listing is the
+	 * record of whatever the stream delivered before it, and its copy stands
+	 * (ark3/agentpane#86).
 	 */
 	hydrate(thread: Pick<Thread, "id" | "turns">): CodexEffect[] {
-		const live = this.slots;
 		this.slots = new Map();
 		this.threadId = thread.id;
 		for (const turn of thread.turns) {
 			this.turnId = turn.id;
 			const timestamp = (turn.startedAt ?? 0) * 1000 || this.now();
-			for (const item of turn.items) {
-				const slot = live.get(item.id);
-				if (slot) {
-					this.slots.set(item.id, slot);
-					continue;
-				}
-				this.applyItem(item, timestamp, true);
-			}
+			for (const item of turn.items) this.applyItem(item, timestamp, true);
 		}
-		for (const [id, slot] of live) if (!this.slots.has(id)) this.slots.set(id, slot);
 		this.messages = this.flattenMessages();
 		return [{ type: "reset" }];
 	}
