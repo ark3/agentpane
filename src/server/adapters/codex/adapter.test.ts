@@ -143,6 +143,8 @@ interface HappyServerOptions {
 	historyMode?: "legacy" | "paginated";
 	/** The `thread.name` a `thread/start` or `thread/resume` answers with; absent, the thread has none. */
 	threadName?: string;
+	/** Answer `thread/name/set` without the `thread/name/updated` that follows it. */
+	holdNameUpdated?: boolean;
 }
 
 /**
@@ -250,9 +252,12 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 				proc.emit({ id, result: {} });
 				break;
 			case "thread/name/set":
-				// As of `codex-cli` 0.154.0 the answer is `{}`, beside a
-				// `thread/name/updated`, which a test sends itself.
+				// As of `codex-cli` 0.154.0, and mid-turn on 0.160.0, the answer is
+				// `{}`, and a `thread/name/updated` naming the thread and name follows.
 				proc.emit({ id, result: {} });
+				if (!options.holdNameUpdated) {
+					proc.emit({ method: "thread/name/updated", params: { threadId: params["threadId"], threadName: params["name"] } });
+				}
 				break;
 			case "thread/compact/start":
 				// OW-72: params `{ threadId }`, response an empty object.
@@ -1735,7 +1740,7 @@ function codexModel(id: string, efforts: string[], defaultEffort: string): Recor
 }
 
 describe("CodexAdapter session name (D27, OW-jamaha)", () => {
-	it("names the thread with thread/name/set and carries the name once Codex answers", async () => {
+	it("names the thread with thread/name/set and carries the name from thread/name/updated", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: STORED_REF.id, turns: twoStoredTurns() }, STORED_REF);
 		const seen: StateChange[] = [];
 		adapter.onUpdate((_state, change) => seen.push(change));
@@ -1746,6 +1751,46 @@ describe("CodexAdapter session name (D27, OW-jamaha)", () => {
 		expect(request(proc, "thread/name/set")["params"]).toEqual({ threadId: STORED_REF.id, name: "probe name" });
 		expect(adapter.getState().name).toBe("probe name");
 		expect(seen).toEqual(["status"]);
+	});
+
+	it("takes no name from thread/name/set's reply, and answers only once thread/name/updated has come (D34 point 5)", async () => {
+		const { adapter, proc } = await startedAdapter(
+			{ threadId: STORED_REF.id, turns: twoStoredTurns(), threadName: "named before", holdNameUpdated: true },
+			STORED_REF,
+		);
+		const seen: StateChange[] = [];
+		adapter.onUpdate((_state, change) => seen.push(change));
+		let answered = false;
+		const renamed = adapter.setName("probe name").then(() => {
+			answered = true;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		// The reply has come and gone; the name has not moved, and the rename waits.
+		expect(request(proc, "thread/name/set")["params"]).toEqual({ threadId: STORED_REF.id, name: "probe name" });
+		expect(adapter.getState().name).toBe("named before");
+		expect(seen).toEqual([]);
+		expect(answered).toBe(false);
+
+		proc.emit({ method: "thread/name/updated", params: { threadId: STORED_REF.id, threadName: "probe name" } });
+		await renamed;
+		expect(adapter.getState().name).toBe("probe name");
+		expect(seen).toEqual(["status"]);
+	});
+
+	it("fails a rename still waiting for its thread/name/updated when app-server exits", async () => {
+		const { adapter, proc } = await startedAdapter(
+			{ threadId: STORED_REF.id, turns: twoStoredTurns(), holdNameUpdated: true },
+			STORED_REF,
+		);
+		adapter.onError(() => {});
+		const renamed = adapter.setName("probe name");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		proc.exit(1, null, new Error("app-server died"));
+
+		await expect(renamed).rejects.toThrow("app-server died");
+		expect(adapter.getState().name).toBeNull();
 	});
 
 	it("refuses to name a thread with no conversation yet, sending nothing (OW-kametu)", async () => {

@@ -137,10 +137,10 @@ They carry 15 `turn/start` replies, four of them in `compact.jsonl`, and no `thr
   Order: none relied on.
   Evidence: read from the code at f6d01c95.
   D18: first group.
-- **Name after a rename**, from `setName`'s `thread/name/set` reply.
-  Event: `thread/name/updated`, which the adapter takes too.
-  Order: the reply came first, then the event, on `codex-cli 0.154.0` and mid-turn on `0.160.0`, 4.961s against 4.967s (`docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire" and OW-kametu); either order sets the same name, so none is relied on.
-  D18: first group.
+- **Name after a rename**, which `setName` does not write from its `thread/name/set` reply since #82: `thread/name/updated` carries it, and `setName` answers once both have come, so the update goes out before the command's reply (D31 point 3).
+  Order: the reply came first, then the event, on `codex-cli 0.154.0` and mid-turn on `0.160.0`, 4.961s against 4.967s (`docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire" and OW-kametu); the wait is armed before the request, so either order resolves it, but the event's arrival is relied on.
+  D18: third group, **licenses absent code**: were a release to stop sending the event, `setName` would wait until the session closed or app-server exited, holding every verb `SessionManager.#serially` queued behind it, with nothing to say so.
+  Not asserted: what would be loud is an absence, which only a timer could see, and agentpane times out no backend answer but a start (D35); a `thread/name/set` reply that never came would hold it the same way.
 - **The running turn**, from the `turn/start` reply's `turn.id`, into `turnBusy` and, where nothing contradicts it, `turnId`; `turnBusy` itself is set as a submission before the request goes out.
   Event: `turn/started` names the same id, and `turn/completed` ends it.
   Order: the reply came before `thread/status/changed` `active` and `turn/started` for all 15 `turn/start` replies in the wire captures, `codex-cli 0.147.0` to `0.157.1`.

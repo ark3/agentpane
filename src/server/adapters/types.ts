@@ -39,7 +39,8 @@ export interface AdapterState {
 	/**
 	 * The session's name as the backend holds it: the one `setName` last had
 	 * accepted, or else the one the backend reported -- at attach where the
-	 * adapter has it in hand, and for Codex at every `thread/name/updated`.
+	 * adapter has it in hand, and for Codex at every `thread/name/updated`,
+	 * which is also how Codex reports a rename `setName` sent (D34 point 5).
 	 * Null when the backend has none, or none the adapter can read. This is
 	 * the only copy agentpane serves, and it dies with the adapter (D13,
 	 * "Names are not marks").

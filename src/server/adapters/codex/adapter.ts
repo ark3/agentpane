@@ -200,13 +200,16 @@ export class CodexAdapter implements BackendAdapter {
 	private effort: string | null = null;
 	/**
 	 * The thread's name: the one `thread/start` or `thread/resume` answered
-	 * with, then the one `setName` had accepted or a `thread/name/updated` for
-	 * this thread last reported. As of `codex-cli 0.154.0` Codex kept it
-	 * beside the rollout, never in it, so the D9 walk cannot see it
+	 * with, then the one a `thread/name/updated` for this thread last
+	 * reported, a rename `setName` sent included (D34 point 5). As of
+	 * `codex-cli 0.154.0` Codex kept it beside the rollout, never in it, so
+	 * the D9 walk cannot see it
 	 * (docs/MANUAL_TESTING.md, "All three backends rename an attached session
 	 * over the wire").
 	 */
 	private name: string | null = null;
+	/** The rename `setName` waits on until its `thread/name/updated` arrives. */
+	private renaming: { resolve: () => void; reject: (error: Error) => void } | null = null;
 	private cwd: string | null = null;
 	private disposed = false;
 	private disposal: Promise<void> | null = null;
@@ -487,10 +490,10 @@ export class CodexAdapter implements BackendAdapter {
 			},
 			onExit: (code, signal, error) => {
 				if (!this.owns(ownership)) return;
-				this.emitError(
-					error?.message ??
-						`codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`,
-				);
+				const message =
+					error?.message ?? `codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`;
+				this.renaming?.reject(new Error(message));
+				this.emitError(message);
 			},
 		});
 	}
@@ -519,6 +522,8 @@ export class CodexAdapter implements BackendAdapter {
 		this.turnBusy = null;
 		this.pendingTurnCompletions.clear();
 		this.pendingTurnCompletionOverflow = false;
+		this.renaming?.reject(new Error("codex adapter disposed"));
+		this.renaming = null;
 		// The child dies with the LAST holder, not with this one. A fork drives a
 		// thread only the parent's app-server may open, so killing on the first
 		// release would take the fork's session down with the parent's
@@ -895,9 +900,17 @@ export class CodexAdapter implements BackendAdapter {
 
 	/**
 	 * `thread/name/set`, the method's spelling as of `codex-cli 0.154.0`: the
-	 * `thread/setName` its params type suggests was refused with `-32600`. The
-	 * `thread/name/updated` it also sends names the same thread and name, so
-	 * whichever arrives first, the other moves nothing.
+	 * `thread/setName` its params type suggests was refused with `-32600`.
+	 *
+	 * The name is taken from the `thread/name/updated` it also sends, not from
+	 * its `{}` reply (D34 point 5), and this resolves once both have arrived,
+	 * so the session's update goes out before the command's reply as D31
+	 * orders them. On `codex-cli 0.154.0`, and mid-turn on `0.160.0`, the
+	 * event came after the reply (docs/MANUAL_TESTING.md, "All three backends
+	 * rename an attached session over the wire" and OW-kametu); the wait is
+	 * armed before the request, so either order resolves it. Nothing times
+	 * the event out, as nothing times out the reply: app-server exiting, or
+	 * the adapter being disposed, rejects the wait.
 	 *
 	 * Refused while the transcript is empty, which stands in for a thread not
 	 * yet prompted: as of `codex-cli 0.160.0` a rename on one wrote a
@@ -914,9 +927,16 @@ export class CodexAdapter implements BackendAdapter {
 		}
 		const client = this.requireClient();
 		const params: ThreadSetNameParams = { threadId: this.requireThread(), name };
-		await client.request<ThreadSetNameResponse>("thread/name/set", params);
-		this.name = name;
-		this.emitUpdate("status");
+		let renaming!: NonNullable<typeof this.renaming>;
+		const renamed = new Promise<void>((resolve, reject) => {
+			renaming = { resolve, reject };
+		});
+		this.renaming = renaming;
+		try {
+			await Promise.all([client.request<ThreadSetNameResponse>("thread/name/set", params), renamed]);
+		} finally {
+			if (this.renaming === renaming) this.renaming = null;
+		}
 	}
 
 	/** Takes effect on the next `turn/start`, like `setModel`. */
@@ -986,6 +1006,7 @@ export class CodexAdapter implements BackendAdapter {
 					if (msg.params.threadId !== this.threadId) return;
 					this.name = msg.params.threadName ?? null;
 					this.emitUpdate("status");
+					this.renaming?.resolve();
 					break;
 				}
 				case "turn/completed": {
