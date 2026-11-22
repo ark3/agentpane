@@ -230,8 +230,11 @@ export class ClaudeAdapter implements BackendAdapter {
 	/** `get_settings`'s `applied.effort` as last read: null for a model without effort (see module doc). */
 	private effort: string | null = null;
 	/**
-	 * The title `setName` last had the CLI accept. Null until then, even for a
-	 * session that already had one: this adapter has no in-process read of it.
+	 * The title the last `system` `session_title_changed` named, a rename
+	 * `setName` sent included (D34 point 5). As of `claude 2.1.328` the CLI
+	 * also sent one unprompted at a resume or a fork of a titled session,
+	 * naming the stored title (resources/fixtures/claude/rename.meta.json).
+	 * Null until one arrives.
 	 */
 	private name: string | null = null;
 	private started = false;
@@ -548,11 +551,17 @@ export class ClaudeAdapter implements BackendAdapter {
 	 * CLI answered with success mid-session (docs/MANUAL_TESTING.md, "All three
 	 * backends rename an attached session over the wire"). Not `/rename` as a
 	 * user message: that works too, but runs as a turn.
+	 *
+	 * The name is taken from the `system` `session_title_changed` it also
+	 * sends, not from its reply, which only ends the request (D34 point 5).
+	 * On `claude 2.1.328` the event came just ahead of the reply, before a
+	 * turn and after one (resources/fixtures/claude/rename.jsonl), so the
+	 * session's update goes out before the command's reply as D31 orders
+	 * them. That order is relied on, not waited for: a CLI that reversed it
+	 * would put the reply ahead of the update (docs/BACKENDS.md).
 	 */
 	async setName(name: string): Promise<void> {
 		await this.sendControl({ subtype: "rename_session", title: name });
-		this.name = name;
-		this.emitUpdate("status");
 	}
 
 	/** Sent now over the control channel; the effort in force is then read back (module doc). */
@@ -746,6 +755,13 @@ export class ClaudeAdapter implements BackendAdapter {
 			const model = (event as { model?: unknown }).model;
 			if (typeof model === "string" && model && model !== this.model) {
 				this.model = model;
+				this.emitUpdate("status");
+			}
+		}
+		if (event.type === "system" && event.subtype === "session_title_changed") {
+			const title = (event as { title?: unknown }).title;
+			if (typeof title === "string") {
+				this.name = title;
 				this.emitUpdate("status");
 			}
 		}

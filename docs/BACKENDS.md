@@ -101,7 +101,7 @@ The loss is agentpane's kill, not the CLI's; see `docs/MANUAL_TESTING.md` OW-jap
 
 Each fact `ClaudeAdapter` (`src/server/adapters/claude/adapter.ts`) writes from a `control_response`, laid out as under Pi's.
 A prompt and `/compact` are stdin writes that get no reply: `turnActive`, and compaction's `"requesting"`, are written at the write and ended by events (`result`, `compact_boundary`), read from the code at f6d01c95.
-No entry here licenses absent code.
+Only the name licenses absent code.
 
 - **Model**, from `setModel`'s `set_model` reply.
   Event: an `isReplay` user event reading ``Set model to `sonnet (claude-sonnet-5)` `` came ahead of each reply after a turn and on a resume, and none before a fresh session's first turn (`resources/fixtures/claude/set-model.jsonl`, `claude 2.1.280`; `docs/MANUAL_TESTING.md` OW-hiligu; none in `control-discovery.jsonl`, `claude 2.1.238`); the reducer drops it.
@@ -112,10 +112,12 @@ No entry here licenses absent code.
   Event: none for the effort, which neither `init` nor an `assistant` event carried on `claude 2.1.280` (the docblock on `ClaudeReducer`'s effort field, OW-hokaye); for the model, `init` with the next turn.
   Order: none relied on.
   D18: first group.
-- **Name**, from `setName`'s `rename_session` reply.
-  Event: none recorded; the runs read the store, which gained a `custom-title` line, and whether stdout carries an event was not recorded (`claude 2.1.270`, "All three backends rename an attached session over the wire", and `claude 2.1.287`, OW-kametu).
-  Order: none relied on.
-  D18: first group.
+- **Name**, which `setName` does not write from its `rename_session` reply since #85: a `system` `session_title_changed` carries it, and the reply only ends the request.
+  Event: `session_title_changed`, its `title` the name, before a first turn and after one on `claude 2.1.328` (`resources/fixtures/claude/rename.jsonl`); the 2.1.270 and 2.1.287 runs read only the store, which gained a `custom-title` line ("All three backends rename an attached session over the wire", and OW-kametu).
+  The CLI also sent one unprompted at a `--resume` and at a `--fork-session` spawn of a titled session, naming the stored title, ahead of `get_settings`' reply, so since #85 a resumed or forked session is named at attach (`claude 2.1.328`, `rename.meta.json`'s `follow_on_runs`).
+  Order: relied on, the event coming first, 1ms ahead of the reply in both renames; that is what puts the session's update ahead of the command's reply on the socket (D31 point 3), with no wait for the event.
+  D18: third group, **licenses absent code**: were a release to send the reply first, the reply would land before the update, a brief reorder rather than a hang; were it to stop sending the event, the rename would answer success and the name would never change, with nothing to say so.
+  Not asserted: a reversal costs only that reorder, and an absence is something only a timer could see.
 
 Exempt and writing no session state: `initialize`'s model list; `interrupt`, whose turn ends at its `result` (`resources/fixtures/claude/interrupt.jsonl`, `claude 2.1.238`); `apply_flag_settings`, whose effort is read back from `get_settings`.
 

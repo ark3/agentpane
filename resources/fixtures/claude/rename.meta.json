@@ -1,0 +1,39 @@
+{
+  "backend": "claude",
+  "scenario": "rename",
+  "covers": "the system session_title_changed event a rename_session control request emits ahead of its control_response, before the first turn and after one (ark3/agentpane#85)",
+  "prompt": "control_requests get_settings, then rename_session \"probe name pre-turn\", 5s quiet, the user prompt \"Reply with the single word ok.\" to its result, 2s quiet, rename_session \"probe name after turn\", 5s quiet, the same prompt again to its result, 2s quiet, then stdin closed; no initialize",
+  "invocation": "claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --model haiku --session-id <session_id>, run directly with no sbox, against the session's own ~/.claude",
+  "cli_version": "2.1.328 (Claude Code)",
+  "captured_at": "2026-11-22T06:45-05:00",
+  "capture_cwd": "a fresh scratch directory under /tmp",
+  "lines": 30,
+  "terminated_cleanly": true,
+  "session_id": "e54b2f90-4a3d-4806-999c-e7c5ed7484b5",
+  "rename_timing": {
+    "pre_turn_rename_sent_ms": 985,
+    "pre_turn_title_event_ms": 997,
+    "pre_turn_reply_ms": 998,
+    "after_turn_rename_sent_ms": 9750,
+    "after_turn_title_event_ms": 9755,
+    "after_turn_reply_ms": 9756
+  },
+  "follow_on_runs": "The same session respawned on the same flags with --resume <session_id> in place of --session-id, and again with --resume <session_id> --resume-session-at <first assistant uuid> --fork-session --session-id <new id>, each sent only get_settings and no prompt (2026-11-22T06:48-05:00). Each wrote a session_title_changed naming \"probe name after turn\" unprompted, before the get_settings reply: on the resume under the stored session_id, at 942ms and 8686ms in two runs; on the fork under the new id, at 993ms and 2927ms in two runs. Not recorded as fixtures.",
+  "event_census": {
+    "assistant": 2,
+    "control_response": 3,
+    "rate_limit_event": 1,
+    "result": 2,
+    "stream_event:content_block_delta": 2,
+    "stream_event:content_block_start": 2,
+    "stream_event:content_block_stop": 2,
+    "stream_event:message_delta": 2,
+    "stream_event:message_start": 2,
+    "stream_event:message_stop": 2,
+    "system:init": 2,
+    "system:session_state_changed": 4,
+    "system:session_title_changed": 2,
+    "system:status": 2
+  },
+  "scrub": "operator home directory prefix replaced with /example-home; host tools, MCP services, commands, agents, skills and plugins replaced with structural example values; get_settings' effective and sources (the operator's settings file) emptied, applied kept; account rate-limit timestamps, utilization, and overage values nulled; manual grep found no username, hostname, home path, or private content; model ids kept because they are the evidence"
+}

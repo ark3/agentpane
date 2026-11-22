@@ -21,7 +21,8 @@ export type FixtureName =
 	| "session-id"
 	| "control-discovery"
 	| "permission-request"
-	| "set-model";
+	| "set-model"
+	| "rename";
 
 const FIXTURE_DIR = fileURLToPath(
 	new URL("../../../../resources/fixtures/claude/", import.meta.url),

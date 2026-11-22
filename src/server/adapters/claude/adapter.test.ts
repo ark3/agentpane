@@ -777,6 +777,7 @@ describe("ClaudeAdapter session controls", () => {
 		expect(h.proc().lastUserMessage()).toBeUndefined();
 		// Written through: nothing is held until the CLI has it.
 		expect(h.adapter.getState().name).toBeNull();
+		h.proc().emit({ type: "system", subtype: "session_title_changed", title: "probe name" });
 		h.proc().emit({
 			type: "control_response",
 			response: { subtype: "success", request_id: request?.request_id },
@@ -784,6 +785,47 @@ describe("ClaudeAdapter session controls", () => {
 		await naming;
 
 		expect(h.adapter.getState().name).toBe("probe name");
+		expect(seen).toEqual(["status"]);
+	});
+
+	/**
+	 * As of `claude 2.1.328` a `rename_session` was answered by a `system`
+	 * `session_title_changed` naming the title, just ahead of its reply
+	 * (resources/fixtures/claude/rename.jsonl). The name is the event's, and the
+	 * reply only ends the request (D34 point 5).
+	 */
+	it("takes the name from session_title_changed, and a reply alone sets nothing (D34 point 5)", async () => {
+		const h = harness();
+		await h.adapter.start({ cwd: "/workspace" });
+		const lines = readFixture("rename");
+		const titles = lines.filter((event) => event.type === "system" && event.subtype === "session_title_changed");
+		expect(titles).toHaveLength(2);
+
+		for (const title of titles) {
+			const name = (title as { title?: string }).title;
+			const naming = h.adapter.setName(name ?? "");
+			const request = h.proc().lastControlRequest("rename_session");
+			h.proc().emit({
+				type: "control_response",
+				response: { subtype: "success", request_id: request?.request_id },
+			});
+			await naming;
+			expect(h.adapter.getState().name).not.toBe(name);
+
+			h.proc().emit(title);
+			expect(h.adapter.getState().name).toBe(name);
+		}
+	});
+
+	it("names a resumed session from the title the CLI reports at start (D34 point 5)", async () => {
+		const h = harness({ entries: storedEntries() });
+		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
+		const seen: StateChange[] = [];
+		h.adapter.onUpdate((_state, change) => seen.push(change));
+
+		h.proc().emit({ type: "system", subtype: "session_title_changed", title: "stored title", session_id: "stored-id" });
+
+		expect(h.adapter.getState().name).toBe("stored title");
 		expect(seen).toEqual(["status"]);
 	});
 
