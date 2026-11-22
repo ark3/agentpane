@@ -223,6 +223,22 @@ It was `fork_attach_probe.py`, over HTTP and the event stream, until ark3/agentp
 Since the port it forks with one fork-and-prompt (D30) where it sent a fork and then an attach, so each fork it makes, the fork of the fork and the second fork of the parent included, answers a turn of its own.
 Verified with the port: `pi` 1.5.2, `codex-cli` 0.170.0 and `claude` 2.1.328 on the home server, 2026-11-19; see `docs/MANUAL_TESTING.md`, "The probes over the socket (ark3/agentpane#54)".
 
+## `pi_attach_rename_probe.ts`
+
+Proves: **attaching a stored Pi session through the production server, with no prompt, moves no ref and leaves one listing row for it** (D35 point 1, ark3/agentpane#90).
+It creates a Pi session on the pinned model, prompts it once with one word, closes it, then attaches it by the ref its handle last carried, and records every ref under each handle and the listing's rows for that file before and after the attach.
+
+```bash
+bun pi_attach_rename_probe.ts                 # builds the client first
+bun pi_attach_rename_probe.ts --skip-build    # --model <ref>, default the one AGENTS.md pins
+```
+
+It runs against the machine's own `~/.pi/agent/sessions`, refusing to start if it is not writable, since the server's index reads that store whatever `PI_CODING_AGENT_DIR` says; it leaves one small session there.
+It exits 0 when the attach renamed nothing and the file has one row, attached, and 1 otherwise.
+Costs tokens: one one-word turn.
+
+Verified with: `pi` 1.5.2 on the home server, 2026-11-22, at 0dfbcb14; see `docs/MANUAL_TESTING.md`, "Attaching a stored Pi session makes no rename".
+
 ## `loopback_token_repro_probe.ts`
 
 Proves: **a separate process holding no token gets no command run over the socket** (D29, D31 point 5).

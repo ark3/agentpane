@@ -20,6 +20,11 @@ See `docs/MANUAL_TESTING.md` OW-sededi, OW-gajesu and OW-vijine, and OW-yudoni f
 On `pi 1.5.2` (home server, 2026-11-19, `deepseek/deepseek-v4.1-flash`), a stop sent to a session with no turn running, `clear_queue` and then `abort`, answered both with `success: true`, `clear_queue` with both queues empty, and Pi wrote nothing else but one `queue_update` naming both queues empty; a `fork` at the first user message after it succeeded and moved `sessionFile`.
 That is the stop `PiAdapter.fork` sends ahead of every fork (D30), and `resources/probes/pi_idle_stop_fork_probe.py` repeats the run; see `docs/MANUAL_TESTING.md`, "A Pi stop with no turn running".
 
+### Resume
+
+On `pi 1.5.2` (home server, 2026-11-22), neither a new session's first prompt nor a later resume of it moved its session file: the create named the JSONL path at start, the one-word turn left it there, and an attach of that path through agentpane, with no prompt, answered the same path and carried no other.
+D35 point 1 rests on it, since a resume that moved the file would list the session twice; `resources/probes/pi_attach_rename_probe.ts` repeats the run, and `docs/MANUAL_TESTING.md`, "Attaching a stored Pi session makes no rename", records it.
+
 ### RPC framing
 
 **Pi RPC framing is LF-only.**

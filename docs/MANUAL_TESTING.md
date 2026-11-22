@@ -5264,6 +5264,21 @@ Its `thread.status` was `{"type": "active", "activeFlags": []}`, and it carried 
 The `thread/turns/list` that followed, at `itemsView: "full"`, named one turn `inProgress` with its `userMessage` and a `reasoning` item, and left the streaming `agentMessage` out, as on `0.156.0`.
 After `turn/completed` (`status: "completed"`) the listing held that `agentMessage` at 1491 characters, equal to all its deltas carried.
 
+## Attaching a stored Pi session makes no rename, on `pi 1.5.2` (ark3/agentpane#90)
+
+Run on the home server on 2026-11-22 by `bun resources/probes/pi_attach_rename_probe.ts --out /tmp/pi_attach_rename_run1.json`, one invocation exiting 0, on `pi 1.5.2` and `bun 1.4.0`, against this checkout at 0dfbcb14, before #90 changed the manager.
+The create named `openrouter/deepseek/deepseek-v4.1-flash:high`; the attach, a resume, passes no model (D23).
+It used the machine's own Pi state directory, `~/.pi/agent/sessions`, which was writable in this session, because the server's index reads only that store; it left the one session it made there, under the worktree's directory.
+D35 point 1 holds a live session under its current ref alone, so it rests on this: an attach that moved a stored session's ref would list it twice.
+
+**The first prompt did not move the ref.**
+The create answered a JSONL path, Pi having named it inside the start, and the one ref under the create's handle after a one-word turn was that same path, now on disk.
+The listing after the close held one row for it, `detached`, with no handle.
+
+**The attach by that ref did not move it either, and the listing held one row.**
+The attach answered the same path under a new handle, and in the five seconds after it no snapshot under that handle carried any other ref.
+The listing then held one row for the path, `attached` under the new handle, and it was the only attached Pi row in the workspace.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
