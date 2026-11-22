@@ -1,0 +1,29 @@
+{
+  "backend": "pi",
+  "scenario": "rename",
+  "covers": "a set_session_name after one turn, and what Pi writes around its reply",
+  "prompt": "Reply with exactly: hello there friend",
+  "workspace_files": [],
+  "cli_version": "1.5.2",
+  "captured_at": "2026-11-22T06:45:10-0500",
+  "elapsed_seconds": 3.5,
+  "lines": 19,
+  "terminated_cleanly": true,
+  "event_census": {
+    "agent_end": 1,
+    "agent_settled": 1,
+    "agent_start": 1,
+    "message_end": 3,
+    "message_start": 3,
+    "message_update": 5,
+    "response": 2,
+    "session_info_changed": 1,
+    "turn_end": 1,
+    "turn_start": 1
+  },
+  "model_flag": "openrouter/deepseek/deepseek-v4.1-flash:high",
+  "models_seen": [
+    "openrouter/deepseek/deepseek-v4.1-flash"
+  ],
+  "dialogs_seen": []
+}

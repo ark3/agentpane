@@ -84,6 +84,7 @@ New Claude `rate_limit_event` captures follow the same rule, and their `init` ev
 | `compact-rollout` | one turn, then compact it | manual compaction, with rollout (OW-zadupu) |
 | `tool-read-session` | read a file and summarise it | tool call + tool result pair, with session file (OW-piyulu) |
 | `compact-session` | two turns, then compact them | manual compaction, with session file (OW-piyulu) |
+| `rename` | reply with a fixed string, then `set_session_name` | `session_info_changed` against the rename's reply, Pi only (ark3/agentpane#80) |
 
 ## What was captured (2026-08-10, pi 0.84.1 / codex-cli 0.147.0)
 

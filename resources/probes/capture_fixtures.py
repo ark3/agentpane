@@ -282,6 +282,16 @@ SCENARIOS: dict[str, dict] = {
         "session": True,
         "backends": ("pi",),
     },
+    "rename": {
+        # After the turn settles, `set_session_name` with this name, read until
+        # shortly after its response, so the fixture shows what Pi wrote on
+        # either side of it (ark3/agentpane#80).
+        "prompt": "Reply with exactly: hello there friend",
+        "files": {},
+        "covers": "a set_session_name after one turn, and what Pi writes around its reply",
+        "rename": "probe name",
+        "backends": ("pi",),
+    },
     "compact-rollout": {
         # `compact` itself stays the codex-cli 0.147.0 capture: the OW-kelomi
         # test asserts its exact pre-compaction figure, and the token updates
@@ -513,6 +523,8 @@ class Recorder:
 
 
 PI_DIALOG_METHODS = ("select", "confirm", "input", "editor")
+# How long a rename capture keeps reading after `set_session_name`'s response.
+RENAME_LINGER_SECONDS = 2.0
 
 
 def capture_pi(scenario: str, spec: dict, timeout: float, model: str) -> dict:
@@ -523,7 +535,7 @@ def capture_pi(scenario: str, spec: dict, timeout: float, model: str) -> dict:
     # The compact scenario runs in two phases: the prompt turn, then a manual
     # compaction. `phase` decides which terminal signal sets `rec.done`.
     want_compact = bool(spec.get("compact"))
-    phase = {"name": "prompt", "compacted": False}
+    phase = {"name": "prompt", "compacted": False, "renamed": False}
 
     if want_compact:
         # Pi refuses to compact when everything still fits inside
@@ -576,6 +588,13 @@ def capture_pi(scenario: str, spec: dict, timeout: float, model: str) -> dict:
                 phase["compacted"] = True
                 rec.done.set()
             return
+        # In the rename phase it is the rename's own response; the capture
+        # then lingers, so an event Pi wrote after it is on record too.
+        if phase["name"] == "rename":
+            if kind == "response" and event.get("command") == "set_session_name":
+                phase["renamed"] = bool(event.get("success"))
+                rec.done.set()
+            return
         # `agent_settled` is the real terminal signal: `agent_end` can still be
         # followed by a retry, compaction, or a queued continuation.
         if kind == "agent_settled":
@@ -597,6 +616,13 @@ def capture_pi(scenario: str, spec: dict, timeout: float, model: str) -> dict:
         print("  -- issuing manual compaction")
         rec.send({"type": "compact"})
         settled = rec.wait(timeout) and phase["compacted"]
+    if spec.get("rename") and settled:
+        phase["name"] = "rename"
+        rec.done.clear()
+        print("  -- issuing set_session_name")
+        rec.send({"type": "set_session_name", "id": "rename-1", "name": spec["rename"]})
+        settled = rec.wait(timeout) and phase["renamed"]
+        time.sleep(RENAME_LINGER_SECONDS)
     proc.terminate()
     try:
         proc.wait(timeout=10)
