@@ -952,8 +952,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		// for it before sending (D32 point 3), as well as the operation (D30):
 		// the fork's snapshot, broadcast before its prompt goes out, is bound
 		// as an attach's binds that attach. So does a refusal naming a fork
-		// that was attached; one whose own start failed names no handle, and
-		// binds nothing.
+		// still attached; one closed before its prompt was refused names no
+		// handle, and binds nothing.
 		// It is `view`'s send still out, refused `busy` beside a prompt from
 		// it, and while it is out nothing attaches the session forked, by any
 		// ref it is known by, from any view (D32 point 4).

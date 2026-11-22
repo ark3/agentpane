@@ -3102,8 +3102,9 @@ prompts the fork rather than forking the parent a second time (D30,
 ark3/agentpane#17): the parent's region gets the draft the edit
 displaced back, and the fork's buffer, shown where the parent was, holds
 the edited text.  A fork named with a handle is attached, the helper
-having bound the view of the buffer made for it (D32 point 3); one whose
-own start failed is not.  A Pi parent detaches, as after a fork that lands."
+having bound the view of the buffer made for it (D32 point 3); one named
+with no handle, closed before its prompt was refused, is not.  A Pi
+parent detaches, as after a fork that lands."
   (dolist (case '(("codex" "h-fork") ("codex" nil) ("pi" "h-fork")))
     (let* ((backend (car case))
            (handle (cadr case))

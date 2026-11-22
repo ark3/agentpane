@@ -441,7 +441,8 @@
  *   `sessions/prompt`'s. An index no fork point names is refused
  *   `not_a_fork_point` and nothing forked. A failure after the fork was
  *   created carries `fork`, `{ ref, handle }`, in its `data`, `handle` being
- *   `null` where the fork's own start failed; the server removes nothing.
+ *   `null` where the fork was closed before its prompt was refused; the
+ *   server removes nothing.
  *   `view` is the edit's buffer, whose binding names the session forked;
  *   `forkView` (integer) is the buffer agentpane-mode made for the fork
  *   before sending (D32 point 3). It is also an attach of the fork for

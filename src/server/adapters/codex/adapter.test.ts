@@ -2875,8 +2875,8 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 	it("does not hand a blocking request to a fork nobody has started yet", async () => {
 		// A borrower joins the stream at fork time so the share is taken before
 		// any `close()` can land, but `SessionManager` does not subscribe to it
-		// until `start()`. Close the parent while the fork is still parked and
-		// the parked borrower would otherwise become the fallback recipient for a
+		// until `start()`. Close the parent before the fork has started and the
+		// unstarted borrower would otherwise become the fallback recipient for a
 		// thread nobody drives (D19's subagent): not started, so it can write no
 		// refusal, and named to nobody -- D2a's silent stall, now pinning the
 		// shared app-server too.

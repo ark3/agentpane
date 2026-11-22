@@ -3575,13 +3575,15 @@ buffer's prompt region gets the draft the edit displaced back, as
 `agentpane-cancel-edit' leaves it, and the fork's buffer, shown as above,
 gets the text the region held, the edited text unless it was changed
 meanwhile.  The fork is attached where the refusal names its handle, the
-helper having bound it as above, and not where its own start failed.  A
+helper having bound it as above, and not where it names none, the fork
+closed before its prompt was refused.  A fork whose own start failed is
+not named: the server leaves nothing of it (D35 point 6).  A
 refusal that names none, the message no longer a fork point among them,
 created nothing, and leaves the edit standing, the edited text still in
 the prompt region, as the browser's `send' leaves its edit mode.  Any
 failure kills the fork's buffer unless a snapshot has filled it, its
 kill giving the fork's attach up in the helper; a refusal naming a fork
-whose own start failed then shows a buffer made for the fork's ref.  From
+with no handle then shows a buffer made for the fork's ref.  From
 a buffer holding no handle, one a helper's death or a gap detached, the
 send is refused here, sending nothing and leaving the edit standing:
 the request names the session by the handle (D31 point 9), and the

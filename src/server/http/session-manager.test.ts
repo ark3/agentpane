@@ -603,8 +603,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	// Claude Code's shape (OW-razoki): `fork()` mints the fork's id and the
 	// arguments that spawn its child, but runs nothing. Nothing has written the
 	// fork's store file yet, so the session index cannot answer for it -- the
-	// manager has to hold that recipe until the fork is attached, and hand it to
-	// the fork's own adapter.
+	// manager hands that recipe to the fork's own start (D35 point 6).
 	it("attaches a fork the session index has never heard of, from the recipe fork() returned", async () => {
 		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
 		const claude = new FakeAdapterFactory({ forkMode: "claude" });
@@ -638,9 +637,9 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		);
 	});
 
-	it("keeps the recipe parked when the fork's start fails, so a retry starts it", async () => {
-		// Replayable, unlike a handle: the recipe is the whole of what a retry
-		// has left to work from, since the index cannot answer for the fork.
+	it("leaves nothing when the fork's start fails, so an attach by its ref finds nothing to start", async () => {
+		// As a create's failed start leaves nothing (D30, D35 point 6): nothing
+		// holds the recipe past the one start it was handed to.
 		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
 		// One options object every adapter the factory builds reads, so the
 		// fork's start can fail without the parent's having failed.
@@ -649,41 +648,16 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
 		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
 		await sessions.attach(claudeRef);
-		const forked = await sessions.fork(claudeRef, "e1");
 
 		options.failStart = "fork refused";
-		await expect(sessions.attach(forked)).rejects.toThrow("fork refused");
+		await expect(sessions.fork(claudeRef, "e1")).rejects.toThrow("fork refused");
 		delete options.failStart;
-		const retried = (await sessions.attach(forked)) as FakeAdapter;
+		const forked: SessionRef = { backend: "claude", id: "parent#fork-e1" };
 
-		expect(claude.created).toHaveLength(3);
-		expect(retried).toBe(claude.created[2]);
-		expect(retried.startOptions).toEqual({ cwd: WORKSPACE, forkOf: { parentId: "parent", entryId: "e1" } });
-	});
-
-	it("stops reaching the recipe once the fork has its own child, including on a spelling the rename left behind", async () => {
-		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
-		// The CLI is authoritative about its own store, so a Claude session can
-		// rename under us after `start()` -- `ClaudeAdapter` adopts the id `init`
-		// reports. The client follows the snapshot under the handle and holds the
-		// new ref from there.
-		const claude = new FakeAdapterFactory({ forkMode: "claude", materialiseOnSubmit: "fork-real" });
-		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
-		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
-		await sessions.attach(claudeRef);
-		const forked = await sessions.fork(claudeRef, "e1");
-		await sessions.attach(forked);
-		await sessions.submit(forked, "hi");
-		const renamed: SessionRef = { backend: "claude", id: "fork-real" };
-		expect(sessions.canonicalRef(forked)).toEqual(renamed);
-
-		await closeLive(renamed);
-
-		// A recipe still parked under the pre-rename spelling would fork the
-		// PARENT a second time and hand the caller that as the session it asked
-		// for.
+		expect(sessions.holds(forked)).toBe(false);
 		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
 		expect(claude.created).toHaveLength(2);
+		expect(claude.created[1]?.disposals).toBe(1);
 	});
 
 	// What a ref-changing fork leaves behind for the PARENT (OW-kekoji). The
@@ -938,7 +912,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		// (socket.ts), and a close does not queue behind a fork
 		// (`SessionManager.#serially`); nothing serializes them. `close()` empties the
 		// table before its first await, and the adapter announces its move long
-		// afterwards -- here, once Pi's parked fork round trip resumes. Were the
+		// afterwards -- here, once Pi's gated fork round trip resumes. Were the
 		// container still subscribed, that would put a fork's container into
 		// `#sessions`, with an adapter that is already disposed, and
 		// `#disposing` never catches it because `close()` computed its keys
@@ -974,7 +948,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 
 	it("puts no fork's container into the table for a session disposed while its fork was in flight", async () => {
 		// Same window as the test above, with shutdown in place of the close.
-		// `disposeAll()` clears the table before its first await, and the parked
+		// `disposeAll()` clears the table before its first await, and the gated
 		// `fork` announces its move afterwards -- so were each ManagedSession not
 		// unsubscribed in that same run, it would re-insert the disposed
 		// container under the fork's id, into the table shutdown just emptied.
@@ -1165,17 +1139,22 @@ describe("fork and prompt, one operation (D30)", () => {
 		expect(sessions.isAttached(ref)).toBe(true);
 	});
 
-	it("refuses a fork whose own start failed with an error naming the fork by its ref alone", async () => {
+	it("refuses a fork whose own start failed with that failure alone, and leaves nothing a prompt by its ref can reach (D35 point 6)", async () => {
 		const options: FakeAdapterOptions = { forkPoints: POINTS, forkMode: "claude" };
 		const { ref } = managing("claude", options);
 		await sessions.attach(ref);
 		options.failStart = "fork would not start";
 
 		const error = await sessions.forkAndPrompt(ref, 0, "again").catch((e: unknown) => e);
+		delete options.failStart;
 
-		expect(error).toBeInstanceOf(ForkNotPromptedError);
-		expect((error as ForkNotPromptedError).message).toBe("fork would not start");
-		expect((error as ForkNotPromptedError).fork).toEqual({ ref: { backend: "claude", id: "parent#fork-e1" }, handle: null });
+		// Named nowhere: each client stays on the parent with the edit open (D30).
+		expect(error).not.toBeInstanceOf(ForkNotPromptedError);
+		expect((error as Error).message).toBe("fork would not start");
+		const forkRef: SessionRef = { backend: "claude", id: "parent#fork-e1" };
+		expect(sessions.holds(forkRef)).toBe(false);
+		await expect(sessions.attachAndSubmit(forkRef, "again", undefined, null)).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(sessions.liveRefs()).toEqual([ref]);
 	});
 
 	// `PiAdapter.fork` announces the move, then re-sends the level and hydrates
@@ -1524,37 +1503,39 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		expect(child.kills).toBe(1);
 	});
 
-	it("discards the handle and releases the share when the fork's own start fails", async () => {
-		// A handle is single-use: it leaves `#pendingForks` at the claim, and the
-		// reaping disposes its adapter, which releases the share, so a retry
-		// finds no dead adapter parked. A recipe is replayable and is
-		// deliberately kept -- this is where the two shapes part company.
+	it("disposes the fork's adapter exactly once when its own start fails, and the parent's shared child survives (D35 point 6)", async () => {
+		// The startup's failure path reaps the adapter it claimed, as it reaps
+		// any startup's, which releases the share; nothing else holds it.
 		codex = new FakeAdapterFactory({
 			forkMode: "shared",
 			sharedChild: child,
+			forkPoints: [{ id: "e1", text: "first", index: 0 }],
 			forkOptions: { failStart: "fork refused" },
 		});
 		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
-		await sessions.attach(parentRef);
-		const forked = await sessions.fork(parentRef, "e1");
+		const parent = (await sessions.attach(parentRef)) as FakeAdapter;
+		const forks = capturingForks();
 
-		await expect(sessions.attach(forked)).rejects.toThrow("fork refused");
+		const error = await sessions.forkAndPrompt(parentRef, 0, "again").catch((e: unknown) => e);
 
+		expect(error).not.toBeInstanceOf(ForkNotPromptedError);
+		expect((error as Error).message).toBe("fork refused");
+		expect(forks.built().disposals).toBe(1);
 		// The share the failed borrower held is back, so the parent's child is
-		// the parent's alone again.
+		// the parent's alone again, and still drives it.
 		expect(child.holders).toBe(1);
 		expect(child.kills).toBe(0);
-		// And the parked entry is gone: the index has never heard of the fork, so
-		// a retry gets the honest 404 rather than a dead adapter.
-		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(sessions.holds(forkRef)).toBe(false);
+		await sessions.submit(parentRef, "still here");
+		expect(parent.prompts).toEqual([{ text: "still here", images: undefined }]);
 		await closeLive(parentRef);
 		expect(child.kills).toBe(1);
 	});
 
-	it("survives the parent being closed while the fork's attach is in flight", async () => {
+	it("survives the parent being closed while the fork's start is in flight", async () => {
 		// The interleaving the "share taken at fork time" decision exists to make
 		// safe. `#disposing` is keyed per session, so `close(parent)` does not gate
-		// `attach(fork)`: without the share already held, the parent's release
+		// the fork's start: without the share already held, the parent's release
 		// would kill the child under the borrower's resume.
 		const gate = deferred();
 		codex = new FakeAdapterFactory({
@@ -1564,51 +1545,53 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		});
 		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
 		await sessions.attach(parentRef);
-		const forked = await sessions.fork(parentRef, "e1");
+		const forks = capturingForks();
 
-		const attaching = sessions.attach(forked);
+		const forking = sessions.fork(parentRef, "e1");
+		await forks.starting;
 		await closeLive(parentRef);
 		expect(child.kills).toBe(0);
 		gate.resolve();
 
-		const forkAdapter = (await attaching) as FakeAdapter;
-		expect(forkAdapter.started).toBe(true);
+		expect(await forking).toEqual(forkRef);
+		expect(forks.built().started).toBe(true);
 		expect(child.holders).toBe(1);
 		expect(child.kills).toBe(0);
 		expect(sessions.liveRefs()).toEqual([forkRef]);
 	});
 
-	it("releases the share when shutdown drops a fork nobody attached", async () => {
-		await sessions.attach(parentRef);
-		await sessions.fork(parentRef, "e1");
-
-		await sessions.disposeAll();
-
-		expect(child.holders).toBe(0);
-		expect(child.kills).toBe(1);
-	});
-
 	/**
-	 * The adapter the parent's `fork()` builds, which the factory never sees.
-	 * Read once the fork has been taken.
+	 * The adapter the parent's `fork()` builds, which the factory never sees,
+	 * read once the fork has been taken; and when the fork's start has entered
+	 * its `start()`, its startup having claimed it.
 	 */
-	function capturingForks(): () => FakeAdapter {
+	function capturingForks(): { built: () => FakeAdapter; starting: Promise<void> } {
 		const parent = codex.created[0];
 		if (!parent) throw new Error("no parent adapter");
 		const fork = parent.fork.bind(parent);
+		const starting = deferred();
 		let built: FakeAdapter | undefined;
 		parent.fork = async (entryId) => {
 			const forked = await fork(entryId);
-			built = forked.adapter as FakeAdapter;
+			const adapter = forked.adapter as FakeAdapter;
+			const start = adapter.start.bind(adapter);
+			adapter.start = (options) => {
+				starting.resolve();
+				return start(options);
+			};
+			built = adapter;
 			return forked;
 		};
-		return () => {
-			if (!built) throw new Error("no fork adapter");
-			return built;
+		return {
+			built: () => {
+				if (!built) throw new Error("no fork adapter");
+				return built;
+			},
+			starting: starting.promise,
 		};
 	}
 
-	it("disposes a starting fork's adapter once when shutdown lands during its attach", async () => {
+	it("disposes a starting fork's adapter once when shutdown lands during its start", async () => {
 		const gate = deferred();
 		codex = new FakeAdapterFactory({
 			forkMode: "shared",
@@ -1617,16 +1600,15 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		});
 		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
 		await sessions.attach(parentRef);
-		const forkAdapter = capturingForks();
-		const forked = await sessions.fork(parentRef, "e1");
+		const forks = capturingForks();
 
-		const attaching = sessions.attach(forked);
-		await settle();
+		const forking = sessions.fork(parentRef, "e1");
+		await forks.starting;
 		await sessions.disposeAll();
 		gate.resolve();
-		await expect(attaching).rejects.toThrow();
+		await expect(forking).rejects.toThrow();
 
-		expect(forkAdapter().disposals).toBe(1);
+		expect(forks.built().disposals).toBe(1);
 		expect(child.holders).toBe(0);
 	});
 });
@@ -2025,19 +2007,6 @@ describe("holds, what sessions/preview asks before it answers gone (D26 point 5)
 		lookup.resolve();
 		await attaching;
 		expect(sessions.holds(REF)).toBe(true);
-	});
-
-	it("holds a parked fork before its attach", async () => {
-		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
-		const claude = new FakeAdapterFactory({ forkMode: "claude" });
-		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
-		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
-		await sessions.attach(claudeRef);
-
-		const forked = await sessions.fork(claudeRef, "e1");
-
-		expect(sessions.summaryOf(forked)).toBeNull();
-		expect(sessions.holds(forked)).toBe(true);
 	});
 
 	it("does not hold a session whose close is still disposing it", async () => {
@@ -3443,7 +3412,7 @@ describe("the subprocess cap (D12)", () => {
 		expect(pi.created).toHaveLength(maxSessions);
 	});
 
-	it("bounds the fork a Claude Code fork-and-prompt starts, keeping the fork parked for a retry", async () => {
+	it("bounds the fork a Claude Code fork-and-prompt starts, leaving nothing of it (D35 point 6)", async () => {
 		const claudeRefs: SessionRef[] = STORED.map((ref) => ({ backend: "claude", id: ref.id }));
 		const parent = claudeRefs[0] as SessionRef;
 		const claude = new FakeAdapterFactory({ forkMode: "claude", forkPoints: [{ id: "e1", text: "hi", index: 0 }] });
@@ -3457,11 +3426,38 @@ describe("the subprocess cap (D12)", () => {
 
 		const refused = await sessions.forkAndPrompt(parent, 0, "again", undefined, handle).catch((err: unknown) => err);
 
-		expect(refused).toBeInstanceOf(ForkNotPromptedError);
-		expect((refused as ForkNotPromptedError).cause).toBeInstanceOf(AtCapacityError);
-		const fork = (refused as ForkNotPromptedError).fork;
-		expect(fork.handle).toBeNull();
+		expect(refused).toBeInstanceOf(AtCapacityError);
 		expect(claude.created).toHaveLength(maxSessions);
-		expect(sessions.holds(fork.ref)).toBe(true);
+		expect(sessions.holds({ backend: "claude", id: `${parent.id}#fork-e1` })).toBe(false);
+	});
+
+	it("disposes, once, the adapter a Codex fork handed over when the cap refuses its start", async () => {
+		// Refused before the startup claims it, so the fork's handover disposes
+		// it, and the share it holds of the parent's child goes with it.
+		const codexRefs: SessionRef[] = STORED.map((ref) => ({ backend: "codex", id: ref.id }));
+		const parent = codexRefs[0] as SessionRef;
+		const child = new FakeSharedChild();
+		const codex = new FakeAdapterFactory({ forkMode: "shared", sharedChild: child, forkPoints: [{ id: "e1", text: "hi", index: 0 }] });
+		index = new FakeSessionIndex(codexRefs.map((ref) => storedSession(ref, WORKSPACE)));
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+		for (const ref of codexRefs.slice(0, maxSessions)) {
+			await sessions.attach(ref);
+			(codex.forRef(ref) as FakeAdapter).setStreaming(true);
+		}
+		const parentAdapter = codex.forRef(parent) as FakeAdapter;
+		const fork = parentAdapter.fork.bind(parentAdapter);
+		let built: FakeAdapter | undefined;
+		parentAdapter.fork = async (entryId) => {
+			const forked = await fork(entryId);
+			built = forked.adapter as FakeAdapter;
+			return forked;
+		};
+
+		const refused = await sessions.forkAndPrompt(parent, 0, "again").catch((err: unknown) => err);
+
+		expect(refused).toBeInstanceOf(AtCapacityError);
+		expect(built?.disposals).toBe(1);
+		expect(built?.started).toBe(false);
+		expect(child.holders).toBe(maxSessions);
 	});
 });

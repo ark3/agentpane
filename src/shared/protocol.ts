@@ -456,9 +456,11 @@ export interface EditDraftResponse {
  * forked (D20). Admitting the prompt clears no turn error: nobody has seen
  * one on the fork (`PromptRequest.priorErrorId`).
  *
- * Answered once the fork's prompt is admitted. A failure after the fork
- * exists is refused as that failure would be on its own, naming the fork
- * (`ApiError.fork`); the server removes nothing (D17).
+ * Answered once the fork's prompt is admitted. A failure once the fork's
+ * attach has published, or a Pi fork's after it moved, is refused as that
+ * failure would be on its own, naming the fork (`ApiError.fork`); the server
+ * removes nothing (D17). A fork whose own start fails leaves nothing, and its
+ * refusal names none (D35 point 6).
  */
 export interface ForkAndPromptRequest {
 	index: number;
@@ -584,9 +586,11 @@ export interface ApiError {
 	detail?: string;
 	/**
 	 * Only from `sessions/forkAndPrompt`, for a failure after the fork was created: the
-	 * fork, by its ref, and by its handle where it was attached, null where its
-	 * own start failed (D30). A client moves to it, so that sending again
-	 * prompts that fork rather than forking the parent a second time.
+	 * fork, by its ref, and by its handle where it is still live, null where it
+	 * was not by the time its prompt was refused (D30). A fork whose own start
+	 * failed is not named: it left nothing (D35 point 6). A client moves to it,
+	 * so that sending again prompts that fork rather than forking the parent a
+	 * second time.
 	 */
 	fork?: { ref: SessionRef; handle: string | null };
 	/**

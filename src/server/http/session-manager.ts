@@ -29,6 +29,7 @@ import { sessionKey } from "../../shared/protocol.ts";
 import type {
 	AdapterState,
 	BackendAdapter,
+	ForkResult,
 	ImageInput,
 	StartOptions,
 	StateChange,
@@ -82,10 +83,12 @@ export class NotAForkPointError extends Error {
 }
 
 /**
- * `forkAndPrompt` created the fork and then failed: its attach or its prompt
- * was refused, or a Pi fork failed after it had moved the adapter onto the
- * fork. `cause` is that refusal, which the caller answers as it would
- * on its own, naming `fork` beside it; the fork stays (D17, D30).
+ * `forkAndPrompt` created the fork and then failed: its prompt was refused
+ * once its attach had published, or a Pi fork failed after it had moved the
+ * adapter onto the fork. `cause` is that refusal, which the caller answers as
+ * it would on its own, naming `fork` beside it; the fork stays (D17, D30). A
+ * fork whose own start fails is not one: it leaves nothing, and is refused
+ * with that failure alone (D35 point 6).
  */
 export class ForkNotPromptedError extends Error {
 	constructor(
@@ -327,12 +330,29 @@ interface PendingStart {
 }
 
 /**
- * A fork that exists but is not attached yet. `start` is the `StartOptions`
- * that open it; `adapter` is the fork's own adapter when only the parent could
- * build one -- see `#pendingForks`.
+ * What a fork's own start is handed, from what `adapter.fork` returned, for a
+ * fork the session index cannot answer for or cannot be opened from (D35
+ * point 6): `start`, the `StartOptions` that open it, and `adapter`, the
+ * fork's own adapter where only its parent could build one. Two backends
+ * need it, for different reasons:
+ *
+ *  - Claude Code's fork spawns nothing, so no store file can exist when it
+ *    returns (OW-razoki), and `#start`'s index lookup would throw
+ *    `UnknownSessionError`. It hands over `start` alone.
+ *  - Codex's fork IS on disk, but only the app-server that minted it may
+ *    open it (`codex-cli` 0.154.0, OW-lajehi), so it hands over `adapter`
+ *    too, already holding a share of the parent's child. A Codex fork that
+ *    keeps no turn is minted by nothing until its start, and hands over
+ *    `start` alone, as Claude Code's does (OW-hojefo).
+ *
+ * Nothing holds it beyond the one start it is handed to: a fork whose start
+ * fails leaves nothing, as a create does (D30), and nothing reaches it
+ * afterwards. The startup takes `adapter` at its claim (`#start`), from
+ * which `#terminate` is its one disposal; one no startup claimed, its start
+ * refused before the claim, `#attachFork` disposes.
  */
-interface PendingFork {
-	start: StartOptions;
+interface ForkStart {
+	readonly start: StartOptions;
 	adapter?: BackendAdapter;
 }
 
@@ -355,51 +375,6 @@ export class SessionManager {
 	 * this map with every one of its names, on a close and on a fork alike.
 	 */
 	readonly #names = new Map<string, string>();
-	/**
-	 * Fork ref -> what it takes to open that fork, for a fork the session index
-	 * cannot answer for or cannot be opened from. Two backends need it, for
-	 * different reasons:
-	 *
-	 *  - Claude Code's fork spawns nothing, so no store file can exist when it
-	 *    returns (OW-razoki), and `#start`'s index lookup would throw
-	 *    `UnknownSessionError` at the attach that follows every fork. Its entry
-	 *    is `start` alone: three strings, replayable.
-	 *  - Codex's fork IS on disk, but only the app-server that minted it may
-	 *    open it (`codex-cli` 0.154.0, OW-lajehi). Its entry also carries
-	 *    `adapter` -- the fork's own, built by the parent's adapter and already
-	 *    holding a share of the parent's child. A Codex fork that keeps no turn
-	 *    is minted by nothing until its attach, and its entry is `start` alone,
-	 *    as Claude Code's is (OW-hojefo).
-	 *
-	 * That second shape changes what an abandoned entry costs, and D17's answer
-	 * with it. An abandoned recipe is three strings; an abandoned live handle is
-	 * a share of a running app-server, taken at fork time so that a `close()` on
-	 * the parent cannot kill the child out from under the attach. So
-	 * `disposeAll()` does not merely drop these entries, it disposes the
-	 * adapter in them, which is what releases the share. A close names a
-	 * handle, which a parked fork has none of (D35 point 3), so a fork that is
-	 * never attached pins one app-server until shutdown. That is deliberate,
-	 * and it is the price of the attach being reliable; D17 declines to spend
-	 * anything on the abandoned fork (OW-puduro) and this is the smallest thing
-	 * that can be spent.
-	 *
-	 * An entry ends three ways: the attach that opens the fork consumes it,
-	 * `disposeAll()` drops the lot, and a *handle* is taken by the startup
-	 * that claims its adapter. That last one is
-	 * the difference between the two shapes: a recipe stays parked until the
-	 * start succeeds, and a failed attach KEEPS it deliberately, because
-	 * `#start`'s failure path unregisters the container too and the recipe is
-	 * the whole of what a retry has left to work from -- but a handle is
-	 * single-use. From the claim its adapter is the startup's
-	 * (`PendingStart.adapter`), which teardown and the failure path's reaping
-	 * both dispose through that one record, and a retry after a failure finds
-	 * no dead adapter and released share parked for it.
-	 *
-	 * Keyed by the fork's backend key, and holding no container: a parked fork
-	 * gets its container, and with it the handle the manager mints (D24), at
-	 * the attach that opens it. Nothing is emitted for it before then.
-	 */
-	readonly #pendingForks = new Map<string, PendingFork>();
 	readonly #index: SessionIndex;
 	readonly #adapters: Partial<Record<BackendId, { create(ref: SessionRef): BackendAdapter }>>;
 	readonly #newId: () => string;
@@ -590,15 +565,15 @@ export class SessionManager {
 
 	/**
 	 * Whether this manager holds `ref` under any name: a container in the
-	 * table, a startup in flight (`#attaching`, whose entries `#retire` deletes
-	 * once empty), or a parked fork. What `sessions/preview` asks before it
+	 * table, or a startup in flight (`#attaching`, whose entries `#retire`
+	 * deletes once empty). What `sessions/preview` asks before it
 	 * reads a missing file as the session gone (D26 point 5, D24). Not
 	 * `#disposing`: a session a close is still disposing, with nothing on
 	 * disk, is going.
 	 */
 	holds(ref: SessionRef): boolean {
 		const key = sessionKey(ref);
-		return this.#names.has(key) || this.#attaching.has(key) || this.#pendingForks.has(key);
+		return this.#names.has(key) || this.#attaching.has(key);
 	}
 
 	/**
@@ -631,7 +606,15 @@ export class SessionManager {
 	 * Idempotent: attaching an already-attached session re-snapshots (which is
 	 * exactly what a session switch wants) without touching the subprocess.
 	 */
-	async attach(ref: SessionRef): Promise<BackendAdapter> {
+	attach(ref: SessionRef): Promise<BackendAdapter> {
+		return this.#attach(ref);
+	}
+
+	/**
+	 * `attach`, with what a fork's own start is handed where there is one
+	 * (`#attachFork`): the startup that begins here starts the fork from it.
+	 */
+	async #attach(ref: SessionRef, fork?: ForkStart): Promise<BackendAdapter> {
 		if (this.#shuttingDown) throw new ServerShuttingDownError();
 		const requested = sessionKey(ref);
 		// A close of this session still disposing its adapter. The attach waits
@@ -674,7 +657,7 @@ export class SessionManager {
 			// spawned, so an attach arriving while it does joins the failure
 			// rather than spawning beside the adapter still being disposed.
 			promise: Promise.resolve(disposing?.promise)
-				.then(() => (disposing ? this.#afterDisposal(effectiveRef, pending) : this.#start(effectiveRef, existing, pending)))
+				.then(() => (disposing ? this.#afterDisposal(effectiveRef, pending) : this.#start(effectiveRef, existing, pending, fork)))
 				.catch((err: unknown) => {
 					this.#retire(pending);
 					throw err;
@@ -791,9 +774,7 @@ export class SessionManager {
 	 * container or hands its keys to another startup still in flight, once it
 	 * has failed and reaped what it spawned, or when
 	 * shutdown flags it. From here nothing joins it, so an attach that finds no
-	 * container starts afresh. A handle a fork starts from is not this
-	 * function's: it leaves `#pendingForks` at the claim (`#start`), since from
-	 * there its adapter is the startup's.
+	 * container starts afresh.
 	 */
 	#retire(pending: PendingStart): void {
 		for (const key of pending.keys) {
@@ -1016,13 +997,14 @@ export class SessionManager {
 	}
 
 	/**
-	 * Fork a session from a past entry, as `forkAndPrompt`'s first half does
-	 * through `#forkOn`. Since ark3/agentpane#75 took the plain fork off the
-	 * wire (D33) no command reaches this one, and it stays as the seam the
-	 * tests of forking drive. Like `submit`, this goes through the
+	 * Fork a session from a past entry, as `forkAndPrompt` does, without the
+	 * fork point's lookup or the prompt. Since ark3/agentpane#75 took the plain
+	 * fork off the wire (D33) no command reaches this one, and it stays as the
+	 * seam the tests of forking drive. Like `submit`, this goes through the
 	 * manager rather than straight at the adapter because it queues
 	 * (`#serially`), and because two of the backends hand back something the
-	 * attach that follows needs (`#pendingForks`). The backends are asymmetric:
+	 * fork's own start needs (`ForkStart`), which this starts at once, as
+	 * `forkAndPrompt` does (`#attachFork`). The backends are asymmetric:
 	 *
 	 *  - Pi's `fork` is copy-on-write: the process's active `sessionFile` MOVES to
 	 *    a new file, so the adapter announces a `"fork"` through `onRefChanged`
@@ -1038,17 +1020,15 @@ export class SessionManager {
 	 *    `adapter.ref` -- so we hand back what `adapter.fork` gave us, not
 	 *    `session.ref`. Only the app-server that minted that thread may open it
 	 *    (OW-lajehi), so `fork()` also hands over the fork's own adapter, already
-	 *    sharing the parent's connection; `#pendingForks` holds it, with the
-	 *    resume that starts it, until the attach. A fork at the first user
-	 *    message is the exception: no `thread/fork` keeps nothing, so it takes
-	 *    Claude Code's path below, and the attach renames its placeholder ref
-	 *    to the thread its `thread/start` names, as a virtual session's is
-	 *    (OW-hojefo).
+	 *    sharing the parent's connection, with the resume that starts it. A
+	 *    fork at the first user message is the exception: no `thread/fork`
+	 *    keeps nothing, so it takes Claude Code's path below, and its start
+	 *    renames its placeholder ref to the thread its `thread/start` names, as
+	 *    a virtual session's is (OW-hojefo).
 	 *  - Claude Code's `fork` takes Codex's path -- its own ref is unchanged and
 	 *    the parent keeps its child and its turn (OW-razoki) -- but nothing has
 	 *    recorded the fork yet, so it also hands back the `StartOptions` its own
-	 *    adapter must be started with. `#pendingForks` holds those until the
-	 *    attach that follows.
+	 *    adapter must be started with.
 	 *
 	 * Where the ref DOES change, which is Pi alone, the live adapter is driving
 	 * the FORK from there on and the parent is left detached -- still on disk,
@@ -1056,20 +1036,33 @@ export class SessionManager {
 	 * had. That is why the adapter says `"fork"`: unlike a rename, the parent's
 	 * id must not become a name for the fork (`#forkOnto`, OW-kekoji).
 	 */
-	fork(ref: SessionRef, entryId: string, handle?: string): Promise<SessionRef> {
-		return this.#serially(ref, (_session, adapter) => this.#forkOn(adapter, entryId), handle);
+	async fork(ref: SessionRef, entryId: string, handle?: string): Promise<SessionRef> {
+		const forked = await this.#serially(ref, (_session, adapter) => adapter.fork(entryId), handle);
+		if (forked.start) await this.#attachFork(forked);
+		return forked.ref;
 	}
 
-	/** The body of a queued fork: fork, and park what the fork's attach will need. */
-	async #forkOn(adapter: BackendAdapter, entryId: string): Promise<SessionRef> {
-		const forked = await adapter.fork(entryId);
-		if (forked.start) {
-			this.#pendingForks.set(sessionKey(forked.ref), {
-				start: forked.start,
-				...(forked.adapter ? { adapter: forked.adapter } : {}),
-			});
+	/**
+	 * Attach the fork `adapter.fork` returned, handing what came back with it
+	 * to the fork's own start (`ForkStart`), so that a start that fails leaves
+	 * nothing, as a create's does (D35 point 6). A Pi fork hands nothing over:
+	 * it is already live, and its attach re-snapshots it.
+	 */
+	async #attachFork(forked: ForkResult): Promise<void> {
+		if (!forked.start) {
+			await this.attach(forked.ref);
+			return;
 		}
-		return forked.ref;
+		const fork: ForkStart = { start: forked.start, ...(forked.adapter ? { adapter: forked.adapter } : {}) };
+		try {
+			await this.#attach(forked.ref, fork);
+		} finally {
+			// An adapter no startup claimed: the start was refused before the
+			// claim, by the cap or by shutdown. Nothing else holds it, and its
+			// share of the parent's app-server goes with it (OW-lajehi).
+			// Swallowed as `#terminate` swallows it: the fork is gone either way.
+			await Promise.resolve(fork.adapter?.dispose()).catch(() => {});
+		}
 	}
 
 	/**
@@ -1087,9 +1080,13 @@ export class SessionManager {
 	 * prompt queued inside the item would wait on the item itself.
 	 *
 	 * Admitting the prompt clears no turn error, since nobody has seen one on
-	 * the fork: one its start raised stays up (OW-jokoto). A failure after the
-	 * fork exists is `ForkNotPromptedError`, naming it; nothing is removed
-	 * (D17).
+	 * the fork: one its start raised stays up (OW-jokoto). A failure once the
+	 * fork's attach has published is `ForkNotPromptedError`, naming it, and so
+	 * is a Pi fork's after it moved; nothing is removed (D17). A fork whose
+	 * own start fails leaves nothing, as a create does, and is refused with
+	 * that failure alone, naming no fork, so each client stays on the parent
+	 * with the edit open (D30, D35 point 6). A Codex fork's file, written
+	 * before that start, stays on disk, an orphan D17 accepts.
 	 */
 	async forkAndPrompt(
 		ref: SessionRef,
@@ -1102,7 +1099,7 @@ export class SessionManager {
 			const point = (await adapter.listForkPoints()).find((candidate) => candidate.index === index);
 			if (!point) throw new NotAForkPointError(index);
 			try {
-				return await this.#forkOn(adapter, point.id);
+				return await adapter.fork(point.id);
 			} catch (cause) {
 				// A Pi fork that announced the move and then failed, re-sending the
 				// level or hydrating: the adapter drives the fork from a container
@@ -1115,16 +1112,16 @@ export class SessionManager {
 				throw new ForkNotPromptedError(cause, { ref: fork.ref, handle: fork.handle });
 			}
 		}, handle);
+		await this.#attachFork(forked);
 		try {
-			await this.attach(forked);
-			const disposition = await this.submit(forked, text, images, null);
-			const session = this.summaryOf(forked);
-			if (!session) throw new UnknownSessionError(forked);
+			const disposition = await this.submit(forked.ref, text, images, null);
+			const session = this.summaryOf(forked.ref);
+			if (!session) throw new UnknownSessionError(forked.ref);
 			return { session, disposition };
 		} catch (cause) {
-			const held = this.summaryOf(forked);
+			const held = this.summaryOf(forked.ref);
 			throw new ForkNotPromptedError(cause, {
-				ref: held?.ref ?? this.canonicalRef(forked),
+				ref: held?.ref ?? this.canonicalRef(forked.ref),
 				handle: held?.status === "attached" ? held.handle : null,
 			});
 		}
@@ -1286,17 +1283,17 @@ export class SessionManager {
 		ref: SessionRef,
 		existing: ManagedSession | undefined,
 		pending: PendingStart,
+		fork?: ForkStart,
 	): Promise<ManagedSession> {
 		if (!this.#adapters[ref.backend]) throw new UnknownBackendError(ref.backend);
 		let session = existing;
-		const forkStart = this.#pendingForks.get(sessionKey(ref));
-		if (!session && forkStart) {
+		if (!session && fork) {
 			// A fork this manager minted a moment ago. Its workspace and the
 			// arguments that open it came back from `fork()`, because the index
 			// either cannot answer for it or cannot be acted on -- see
-			// `#pendingForks`. Its container, and its handle, begin here.
+			// `ForkStart`. Its container, and its handle, begin here.
 			session = this.#container(ref, {
-				cwd: forkStart.start.cwd,
+				cwd: fork.start.cwd,
 				virtual: false,
 				fromStore: false,
 				onDisk: false,
@@ -1398,14 +1395,15 @@ export class SessionManager {
 			// handle is still the direct route and the only one that works for a
 			// fork whose rollout the index cannot answer for.
 			// The cap first, inside the `try`, so a refusal takes the container
-			// out as any failed start does, and leaves a parked fork parked.
+			// out as any failed start does. A fork's adapter it refuses is still
+			// the fork's to dispose (`#attachFork`).
 			this.#makeRoom();
-			adapter = forkStart?.adapter ?? factory.create(bound.ref);
+			adapter = fork?.adapter ?? factory.create(bound.ref);
 			pending.adapter = adapter;
-			// A handle is single-use, and from here its adapter is this startup's:
-			// left parked, `disposeAll()` would reach it down a second route. A
-			// recipe stays parked until the start succeeds -- see `#pendingForks`.
-			if (forkStart?.adapter) this.#pendingForks.delete(sessionKey(ref));
+			// The claim: from here a fork's adapter is this startup's, which
+			// teardown and the failure path below each dispose through
+			// `#terminate`, once.
+			if (fork) fork.adapter = undefined;
 			// Subscribe *before* start(): a backend can emit its first state during
 			// startup and we would otherwise miss it.
 			bound.subscriptions.push(
@@ -1447,7 +1445,7 @@ export class SessionManager {
 				cancelDeadline = this.#setTimer(() => reject(new StartTimeoutError(ref)), startTimeoutMs);
 			});
 			const started = adapter.start(
-				forkStart?.start ?? {
+				fork?.start ?? {
 					cwd: bound.cwd,
 					// Only a session the backend itself stored can be resumed; a
 					// `virtual:` id means nothing to Pi or Codex.
@@ -1506,13 +1504,6 @@ export class SessionManager {
 		// it found the startup.
 		bound.adapter = adapter;
 		this.#retire(pending);
-		// Consumed: the fork has its own child and its own container, so nothing
-		// reaches it through the recipe again -- and must not, or a `close()`
-		// followed by an attach on a spelling a rename left behind would fork
-		// the PARENT a second time. Deliberately after `start()` resolved: the
-		// failure path above leaves a recipe parked for a retry. A handle went
-		// at the claim.
-		this.#pendingForks.delete(sessionKey(ref));
 		const initialState = adapter.getState();
 		bound.lastStreaming = initialState.isStreaming;
 		bound.lastCompaction = initialState.compaction;
@@ -1711,15 +1702,8 @@ export class SessionManager {
 		// of the table, which the table here no longer reaches. One disposal
 		// sits under every name its container had, so once each.
 		const closing = [...new Set(this.#disposing.values())];
-		// Forks nobody attached. Dropping a recipe on the floor costs nothing;
-		// dropping a live handle leaks the app-server share it holds (OW-lajehi),
-		// so they are disposed alongside everything else below.
-		const parkedForks = [...this.#pendingForks.values()].flatMap((fork) =>
-			fork.adapter ? [fork.adapter] : [],
-		);
 		this.#sessions.clear();
 		this.#names.clear();
-		this.#pendingForks.clear();
 		// Before the first await, so a startup still short of creating its adapter
 		// finds this rather than spawning into a server that is already leaving.
 		for (const pending of starting) {
@@ -1747,10 +1731,8 @@ export class SessionManager {
 			// and their `ManagedSession.adapter` is still undefined. Resolving
 			// without reaping them is exactly how shutdown orphans an agent. Each
 			// adapter is reached by one route alone: a startup is retired in the
-			// run that publishes its adapter to the table, and a parked handle
-			// leaves the parked forks at the claim that makes it a startup's.
+			// run that publishes its adapter to the table.
 			...starting.map((pending) => this.#terminate(pending)),
-			...parkedForks.map((adapter) => adapter.dispose()),
 			...closing.map((disposal) => disposal.promise),
 		]);
 	}

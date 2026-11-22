@@ -110,10 +110,11 @@ export interface StartOptions {
  * Claude Code's forks do (OW-hojefo).
  *
  * A union rather than two optional fields, because an `adapter` without a
- * `start` is a shape nothing can act on: `SessionManager.fork` parks an entry
- * only when there is something to start it with, so such an adapter would be
- * silently dropped -- never started, never disposed, holding its share of the
- * parent's child for the life of the server. The type refuses to express it.
+ * `start` is a shape nothing can act on: `SessionManager` hands the fork's
+ * own start what came back only when there is something to start it with
+ * (`#attachFork`), so such an adapter would be silently dropped -- never
+ * started, never disposed, holding its share of the parent's child for the
+ * life of the server. The type refuses to express it.
  */
 export type ForkResult =
 	/** Reachable the ordinary way: the backend has recorded it, or Pi's live process IS it. */

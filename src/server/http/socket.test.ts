@@ -450,18 +450,6 @@ describe("queries", () => {
 			expect(app.sessions.isAttached(session.ref)).toBe(true);
 			expect((await socket.ok("sessions/preview", { ref: session.ref })).turns).toEqual([]);
 		});
-
-		it("a parked fork whose start failed, which the table does not hold", async () => {
-			const options: FakeAdapterOptions = { forkPoints: [{ id: "e1", text: "first ask", index: 0 }], forkMode: "claude" };
-			rebuild({ claude: new FakeAdapterFactory(options) });
-			const { socket, handle } = await attached(CLAUDE_SESSION);
-			options.failStart = "fork would not start";
-			const { fork } = await socket.refused("sessions/forkAndPrompt", { handle, index: 0, text: "again" });
-			const ref = fork!.ref;
-			index.previews.set(sessionKey(ref), null);
-			expect(app.sessions.summaryOf(ref)).toBeNull();
-			expect((await socket.ok("sessions/preview", { ref })).turns).toEqual([]);
-		});
 	});
 
 	it("answers fork points and whether a fork stops the turn, which only the adapter's fork says (D30)", async () => {
@@ -994,7 +982,7 @@ describe("commands that name a handle (D31 point 9)", () => {
 		]);
 	});
 
-	describe("a fork whose own start or prompt failed is named, and stays (D17, D30)", () => {
+	describe("a fork whose prompt failed is named, and stays, and one whose own start failed leaves nothing (D17, D30, D35 point 6)", () => {
 		const POINTS = [{ id: "e1", text: "first ask", index: 0 }];
 		const FORK = { backend: "claude", id: `${CLAUDE_SESSION.id}#fork-e1` } as SessionRef;
 
@@ -1018,15 +1006,17 @@ describe("commands that name a handle (D31 point 9)", () => {
 			expect(session.handle).toBe(reply.fork?.handle);
 		});
 
-		it("answers a fork whose start failed with that failure, naming the fork by its ref and no handle", async () => {
+		it("answers a fork whose start failed with that failure, naming no fork, and a prompt by the fork's ref not_found", async () => {
 			const options: FakeAdapterOptions = { forkPoints: POINTS, forkMode: "claude" };
 			rebuild({ claude: new FakeAdapterFactory(options) });
 			const { socket, handle } = await attached(CLAUDE_SESSION);
 			options.failStart = "fork would not start";
 
 			const reply = await socket.refused("sessions/forkAndPrompt", { handle, index: 0, text: "again" });
+			delete options.failStart;
 
-			expect([reply.code, reply.detail, reply.fork]).toEqual(["internal_error", "fork would not start", { ref: FORK, handle: null }]);
+			expect([reply.code, reply.detail, reply.fork]).toEqual(["internal_error", "fork would not start", undefined]);
+			expect((await socket.refused("sessions/prompt", { ref: FORK, text: "again" })).code).toBe("not_found");
 		});
 
 		it("answers a Pi fork that failed after it moved with that failure, naming the fork live", async () => {

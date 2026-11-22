@@ -1496,9 +1496,10 @@ export function createController(
 				// removes nothing (D17, D30). The selection moves there unless a
 				// click has moved it since, so that sending again prompts that fork
 				// rather than forking the parent again; the draft stays for that send.
-				// A fork whose own start failed has no handle, and the pane reads it
-				// detached, as `paneMode` reads any selection this tab holds no view
-				// of; one that started had its snapshot handled before the refusal.
+				// A fork closed before its prompt was refused has no handle, and the
+				// pane reads it detached, as `paneMode` reads any selection this tab
+				// holds no view of; one still live had its snapshot handled before
+				// the refusal.
 				const fork = error instanceof ApiClientError ? error.fork : undefined;
 				if (fork && intent === selectionIntent) {
 					++selectionIntent;

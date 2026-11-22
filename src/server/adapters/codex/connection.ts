@@ -162,10 +162,10 @@ export class CodexConnection {
 	 * Only an `answerable` holder is ever a candidate, for the fork's own thread
 	 * as much as for the fallback. A holder joins at fork time -- that is what
 	 * takes the share early enough to survive a `close()` on the parent -- but
-	 * its adapter is not started until it is attached, so a parked borrower
-	 * cannot write the refusal and nothing has subscribed to hear the error
-	 * naming it. Handing it a blocking request is D2a's silent stall, and it
-	 * would pin this connection with it.
+	 * its adapter is not started until the fork's own start, so a borrower not
+	 * yet started cannot write the refusal and nothing has subscribed to hear
+	 * the error naming it. Handing it a blocking request is D2a's silent stall,
+	 * and it would pin this connection with it.
 	 */
 	#recipientFor(threadId: string | null): CodexConnectionHolder | undefined {
 		const answerable = this.#holders.filter((holder) => holder.answerable);
