@@ -30,6 +30,23 @@ python3 pi_idle_stop_fork_probe.py
 
 Verified with: `pi` 1.5.2 on 2026-11-19 (`docs/MANUAL_TESTING.md`, "A Pi stop with no turn running").
 
+## `pi_stop_compact_probe.ts`
+
+Proves: **when Pi answers a `compact` and a prompt naming an extension command, idle and mid-turn** (ark3/agentpane#12): a `compact` is answered with its `compaction_end`, one sent mid-turn first aborts the turn, a command whose handler awaits `ctx.waitForIdle()` is answered only at the turn's `agent_settled`, and an `abort` sent after such a command stops the turn at once.
+It drives `pi --mode rpc` directly, not through agentpane, in four cases, each a fresh Pi: `idle_compact`, `midturn_compact`, `command_waits_idle` and `command_then_abort`.
+Pi runs under a throwaway `PI_CODING_AGENT_DIR` holding copies of the machine's state files, with `compaction.keepRecentTokens` lowered to 2000 as `capture_fixtures.py` lowers it, and with `--no-extensions -e` loading only the probe's own command.
+
+```bash
+bun pi_stop_compact_probe.ts --out /tmp/run.json    # --case NAME (repeatable), --model <ref>, --keep
+```
+
+Each case's timeline starts at its long prompt, or at the `compact` for `idle_compact`, in milliseconds, with the message updates between two other events folded into one entry and its count; no model text is kept.
+It exits 0 when every case ran to its end, and records rather than asserts.
+Costs tokens: four priming turns, two compactions, and three long turns, two of them stopped early.
+The long prompt, an essay on the printing press, is sometimes stopped by the provider's content filter, as "Output data may contain inappropriate content."; a case whose turn ended that way measured nothing of a stop, and is run again.
+
+Verified with: `pi` 1.5.2 on the home server, 2026-11-22; see `docs/MANUAL_TESTING.md`, "Pi's replies to a compaction and an extension command, on `pi 1.5.2`".
+
 ## `codex_turn_probe.py`
 
 Proves: **`codex app-server` runs a full turn over stdio** —

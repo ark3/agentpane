@@ -5328,6 +5328,35 @@ The probe fed `session/status :isStreaming t` straight into Emacs, which since a
 Each of three invocations printed `busy: RAISED 3 of 3` and `idle: RAISED 3 of 3`, the echo area reading `[jsonrpc] Server exited with status 0` and then "agentpane: sessions/prompt failed: the connection to the agentpane server closed before it answered", the helper's own message.
 With the stand-in's status sent as `isStreaming: false` instead, one invocation printed `RAISED 0 of 3` in both cases, so the raise came from the helper's watch and not from agentpane-mode.
 
+## Pi's replies to a compaction and an extension command, on `pi 1.5.2` (ark3/agentpane#12)
+
+Run on the home server on 2026-11-22, on `pi 1.5.2` and `bun 1.4.0`, every Pi spawned as `pi --mode rpc --session-dir <scratch> --no-extensions -e <the probe's command> --model openrouter/deepseek/deepseek-v4.1-flash:high`.
+`resources/probes/pi_stop_compact_probe.ts` drove Pi directly, not through agentpane, in a throwaway `PI_CODING_AGENT_DIR` under `/var/tmp` holding copies of `~/.pi/agent`'s state files, with `compaction.keepRecentTokens` lowered to 2000; `~/.pi/agent` was writable in this session, and the throwaway directory kept the probe's sessions out of the machine's store and its extensions out of the run.
+It is #12's step 1, the re-measure its prior reading of `pi 1.2.0` asked for, and each case ran in a fresh Pi.
+Two full invocations ran every case, and two more ran `command_then_abort` alone; two earlier invocations of `command_waits_idle`, after the probe's timestamps were fixed, are counted with them.
+Times below are from the send of the request named.
+
+**A `compact` on an idle session was answered with its `compaction_end`.**
+After two priming turns, `compaction_start` came 5 and 8 ms after the `compact`, and `compaction_end` at 5.5 s and 6.6 s, the reply 0 and 2 ms after it, carrying `summary`, `firstKeptEntryId`, `tokensBefore`, `estimatedTokensAfter`, `usage` and `details`.
+That is the order `compact.jsonl` showed on `pi 0.84.2`.
+
+**A `compact` sent mid-turn aborted the turn, and then compacted.**
+Sent at the long turn's first streamed update, 0.3 s and 0.4 s into it, the turn's assistant message ended `stopReason: "aborted"`, "Request was aborted", and `agent_settled` came with `aborted: true`, 6 and 8 ms after the `compact`; `compaction_start` followed 10 ms later, and `compaction_end` with the reply at 8.8 s and 10.1 s.
+So a Pi compaction never waits behind a running turn, which #12 had left open; it stops it, as `AgentSession.compact`'s opening `await this.abort()` reads.
+
+**A prompt naming an extension command that awaits idle was answered only at the turn's end.**
+The command's handler was `await ctx.waitForIdle()`, sent as `/probe-wait-idle` at the long turn's first update.
+In three runs whose turn ran to `stopReason: "stop"` it was answered `disposition: "handled"` in the same millisecond as `agent_settled`, 14.2 s, 16.9 s and 19.1 s after it was sent; in a fourth, the turn was ended at 6.9 s by the provider, `stopReason: "error"`, "Output data may contain inappropriate content.", and the command was answered at that `agent_settled` too.
+So #12's first consequence still holds on `pi 1.5.2`: a Stop that `PiAdapter.abort` holds behind every unanswered prompt waits for such a command, and the command for the turn.
+
+**An `abort` sent while such a command was unanswered stopped the turn at once.**
+Sent 1 s after the command, the `abort` ended the turn within 14, 18 and 22 ms, `stopReason: "aborted"` and `agent_settled` with `aborted: true`, and the command's `"handled"` and then the `abort`'s reply came at that `agent_settled`, in three runs.
+In a fourth the provider's filter ended the turn before the `abort` went out, and the `abort`, reaching an idle Pi, was answered in 1 ms; it measured nothing of a stop.
+So what holds the Stop is the adapter's wait, not Pi: Pi takes an `abort` behind an unanswered command and answers both.
+
+**Not counted.**
+The probe's first two invocations of `command_waits_idle` stamped every event at 0 ms, a bug in its own timeline since fixed, and their turns ran to `stop`; a third, the first with real times, saw its turn end `stopReason: "error"` 1.1 s into streaming, before the probe recorded a message's error, and the command was answered at that `agent_settled`.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.

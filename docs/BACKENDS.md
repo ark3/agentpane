@@ -25,6 +25,16 @@ That is the stop `PiAdapter.fork` sends ahead of every fork (D30), and `resource
 On `pi 1.5.2` (home server, 2026-11-22), neither a new session's first prompt nor a later resume of it moved its session file: the create named the JSONL path at start, the one-word turn left it there, and an attach of that path through agentpane, with no prompt, answered the same path and carried no other.
 D35 point 1 rests on it, since a resume that moved the file would list the session twice; `resources/probes/pi_attach_rename_probe.ts` repeats the run, and `docs/MANUAL_TESTING.md`, "Attaching a stored Pi session makes no rename", records it.
 
+### Stop and compaction
+
+On `pi 1.5.2` (home server, 2026-11-22, `deepseek/deepseek-v4.1-flash`, a throwaway `PI_CODING_AGENT_DIR`), driving `pi --mode rpc` directly:
+- A `compact` sent to an idle session was answered 0 to 2 ms after its `compaction_end`, 5.5 s and 6.6 s after the send, in two runs.
+- A `compact` sent mid-turn did not wait for the turn: within 8 ms Pi aborted it, its assistant message ending `stopReason: "aborted"` and `agent_settled` carrying `aborted: true`, and then compacted, answering with its `compaction_end` 8.8 s and 10.1 s after the send, in two runs; `AgentSession.compact` begins with `await this.abort()` (read at the package).
+- A `prompt` naming an extension command whose handler awaits `ctx.waitForIdle()`, sent mid-turn, was answered `"handled"` only at the turn's `agent_settled`, in the same millisecond, 14.2 s to 19.1 s after the send in the three runs whose turn ran to `stop`; `rpc-mode.js` answers a prompt from its preflight callback, which an extension command reaches only once its handler returns (read at the package).
+- An `abort` sent 1 s after such a command stopped the turn within 22 ms, and the command and the `abort` were both answered at that `agent_settled`, in that order, in three runs.
+
+`resources/probes/pi_stop_compact_probe.ts` repeats the runs; see `docs/MANUAL_TESTING.md`, "Pi's replies to a compaction and an extension command, on `pi 1.5.2`".
+
 ### RPC framing
 
 **Pi RPC framing is LF-only.**
@@ -78,7 +88,7 @@ As of the installed `pi 1.5.2`'s `docs/json.md` (read at the package, not run), 
   D18: first group.
 - **Compaction**: `compact()` writes `"requesting"` before its request and clears it on a failed reply; `compaction_start` and `compaction_end` own `running` and its end, and a successful reply writes nothing.
   Event: `compaction_start` and `compaction_end`; for a `compact` refused before it starts, not measured.
-  Order: both events came before the `compact` reply in `resources/fixtures/pi/compact.jsonl` (`pi 0.84.2`) and `compact-session.jsonl` (`pi 1.2.0`); not relied on.
+  Order: both events came before the `compact` reply in `resources/fixtures/pi/compact.jsonl` (`pi 0.84.2`) and `compact-session.jsonl` (`pi 1.2.0`), and on `pi 1.5.2`, idle and mid-turn ("Stop and compaction" above); not relied on.
   D18: first group.
 
 Exempt and writing no session state: `prompt`'s disposition, which for `"handled"` no event followed on `pi 1.2.0` (OW-kokotu); `clear_queue`'s texts; `get_fork_messages`; `get_available_models`.
