@@ -31,6 +31,7 @@ Name the machine rather than writing "here": this file is checked in and read fr
 Runtime is Bun, tests are vitest.
 `bun run check` (svelte-check, which also typechecks the plain `.ts` files, plus all tests) must pass before any commit touching `src/`; say so explicitly when a commit is docs only.
 It took about 40s on the home server as of 2026-09-11; a run that drifts well past that is a defect to profile, not a reason to skip it.
+By 2026-11-20 it took about 57s, a drift ark3/agentpane#69 tracks; a run near that is not a new defect.
 Run tests through the `test` script, which pins `TZ=Asia/Kolkata`; plain `vitest` fails the time assertions.
 
 `bun run test:browser` runs the Playwright suite in `e2e/` (~30s, headless Chromium).
