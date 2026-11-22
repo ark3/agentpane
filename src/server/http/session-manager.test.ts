@@ -614,7 +614,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	// arguments that spawn its child, but runs nothing. Nothing has written the
 	// fork's store file yet, so the session index cannot answer for it -- the
 	// manager hands that recipe to the fork's own start (D35 point 6).
-	it("attaches a fork the session index has never heard of, from the recipe fork() returned", async () => {
+	it("starts and attaches a fork the session index has never heard of, from the recipe its adapter returned", async () => {
 		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
 		const claude = new FakeAdapterFactory({ forkMode: "claude" });
 		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
@@ -628,9 +628,6 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		// The parent is untouched: same ref, same live adapter.
 		expect(sessions.holds(claudeRef)).toBe(true);
 		expect(sessions.adapterFor(claudeRef)).toBe(parent);
-
-		await sessions.attach(forked);
-
 		expect(sessions.adapterFor(forked)).not.toBe(parent);
 		expect(claude.forRef(forked)?.startOptions).toEqual({
 			cwd: WORKSPACE,
@@ -1406,7 +1403,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		const forked = await sessions.fork(parentRef, "e1");
 		expect(forked).toEqual(forkRef);
 
-		const forkAdapter = await attachAdapter(forked);
+		const forkAdapter = sessions.adapterFor(forked) as FakeAdapter;
 
 		// One adapter from the factory -- the parent's. The fork's came from the
 		// parent adapter, and the factory never saw the fork's ref.
@@ -1424,7 +1421,7 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 	it("keeps the fork driving the shared child after the parent is closed", async () => {
 		await sessions.attach(parentRef);
 		const forked = await sessions.fork(parentRef, "e1");
-		const forkAdapter = await attachAdapter(forked);
+		const forkAdapter = sessions.adapterFor(forked) as FakeAdapter;
 
 		await closeLive(parentRef);
 
@@ -1437,7 +1434,6 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 	it("keeps the parent driving the shared child after the fork is closed", async () => {
 		const parent = await attachAdapter(parentRef);
 		const forked = await sessions.fork(parentRef, "e1");
-		await sessions.attach(forked);
 
 		await closeLive(forked);
 
@@ -1449,7 +1445,6 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 	it("kills the shared child exactly once when shutdown disposes both holders", async () => {
 		await sessions.attach(parentRef);
 		const forked = await sessions.fork(parentRef, "e1");
-		await sessions.attach(forked);
 
 		await sessions.disposeAll();
 
@@ -1886,8 +1881,6 @@ describe("onDisk", () => {
 		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
 		await sessions.attach(claudeRef);
 		const forked = await sessions.fork(claudeRef, "e1");
-
-		await sessions.attach(forked);
 
 		expect(sessions.summaryOf(forked)?.onDisk).toBe(false);
 		expect((await sessions.list()).find((s) => sessionKey(s.ref) === sessionKey(forked))?.onDisk).toBe(false);
@@ -2581,7 +2574,6 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 		await sessions.attach(parentRef);
 		const forked = await sessions.fork(parentRef, "turn-2");
 		expect(forked).toEqual(forkRef);
-		await sessions.attach(forked);
 		expect(cluster.procs).toHaveLength(1);
 	}
 
