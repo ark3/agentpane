@@ -113,6 +113,19 @@
  * Until D32 agentpane-mode kept the watch per handle with a claim per
  * prompt (OW-kakasu), and read the levels from its picker's listings.
  *
+ * Fork points (D33 point 4). The helper holds what the browser's
+ * `refreshForkPoints` (`src/client/controller.ts`) holds for the session
+ * on screen, for every bound view: it fetches the view's fork points
+ * through `sessions/forkPoints` at each snapshot it sends the view and at
+ * each edge of its level, in both directions, the moments the set can
+ * move, and sends them as `session/forkPoints` (`refreshForkPoints`
+ * below). At most one fetch is out per handle (`forkPointsOut`), as the
+ * browser's `forkPointsInFlight`. A failure is quiet and leaves the last
+ * set standing, since nobody asked for it. An unbound view, a preview
+ * among them, gets none: `sessions/forkPoints` serves only an attached
+ * session (OW-sirofi). Until ark3/agentpane#76 agentpane-mode fetched them
+ * itself, at the press of `e`.
+ *
  * The helper does not reconnect: when the socket closes, or fails to open,
  * the helper exits (D25 point 4, D31 point 6). Agentpane is local-only, so a close means the
  * server went away, and there is nothing to reconnect to. agentpane-mode takes the exit to mean every
@@ -309,6 +322,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	let turnWatch: TurnWatch = emptyTurnWatch();
 	/** Each live session's last `isStreaming`, by handle: the level half of the browser's row marks (`foldSessionTurns`). */
 	const levels = new Map<string, boolean>();
+	/** The handles with a `sessions/forkPoints` still out, at most one each, as the browser's `forkPointsInFlight` (D33 point 4). */
+	const forkPointsOut = new Set<string>();
 	let stopped = false;
 	const reader = options.input.getReader();
 	/** Held nodes by handle and node index, in the order each was first held; a later upsert keeps its place. */
@@ -404,6 +419,31 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				notices: view.notices,
 			},
 		});
+		refreshForkPoints(handle);
+	};
+
+	/**
+	 * Fetch the fork points of the session under `handle`, unless a fetch for
+	 * it is out, and send them to the view bound to it when they answer, if
+	 * one still is; see the head of this file. Swallowed on failure, as the
+	 * browser's: no gesture stands behind it, and the server matches the
+	 * index again at the send (D30).
+	 */
+	const refreshForkPoints = (handle: string): void => {
+		if (stopped || forkPointsOut.has(handle)) return;
+		forkPointsOut.add(handle);
+		api.forkPoints(handle)
+			.then(
+				({ points, forkStopsTurn }) => {
+					const bound = holderOf(handle);
+					const view = state.sessions[handle];
+					if (stopped || bound === undefined || !view) return;
+					const indices = points.map((point) => point.index);
+					notify({ method: "session/forkPoints", params: { session: view.ref, view: bound, handle, indices, forkStopsTurn } });
+				},
+				() => {},
+			)
+			.finally(() => forkPointsOut.delete(handle));
 	};
 
 	/**
@@ -555,7 +595,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * the watch on its handle. A false that follows no true ends nothing:
 	 * a session still reads idle for a beat after a prompt goes out
 	 * (`watchSessions`). A session the state no longer holds leaves the
-	 * levels, an `ended` or a gap having settled its watch already.
+	 * levels, an `ended` or a gap having settled its watch already. A level
+	 * that moves either way under a bound view refetches its fork points.
 	 */
 	const foldTurns = (): void => {
 		const streaming = new Map(Object.entries(state.sessions).map(([handle, view]) => [handle, view.isStreaming]));
@@ -566,6 +607,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			levels.set(handle, isStreaming);
 			const watched = before.waiting.has(handle) && !turnWatch.waiting.has(handle);
 			if ((was === true && !isStreaming) || watched) turnEnded(handle, state.sessions[handle]!.ref, watched);
+			if (was !== undefined && was !== isStreaming && holderOf(handle) !== undefined) refreshForkPoints(handle);
 		}
 		for (const handle of levels.keys()) if (!streaming.has(handle)) levels.delete(handle);
 	};
@@ -906,7 +948,6 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			await api.setName(liveHandle(view), name);
 			return null;
 		},
-		"sessions/forkPoints": async ({ view }) => api.forkPoints(liveHandle(view)),
 		// An attach of the fork for `forkView`, the buffer agentpane-mode made
 		// for it before sending (D32 point 3), as well as the operation (D30):
 		// the fork's snapshot, broadcast before its prompt goes out, is bound

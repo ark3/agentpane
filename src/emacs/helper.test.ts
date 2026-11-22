@@ -48,8 +48,13 @@ function fixtureMessages(): PaneMessage[] {
 	return reducer.getState().messages;
 }
 
-/** Emacs's end of the pipe: frames pushed in, frames decoded out. */
-function stdio() {
+/**
+ * Emacs's end of the pipe: frames pushed in, frames decoded out. A bound
+ * view's `session/forkPoints` is left out unless `forkPoints` asks for it:
+ * the helper sends one after every snapshot and at every streaming edge (D33
+ * point 4), and only the tests of that are about it.
+ */
+function stdio(forkPoints = false) {
 	let controller!: ReadableStreamDefaultController<Uint8Array>;
 	const input = new ReadableStream<Uint8Array>({ start: (c) => (controller = c) });
 	const out: Record<string, unknown>[] = [];
@@ -57,7 +62,9 @@ function stdio() {
 	return {
 		input,
 		write: (frame: Uint8Array) => {
-			for (const message of decoder.push(frame)) out.push(message as Record<string, unknown>);
+			for (const message of decoder.push(frame) as Record<string, unknown>[]) {
+				if (forkPoints || message["method"] !== "session/forkPoints") out.push(message);
+			}
 		},
 		out,
 		send(message: unknown) {
@@ -125,8 +132,8 @@ afterEach(async () => {
 	stop = null;
 });
 
-function start(script: Script = {}, renderMarkdown: Render = render) {
-	const io = stdio();
+function start(script: Script = {}, renderMarkdown: Render = render, forkPoints = false) {
+	const io = stdio(forkPoints);
 	const server = socketServer(script);
 	const done = runHelper({
 		input: io.input,
@@ -142,8 +149,8 @@ function start(script: Script = {}, renderMarkdown: Render = render) {
 	return { io, server, done };
 }
 
-/** The commands the server was sent, each as its name and params. */
-const sent = (server: SocketServer) => server.calls.map(({ cmd, params }) => [cmd, params]);
+/** The commands the server was sent, each as its name and params, but the helper's own `sessions/forkPoints` (see `stdio`). */
+const sent = (server: SocketServer) => server.calls.filter(({ cmd }) => cmd !== "sessions/forkPoints").map(({ cmd, params }) => [cmd, params]);
 
 describe("the socket", () => {
 	it("opens at the first request, its first frame the hello carrying the token and the request behind it (D31 point 5)", async () => {
@@ -272,7 +279,6 @@ describe("requests", () => {
 			"sessions/setModel": () => null,
 			"sessions/setEffort": () => null,
 			"sessions/setName": () => null,
-			"sessions/forkPoints": () => ({ points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }),
 			"sessions/dismissError": () => null,
 		});
 		await bindView(io, pi, 1);
@@ -291,8 +297,6 @@ describe("requests", () => {
 			["sessions/setModel", { session: pi, view, model: "m" }, null, ["sessions/setModel", { handle, model: "m" }]],
 			["sessions/setEffort", { session: pi, view, effort: "low" }, null, ["sessions/setEffort", { handle, effort: "low" }]],
 			["sessions/setName", { session: pi, view, name: "probe name" }, null, ["sessions/setName", { handle, name: "probe name" }]],
-			// The whole answer, so agentpane-mode can label a fork from it (D30).
-			["sessions/forkPoints", { session: pi, view }, { points: [{ id: "e1", text: "hi", index: 0 }], forkStopsTurn: true }, ["sessions/forkPoints", { handle }]],
 			// Named by id, so the server clears it only while it is still the one held (OW-desufa, OW-jokoto).
 			["sessions/dismissError", { session: pi, view, errorId: "e4" }, null, ["sessions/dismissError", { handle, errorId: "e4" }]],
 		] as const;
@@ -313,7 +317,6 @@ describe("requests", () => {
 			["sessions/setModel", { session: pi, view, model: "m" }],
 			["sessions/setEffort", { session: pi, view, effort: "low" }],
 			["sessions/setName", { session: pi, view, name: "n" }],
-			["sessions/forkPoints", { session: pi, view }],
 			["sessions/dismissError", { session: pi, view, errorId: "e4" }],
 			["sessions/forkAndPrompt", { session: pi, view, forkView: 4, index: 0, text: "again" }],
 		] as const;
@@ -1681,6 +1684,95 @@ describe("turn ends (D32 point 6)", () => {
 		stop = null;
 		await tick();
 		expect(ended(io)).toEqual([]);
+	});
+});
+
+describe("fork points (D33 point 4)", () => {
+	/** The `sessions/forkPoints` the helper has sent the server, each as its params. */
+	const fetches = (server: SocketServer) => server.calls.filter(({ cmd }) => cmd === "sessions/forkPoints").map(({ params }) => params);
+	/** Each `session/forkPoints` sent so far, as its params. */
+	const sets = (io: ReturnType<typeof stdio>) =>
+		io
+			.notifications()
+			.filter((message) => message["method"] === "session/forkPoints")
+			.map((message) => message["params"]);
+	/** A `sessions/forkPoints` script whose calls each wait on the next of `holds`, answering `index` and `index + 2`. */
+	const holding = (...holds: Promise<void>[]): Script => {
+		let index = 0;
+		return {
+			"sessions/forkPoints": async () => {
+				const at = index++;
+				await holds[at];
+				return { points: [{ id: `e${at}`, text: "hi", index: at }, { id: `f${at}`, text: "hi", index: at + 2 }], forkStopsTurn: at > 0 };
+			},
+		};
+	};
+
+	it("fetches a bound view's points at its snapshot and at each streaming edge, one out per handle, and sends each set under the view", async () => {
+		const first = held();
+		const second = held();
+		const third = held();
+		const { io, server } = start({ ...attachScript(pi), ...holding(first.hold, second.hold, third.hold) }, render, true);
+		await bindView(io, pi, 1);
+		await vi.waitFor(() => expect(fetches(server)).toEqual([{ handle: h(pi) }]));
+		first.release();
+		await vi.waitFor(() => expect(sets(io)).toHaveLength(1));
+		expect(sets(io)[0]).toEqual({ session: pi, view: 1, handle: h(pi), indices: [0, 2], forkStopsTurn: false });
+
+		// A turn starts: a fetch. It ends while that one is out: none.
+		server.emit(status(pi, h(pi), 2, true));
+		await vi.waitFor(() => expect(fetches(server)).toHaveLength(2));
+		server.emit(status(pi, h(pi), 3, false));
+		await tick();
+		expect(fetches(server)).toHaveLength(2);
+		second.release();
+		await vi.waitFor(() => expect(sets(io)).toHaveLength(2));
+		expect(sets(io)[1]).toEqual({ session: pi, view: 1, handle: h(pi), indices: [1, 3], forkStopsTurn: true });
+
+		// Nothing out now, so the next edge fetches again; a status that moves no level does not.
+		server.emit(status(pi, h(pi), 4, false));
+		await tick();
+		expect(fetches(server)).toHaveLength(2);
+		server.emit(status(pi, h(pi), 5, true));
+		await vi.waitFor(() => expect(fetches(server)).toHaveLength(3));
+		third.release();
+	});
+
+	it("fetches nothing for a preview, nor for a session no view of Emacs's is bound to", async () => {
+		const { io, server } = start({ "sessions/list": () => ({ sessions: [] }), ...holding() }, render, true);
+		server.opening = [snapshot(codex)];
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/preview", params: { session: pi } });
+		await io.until(2);
+		server.emit(status(codex, h(codex), 2, true));
+		server.emit(status(codex, h(codex), 3, false));
+		await io.until(3);
+		await tick();
+		expect(fetches(server)).toEqual([]);
+		expect(sets(io)).toEqual([]);
+	});
+
+	it("says nothing of a fetch that fails, and the next edge fetches again", async () => {
+		let calls = 0;
+		const { io, server } = start(
+			{
+				...attachScript(pi),
+				"sessions/forkPoints": () => {
+					calls += 1;
+					throw new ApiClientError("backend_refused", "no points today");
+				},
+			},
+			render,
+			true,
+		);
+		await bindView(io, pi, 1);
+		await vi.waitFor(() => expect(calls).toBe(1));
+		await tick();
+		server.emit(status(pi, h(pi), 2, true));
+		await vi.waitFor(() => expect(calls).toBe(2));
+		await tick();
+		expect(sets(io)).toEqual([]);
+		expect(io.out.filter((message) => "error" in message)).toEqual([]);
 	});
 });
 

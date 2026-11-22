@@ -119,6 +119,11 @@
  * ark3/agentpane#75 raised it a twenty-eighth, under D33: `sessions/fork`
  * goes, agentpane-mode forking only by an edit, and with it the `unwatch`
  * on `sessions/abort` and on that fork.
+ * ark3/agentpane#76 raised it a twenty-ninth, under D33 point 4: the helper
+ * fetches each bound view's fork points and sends them as
+ * `session/forkPoints`, and the `sessions/forkPoints` request goes,
+ * agentpane-mode reading the set it was sent rather than asking at the
+ * press.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -427,11 +432,6 @@
  *   the session's model's `efforts` ids, taking effect from the next turn;
  *   the server refuses any other `bad_request`, and any at all while that
  *   model lists none or is not yet known.
- * - `sessions/forkPoints` -- `{ session, view }` -> `{ points, forkStopsTurn }`:
- *   `points` an array of `{ id, text, index }`, and `forkStopsTurn` whether
- *   a fork of the session stops a turn running when it lands, which is what
- *   "Stop and fork" reads (D30). Until ark3/agentpane#47 the result was the
- *   array alone.
  * - `sessions/forkAndPrompt` -- `{ session, view, index, text, images?,
  *   forkView, stops? }` -> `{ session, disposition }`. An edit of an earlier message as one
  *   server operation (D30): fork at the user message whose transcript
@@ -458,7 +458,8 @@
  *   own buffer's attach meanwhile, and nothing refused another's.
  *   Until ark3/agentpane#51 it attached nothing.
  *   `stops` (boolean, absent meaning false) says the edit's hint read the
- *   fork as stopping a running turn (`forkStopsTurn` above): the turn-done
+ *   fork as stopping a running turn (`forkStopsTurn` on
+ *   `session/forkPoints` below): the turn-done
  *   watch on `view`'s handle goes as the request goes out, raising nothing
  *   for the turn the fork stops, as the browser reads `stopsBeforeFork`.
  *   The fork's watch is armed at the reply, unless the prompt was handled
@@ -592,6 +593,21 @@
  *   draw: it marks the session's row unless a window shows the session,
  *   and raises its indicator for a turn watched in a buffer no window
  *   shows.
+ * - `session/forkPoints` -- `{ session, view, handle, indices,
+ *   forkStopsTurn }`. The transcript indices the session can be forked at,
+ *   `indices` an array of integers, each a fork point's `index`, which
+ *   names a node's `index`; and `forkStopsTurn` (boolean) whether a fork
+ *   of the session stops a turn running when it lands, which is what
+ *   "Stop and fork" reads (D30). The helper fetches them through the
+ *   server's `sessions/forkPoints` at each `session/snapshot` it sends the
+ *   view and wherever the session's `isStreaming` changes, at most one
+ *   fetch out per handle, and sends each answer under the view bound to
+ *   the handle when it lands, if one is; a failed fetch sends nothing, and
+ *   the last set stands (D33 point 4). Until one arrives the view's set is
+ *   unknown, and every user message is offered, as the browser offers
+ *   each while its set is unknown. None is sent for an unbound view.
+ *   Until ark3/agentpane#76 agentpane-mode asked for them by a
+ *   `sessions/forkPoints` request at the press.
  * - `sessions/changed` -- no `params`. Refetch the listing. A listing
  *   detaches nothing: where the server lets go of a handle Emacs attached,
  *   the `session/detached` for it goes out ahead of the `sessions/changed`
@@ -611,7 +627,6 @@ import type {
 	DismissErrorRequest,
 	ForkAndPromptRequest,
 	ForkAndPromptResponse,
-	ForkPointsResponse,
 	ModelInfo,
 	PromptRequest,
 	PromptResponse,
@@ -650,7 +665,6 @@ export interface HelperRequests {
 	"sessions/setModel": { params: ViewParams & { model: string }; result: null };
 	"sessions/setEffort": { params: ViewParams & { effort: string }; result: null };
 	"sessions/setName": { params: ViewParams & { name: string }; result: null };
-	"sessions/forkPoints": { params: ViewParams; result: ForkPointsResponse };
 	"sessions/forkAndPrompt": { params: ViewParams & ForkAndPromptRequest & { forkView: number; stops?: boolean }; result: Naming<ForkAndPromptResponse> };
 }
 
@@ -683,6 +697,10 @@ export type HelperNotification =
 	| { method: "session/notice"; params: { session: SessionRef; view: number; handle: string; notice: AgentNotice } }
 	| { method: "session/detached"; params: { session: SessionRef; view: number; handle: string } }
 	| { method: "session/turnEnded"; params: { session: SessionRef; handle: string; watched: boolean; view?: number } }
+	| {
+			method: "session/forkPoints";
+			params: { session: SessionRef; view: number; handle: string; indices: number[]; forkStopsTurn: boolean };
+	  }
 	| { method: "sessions/changed"; params?: undefined };
 
 export interface TranscriptNode {
