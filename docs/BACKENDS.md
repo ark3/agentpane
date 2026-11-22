@@ -148,15 +148,16 @@ The settings captures carry four `thread/resume` replies, two in `settings-1`, a
   D18: first group.
 - **Name after a rename**, which `setName` does not write from its `thread/name/set` reply since #82: `thread/name/updated` carries it, and `setName` answers once both have come, so the update goes out before the command's reply (D31 point 3).
   Order: the reply came first, then the event, on `codex-cli 0.154.0` and mid-turn on `0.160.0`, 4.961s against 4.967s (`docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire" and OW-kametu); the wait is armed before the request, so either order resolves it, but the event's arrival is relied on.
-  D18: third group, **licenses absent code**: were a release to stop sending the event, `setName` would wait until the session closed or app-server exited, holding every verb `SessionManager.#serially` queued behind it, with nothing to say so.
-  Not asserted: what would be loud is an absence, which only a timer could see, and agentpane times out no backend answer but a start (D35); a `thread/name/set` reply that never came would hold it the same way.
+  D18: third group, **licenses absent code**: were a release to stop sending the event, `setName` would wait out the deadline below, holding every verb `SessionManager.#serially` queued behind it.
+  Asserted since ark3/agentpane#91: a reply or event still to come `eventTimeoutMs` (60s, a first cut) after the request refuses `setName` naming `thread/name/updated`, raises one session error saying the same, and releases the wait, so the queued verbs run (`CodexAdapter.withinDeadline`); an event that comes later sets the name as any rename's does.
 - **The running turn**, which since ark3/agentpane#84 the adapter takes from `turn/started` alone, into `turnId`, and which `turn/completed` ends; the `turn/start` reply's `turn.id` is not read.
   A gate armed before the request, `CodexAdapter.starting`, holds from `turn/start` until that `turn/started`, refusing a second `turn/start` or `thread/compact/start` meanwhile (`TURN_START_PENDING_ERROR`), and `submit` answers once both the reply and the event have come, so `SessionManager.#serially` holds the next prompt until the turn is live and it steers.
   Order: the reply came before `thread/status/changed` `active` and `turn/started` for all 20 `turn/start` replies in the wire captures, `codex-cli 0.147.0` to `0.170.0`; the gate is released by `turn/started` whichever comes first, but its arrival after every successful reply is relied on.
   Not measured on any version: a `turn/start` after a `thread/resume`, one on a borrowed fork, one with images, and an error reply.
-  D18: third group, **licenses absent code**: were a release to stop sending `turn/started` for a turn it ran, `submit` would hold every verb queued behind it, and no turn would be steerable or interruptable.
+  D18: third group, **licenses absent code**: were a release to stop sending `turn/started` for a turn it ran, `submit` would hold every verb queued behind it until the deadline below, and no turn would be steerable or interruptable.
   Asserted since #84: a same-thread `turn/completed`, or a `thread/status/changed` that is not `active`, arriving while the gate holds raises one session error naming what arrived, and releases the gate (`CodexAdapter.unstarted`).
-  Not asserted: total silence after a reply, which only a timer could see; ark3/agentpane#91 is to bound it with a deadline.
+  Asserted since ark3/agentpane#91: a reply or `turn/started` still to come `eventTimeoutMs` (60s, a first cut) after the request refuses `submit` naming `turn/started`, raises one session error saying the same, and releases the gate, so the queued verbs run (`CodexAdapter.withinDeadline`).
+  A miss leaves `turnId` unset and the reducer's streaming flag as the thread's last `thread/status/changed` put it; a `turn/started` that comes later is taken as any is, into `turnId`.
 - **The running turn at a re-attach**, from the `thread/resume` reply's `thread.status` on a re-attach over a live app-server: `active` refuses the attach with `TurnRunningError`, `turn_running` on both wires, before any page is read (`CodexAdapter.startBorrowed`, D34); it writes no session state, since the refused attach starts nothing.
   Event: none; the resume named no turn and replayed no `turn/started` on `codex-cli 0.156.0` (`docs/MANUAL_TESTING.md` OW-dirazu), and no line arrived between its request and its answer on `0.170.0` (ark3/agentpane#78).
   Measured: `{"type": "active", "activeFlags": []}` mid-turn in all eight samples on `codex-cli 0.156.0`, compaction included (OW-dirazu), and in the one `agentMessage` sample on `0.170.0` (ark3/agentpane#78).
@@ -171,6 +172,7 @@ The settings captures carry four `thread/resume` replies, two in `settings-1`, a
   Event: those three; for a refused request, not measured.
   Since #84 `compact()` arms the running turn's gate too, and answers once the compaction's `turn/started` has come, so no prompt takes that `turn/started` for its own.
   Order: the `{}` reply came before the compaction's `turn/started` in `compact.jsonl` (`codex-cli 0.147.0`) and `compact-rollout.jsonl` (`0.157.1`); the gate does not rely on it, but on the event's arrival, as above.
+  Since ark3/agentpane#91 `compact()` clears `"requesting"` too when it misses the same deadline, since no event would.
   D18: third group, with the running turn's assertion.
 - **An interrupted turn**: `abort()` writes `interruptedTurnId` before `turn/interrupt`, the reply writes nothing, and `turn/completed` clears it.
   Order: the `{}` reply came before `turn/completed` with status `interrupted` in `interrupt.jsonl` (`codex-cli 0.157.1`); not relied on.

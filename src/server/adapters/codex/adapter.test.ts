@@ -10,6 +10,8 @@ import type { Thread } from "./protocol.ts";
 import { CodexReducer } from "./reducer.ts";
 import { BackendRefusedError, type StateChange, TurnRunningError } from "../types.ts";
 import { FakeCodexProcess } from "./test-support.ts";
+import { eventTimeoutMs } from "./adapter.ts";
+import { FakeTimers } from "../../http/testing/fakes.ts";
 
 const VIRTUAL_REF: SessionRef = { backend: "codex", id: "virtual:test" };
 const STORED_REF: SessionRef = { backend: "codex", id: "thread-stored" };
@@ -1321,6 +1323,80 @@ describe("CodexAdapter turns", () => {
 			await expect(submitting).rejects.toThrow("codex adapter submit aborted: disposed during turn startup");
 		});
 
+		describe("the deadline on that turn/started (#91)", () => {
+			const missed = (method: string) => `codex sent no turn/started for agentpane's ${method} within 60s`;
+
+			it("refuses a submit whose turn/started has not come by eventTimeoutMs, and runs the verb queued behind it", async () => {
+				const timers = new FakeTimers();
+				const { adapter, proc } = await startedAdapter({ threadId: "thread-silent", holdTurnStarted: true, setTimer: timers.set });
+				const errors: string[] = [];
+				adapter.onError((message) => errors.push(message));
+				const submitting = adapter.submit("first");
+				// As `SessionManager.#serially` runs the next verb once this one settles.
+				const queued = submitting.catch(() => {}).then(() => adapter.submit("queued"));
+				await tick();
+				expect(timers.pending).toEqual([eventTimeoutMs]);
+
+				timers.runOut();
+
+				await expect(submitting).rejects.toThrow(missed("turn/start"));
+				expect(errors).toEqual([missed("turn/start")]);
+				await tick();
+				proc.emit({ method: "turn/started", params: { threadId: "thread-silent", turn: wireTurn("turn-2") } });
+				await expect(queued).resolves.toBe("started");
+				expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(2);
+				expect(methods(proc)).not.toContain("turn/steer");
+				expect(errors).toHaveLength(1);
+				expect(timers.pending).toEqual([]);
+			});
+
+			it("leaves no turn and the streaming the events said after a miss, and takes a turn/started that comes late", async () => {
+				const timers = new FakeTimers();
+				const { adapter, proc } = await startedAdapter({ threadId: "thread-late", holdTurnStarted: true, setTimer: timers.set });
+				const errors: string[] = [];
+				adapter.onError((message) => errors.push(message));
+				const submitting = adapter.submit("first");
+				await tick();
+				timers.runOut();
+				await expect(submitting).rejects.toThrow(missed("turn/start"));
+
+				// No turn app-server named, so nothing to interrupt; the thread said `active`.
+				expect(adapter.getState().isStreaming).toBe(true);
+				await adapter.abort();
+				expect(methods(proc)).not.toContain("turn/interrupt");
+
+				proc.emit({ method: "turn/started", params: { threadId: "thread-late", turn: wireTurn("turn-1") } });
+				await adapter.abort();
+				expect(request(proc, "turn/interrupt")["params"]).toEqual({ threadId: "thread-late", turnId: "turn-1" });
+				endTurn(proc, "thread-late", "turn-1");
+				expect(adapter.getState().isStreaming).toBe(false);
+				expect(errors).toHaveLength(1);
+			});
+
+			it("refuses a compaction whose turn/started has not come by eventTimeoutMs, clears its requesting, and runs the verb queued behind it", async () => {
+				const timers = new FakeTimers();
+				const { adapter, proc } = await startedAdapter({ threadId: "thread-uncompacted", holdTurnStarted: true, setTimer: timers.set });
+				const errors: string[] = [];
+				adapter.onError((message) => errors.push(message));
+				const compacting = adapter.compact();
+				const queued = compacting.catch(() => {}).then(() => adapter.submit("queued"));
+				await tick();
+				expect(adapter.getState().compaction).toBe("requesting");
+				expect(timers.pending).toEqual([eventTimeoutMs]);
+
+				timers.runOut();
+
+				await expect(compacting).rejects.toThrow(missed("thread/compact/start"));
+				expect(errors).toEqual([missed("thread/compact/start")]);
+				expect(adapter.getState().compaction).toBeNull();
+				await tick();
+				proc.emit({ method: "turn/started", params: { threadId: "thread-uncompacted", turn: wireTurn("turn-1") } });
+				await expect(queued).resolves.toBe("started");
+				expect(methods(proc)).toContain("turn/start");
+				expect(errors).toHaveLength(1);
+			});
+		});
+
 		it("refuses a prompt between a compaction's reply and its turn/started, so that turn/started releases no prompt's gate", async () => {
 			const { adapter, proc } = await startedAdapter({ threadId: "thread-compacting", holdTurnStarted: true });
 			let answered = false;
@@ -1547,6 +1623,37 @@ describe("CodexAdapter session name (D27, OW-jamaha)", () => {
 
 		await expect(renamed).rejects.toThrow("app-server died");
 		expect(adapter.getState().name).toBeNull();
+	});
+
+	it("refuses a rename whose thread/name/updated has not come by eventTimeoutMs, and runs the verb queued behind it (#91)", async () => {
+		const timers = new FakeTimers();
+		const { adapter, proc } = await startedAdapter(
+			{ threadId: STORED_REF.id, turns: twoStoredTurns(), holdNameUpdated: true, setTimer: timers.set },
+			STORED_REF,
+		);
+		const errors: string[] = [];
+		adapter.onError((message) => errors.push(message));
+		const renamed = adapter.setName("probe name");
+		// As `SessionManager.#serially` runs the next verb once this one settles.
+		const queued = renamed.catch(() => {}).then(() => adapter.submit("queued"));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(request(proc, "thread/name/set")["params"]).toEqual({ threadId: STORED_REF.id, name: "probe name" });
+		expect(timers.pending).toEqual([eventTimeoutMs]);
+
+		timers.runOut();
+
+		const missed = "codex sent no thread/name/updated for agentpane's thread/name/set within 60s";
+		await expect(renamed).rejects.toThrow(missed);
+		expect(errors).toEqual([missed]);
+		await expect(queued).resolves.toBe("started");
+		expect(methods(proc)).toContain("turn/start");
+		expect(adapter.getState().name).toBeNull();
+		expect(timers.pending).toEqual([]);
+
+		// One that comes after the miss is a rename like any other.
+		proc.emit({ method: "thread/name/updated", params: { threadId: STORED_REF.id, threadName: "probe name" } });
+		expect(adapter.getState().name).toBe("probe name");
+		expect(errors).toHaveLength(1);
 	});
 
 	it("refuses to name a thread with no conversation yet, sending nothing (OW-kametu)", async () => {

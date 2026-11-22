@@ -49,7 +49,6 @@ export type { ThreadReadResponse } from "../../../../resources/codex-protocol/v2
 export type { ThreadTurnsListParams } from "../../../../resources/codex-protocol/v2/ThreadTurnsListParams";
 export type { ThreadTurnsListResponse } from "../../../../resources/codex-protocol/v2/ThreadTurnsListResponse";
 export type { TurnStartParams } from "../../../../resources/codex-protocol/v2/TurnStartParams";
-export type { TurnStartResponse } from "../../../../resources/codex-protocol/v2/TurnStartResponse";
 export type { TurnInterruptParams } from "../../../../resources/codex-protocol/v2/TurnInterruptParams";
 export type { ModelListParams } from "../../../../resources/codex-protocol/v2/ModelListParams";
 export type { ModelListResponse } from "../../../../resources/codex-protocol/v2/ModelListResponse";

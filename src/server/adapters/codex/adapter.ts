@@ -91,7 +91,23 @@ export interface CodexAdapterOptions {
 	 * at a directory of their own so nothing they do reads the real store.
 	 */
 	codexRoot?: string;
+	/**
+	 * A one-shot timer, answering its cancel, as `AppDeps.setTimer` is for the
+	 * session manager: `eventTimeoutMs` runs on it, so a test fires it without
+	 * waiting. `setTimeout` by default.
+	 */
+	setTimer?: (run: () => void, ms: number) => () => void;
 }
+
+/**
+ * The deadline on a request that answers only once an event has come --
+ * `setName`'s `thread/name/updated`, and the `turn/started` `submit` and
+ * `compact` wait on -- counted from the request (ark3/agentpane#91). A miss
+ * refuses the request and raises one session error naming the event
+ * (`withinDeadline`). A first cut beside D35's `startTimeoutMs`: in every
+ * capture the event came within milliseconds of its reply.
+ */
+export const eventTimeoutMs = 60 * 1000;
 
 const DEFAULT_CLIENT_INFO: ClientInfo = { name: "agentpane", title: "agentpane", version: "0.0.0" };
 const DEFAULT_SANDBOX: SandboxMode = "danger-full-access";
@@ -118,6 +134,7 @@ export class CodexAdapter implements BackendAdapter {
 	private reducer: CodexReducer;
 	private readonly sandbox: SandboxMode;
 	private readonly approvalPolicy: AskForApproval;
+	private readonly setTimer: NonNullable<CodexAdapterOptions["setTimer"]>;
 
 	private proc: CodexProcess | null = null;
 	private client: CodexClientView | null = null;
@@ -158,8 +175,8 @@ export class CodexAdapter implements BackendAdapter {
 	 * 0.147.0` to `0.170.0` (docs/BACKENDS.md, "The running turn"). A
 	 * same-thread `turn/completed`, or a status that is not `active`, arriving
 	 * while it holds is that order broken, and is raised as a session error
-	 * before it releases (`unstarted`, D18). Total silence is not seen;
-	 * ark3/agentpane#91 is to bound it with a deadline.
+	 * before it releases (`unstarted`, D18). Total silence is refused at
+	 * `eventTimeoutMs` (`withinDeadline`).
 	 */
 	private starting: { method: string; resolve: () => void; reject: (error: Error) => void } | null = null;
 	private model: string | null = null;
@@ -221,6 +238,12 @@ export class CodexAdapter implements BackendAdapter {
 		this.reducer = new CodexReducer({ now: options.now });
 		this.sandbox = options.sandbox ?? DEFAULT_SANDBOX;
 		this.approvalPolicy = options.approvalPolicy ?? DEFAULT_APPROVAL_POLICY;
+		this.setTimer =
+			options.setTimer ??
+			((run, ms) => {
+				const timer = setTimeout(run, ms);
+				return () => clearTimeout(timer);
+			});
 	}
 
 	/**
@@ -623,8 +646,9 @@ export class CodexAdapter implements BackendAdapter {
 	/**
 	 * Send `request` behind the gate (`starting`), and resolve once both its
 	 * reply and its `turn/started` have come, as `setName` waits on its
-	 * `thread/name/updated` (D34 point 5). The reply is awaited first, so a
-	 * request that fails answers with its own error, and the gate goes with it.
+	 * `thread/name/updated` (D34 point 5), and within the same deadline. The
+	 * reply is awaited first, so a request that fails answers with its own
+	 * error, and the gate goes with it.
 	 */
 	private async untilStarted(method: string, request: () => Promise<unknown>): Promise<void> {
 		let gate!: NonNullable<typeof this.starting>;
@@ -636,10 +660,33 @@ export class CodexAdapter implements BackendAdapter {
 		started.catch(() => {});
 		this.starting = gate;
 		try {
-			await request();
-			await started;
+			await this.withinDeadline("turn/started", method, request().then(() => started));
 		} finally {
 			if (this.starting === gate) this.starting = null;
+		}
+	}
+
+	/**
+	 * Settle as `waiting` does, a request that answers only once `event` has
+	 * come, or refuse it `eventTimeoutMs` from now with one session error
+	 * naming the event (ark3/agentpane#91), as `SessionManager.#start` bounds a
+	 * start (D35 point 2). The caller's `finally` releases the wait's state
+	 * either way, so the verbs `SessionManager.#serially` queued behind it run;
+	 * an event that comes after the miss lands as one nothing waits on.
+	 */
+	private async withinDeadline(event: string, method: string, waiting: Promise<unknown>): Promise<void> {
+		let cancel = (): void => {};
+		const missed = new Promise<never>((_, reject) => {
+			cancel = this.setTimer(() => {
+				const message = `codex sent no ${event} for agentpane's ${method} within ${eventTimeoutMs / 1000}s`;
+				this.emitError(message);
+				reject(new Error(message));
+			}, eventTimeoutMs);
+		});
+		try {
+			await Promise.race([waiting, missed]);
+		} finally {
+			cancel();
 		}
 	}
 
@@ -689,21 +736,25 @@ export class CodexAdapter implements BackendAdapter {
 	 * `turn/started` has come, behind the same gate as `submit`'s, so a prompt
 	 * in the window between the reply and that event is refused rather than
 	 * taking the compaction's `turn/started` for its own.
+	 *
+	 * A compaction refused, or whose `turn/started` missed the deadline, takes
+	 * its `"requesting"` with it, since that is the request's and no event's,
+	 * and would otherwise keep the session compacting with nothing running.
 	 */
 	async compact(): Promise<void> {
 		const client = this.requireClient();
 		const threadId = this.requireThread();
 		if (this.starting) throw new Error(TURN_START_PENDING_ERROR);
 		if (this.turnId) throw new Error(TURN_ACTIVE_ERROR);
-		await this.untilStarted("thread/compact/start", async () => {
-			this.applyEffects(this.reducer.requestCompaction());
-			try {
+		try {
+			await this.untilStarted("thread/compact/start", async () => {
+				this.applyEffects(this.reducer.requestCompaction());
 				await client.request("thread/compact/start", { threadId });
-			} catch (error) {
-				this.applyEffects(this.reducer.cancelCompaction());
-				throw error;
-			}
-		});
+			});
+		} catch (error) {
+			if (this.reducer.getState().compaction === "requesting") this.applyEffects(this.reducer.cancelCompaction());
+			throw error;
+		}
 	}
 
 	// -- fork-from-past -----------------------------------------------------
@@ -902,9 +953,10 @@ export class CodexAdapter implements BackendAdapter {
 	 * orders them. On `codex-cli 0.154.0`, and mid-turn on `0.160.0`, the
 	 * event came after the reply (docs/MANUAL_TESTING.md, "All three backends
 	 * rename an attached session over the wire" and OW-kametu); the wait is
-	 * armed before the request, so either order resolves it. Nothing times
-	 * the event out, as nothing times out the reply: app-server exiting, or
-	 * the adapter being disposed, rejects the wait.
+	 * armed before the request, so either order resolves it. App-server
+	 * exiting, or the adapter being disposed, rejects the wait, and so does
+	 * `eventTimeoutMs` passing with the reply or the event still to come
+	 * (`withinDeadline`).
 	 *
 	 * Refused while the transcript is empty, which stands in for a thread not
 	 * yet prompted: as of `codex-cli 0.160.0` a rename on one wrote a
@@ -927,7 +979,11 @@ export class CodexAdapter implements BackendAdapter {
 		});
 		this.renaming = renaming;
 		try {
-			await Promise.all([client.request<ThreadSetNameResponse>("thread/name/set", params), renamed]);
+			await this.withinDeadline(
+				"thread/name/updated",
+				"thread/name/set",
+				Promise.all([client.request<ThreadSetNameResponse>("thread/name/set", params), renamed]),
+			);
 		} finally {
 			if (this.renaming === renaming) this.renaming = null;
 		}
