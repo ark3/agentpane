@@ -674,7 +674,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	// What a ref-changing fork leaves behind for the PARENT (OW-kekoji). The
 	// adapter genuinely moves -- the one live adapter is driving the fork now,
 	// from a container of the fork's own -- but the parent is a second
-	// conversation, not an older name for this one, so none of its names goes
+	// conversation, not an older name for this one, so its name does not go
 	// with it and the parent's ref stops resolving at all.
 	// It is detached, in the sense D9 and D12 already define, and the next
 	// attach rehydrates it. Pi is the only backend that reaches this now

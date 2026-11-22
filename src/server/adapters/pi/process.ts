@@ -344,7 +344,8 @@ export class PiAdapter implements BackendAdapter {
 
 	/**
 	 * Replace the held transcript with Pi's own. Emits a snapshot, not an upsert.
-	 * On Pi this replace is the merge D24 asks of a hydrate. A fork truncates:
+	 * A replace, as every hydrate is since ark3/agentpane#86 made Codex's one
+	 * too (D24). A fork truncates:
 	 * the branch Pi answers is every message the new session holds, and all
 	 * the transcript held past it is the parent's abandoned turn (OW-yudoni,
 	 * OW-sededi), so laying one under the other keeps nothing of the second.
@@ -734,8 +735,9 @@ export class PiAdapter implements BackendAdapter {
 		// stale; re-fetch the rewound branch -- the same cold-start path `start()`
 		// uses when resuming, and a replace for the reason its docblock gives.
 		// `isStreaming` is not written here: the abandoned turn's `agent_settled`
-		// clears it, and came before the stop's `abort` reply (D34 point 5,
-		// docs/BACKENDS.md); one arriving in the window is loud.
+		// clears it, and came before the stop's `abort` reply in all 22 runs on
+		// `pi 1.2.0` (OW-yewiku, D34 point 5, docs/BACKENDS.md); one arriving in
+		// the window is loud.
 		await this.hydrateMessages();
 		// No `start`: the fork is the file this live process is already writing.
 		return { ref: this.ref };

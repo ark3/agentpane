@@ -111,8 +111,9 @@ export interface SessionSummary {
 	onDisk: boolean;
 	/**
 	 * The session's name as the backend holds it (D27), null for none. For an
-	 * attached session, the one its adapter last set or was told, which a
-	 * change sends `sessions-changed` for; agentpane keeps no copy of its own
+	 * attached session, the one its backend last reported to the adapter, at
+	 * attach or by its rename event (`AdapterState.name`), which a change
+	 * sends `sessions-changed` for; agentpane keeps no copy of its own
 	 * (D13, "Names are not marks"), so a detached session's is what the store
 	 * walk reads, and as of OW-jamaha the walk reads none.
 	 */

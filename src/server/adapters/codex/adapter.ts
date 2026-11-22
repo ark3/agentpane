@@ -104,8 +104,9 @@ export interface CodexAdapterOptions {
  * `setName`'s `thread/name/updated`, and the `turn/started` `submit` and
  * `compact` wait on -- counted from the request (ark3/agentpane#91). A miss
  * refuses the request and raises one session error naming the event
- * (`withinDeadline`). A first cut beside D35's `startTimeoutMs`: in every
- * capture the event came within milliseconds of its reply.
+ * (`withinDeadline`). A first cut beside D35's `startTimeoutMs`:
+ * `thread/name/updated` came 6ms after its reply on `codex-cli 0.160.0`
+ * (docs/BACKENDS.md); the gap before `turn/started` was not timed.
  */
 export const eventTimeoutMs = 60 * 1000;
 

@@ -128,7 +128,7 @@ export class ConnectionLostError extends Error {
 /**
  * Every command on a live session names the handle the client holds for it,
  * and is refused `not_attached` once that handle has ended (D31 point 9).
- * Attach, preview, create, close and the listing name a ref.
+ * Attach, preview, create and the listing name a ref.
  */
 export interface AgentpaneApi {
 	listSessions(cwd?: string): Promise<SessionSummary[]>;
@@ -189,8 +189,9 @@ export interface AgentpaneApi {
 	forkPoints(handle: string): Promise<ForkPointsResponse>;
 	/**
 	 * Fork at the user message `body.index` names, attach the fork and prompt
-	 * it, as one server operation (D30). A refusal after the fork exists
-	 * rejects with an `ApiClientError` whose `fork` names it.
+	 * it, as one server operation (D30). A refusal once the fork is attached
+	 * rejects with an `ApiClientError` whose `fork` names it; one whose own
+	 * start failed names none (D35 point 6).
 	 */
 	forkAndPrompt(handle: string, body: ForkAndPromptRequest): Promise<ForkAndPromptResponse>;
 	/**

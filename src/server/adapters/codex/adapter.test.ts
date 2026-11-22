@@ -779,7 +779,7 @@ describe("CodexAdapter turns", () => {
 		});
 	});
 
-	it("interrupts the active turn returned by turn/start", async () => {
+	it("interrupts the running turn turn/started named", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-abort" });
 		await adapter.submit("begin");
 

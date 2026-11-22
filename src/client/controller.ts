@@ -1492,10 +1492,12 @@ export function createController(
 				return forked;
 			} catch (error: unknown) {
 				if (disposed) return null;
-				// A refusal after the fork was created names it, and the server
-				// removes nothing (D17, D30). The selection moves there unless a
-				// click has moved it since, so that sending again prompts that fork
-				// rather than forking the parent again; the draft stays for that send.
+				// A refusal once the fork's attach has published names it, and the
+				// server removes nothing (D17, D30); a fork whose own start failed
+				// is not named and left nothing (D35 point 6). The selection moves
+				// to a named fork unless a click has moved it since, so that sending
+				// again prompts that fork rather than forking the parent again; the
+				// draft stays for that send.
 				// A fork closed before its prompt was refused has no handle, and the
 				// pane reads it detached, as `paneMode` reads any selection this tab
 				// holds no view of; one still live had its snapshot handled before

@@ -197,7 +197,7 @@ interface ManagedSession {
 	 * Whether the session index has listed this session, reported as
 	 * `SessionSummary.onDisk`. `fromStore` cannot stand in: it is fixed at
 	 * creation, and a session created here reaches the store at its first turn
-	 * (D9). `list()` sets it once the index has the file, so `summaryOf` -- which
+	 * (D9). `list()` sets it once the index has the file, so `#summary` -- which
 	 * does not walk the index -- can say so too; a fork's container starts with
 	 * it false (`#forkOnto`).
 	 */
@@ -1087,9 +1087,9 @@ export class SessionManager {
 	 * (OW-suhoto). What goes there is `ended`, under the parent's own ref, and
 	 * then `sessionsChanged` (D26): a client that did not fork and held the
 	 * parent live loses that view and falls to the parent's preview, its
-	 * selection standing. The client that forked has the fork's ref from the
-	 * response and attaches it, which is what snapshots it under the fork's own
-	 * handle.
+	 * selection standing. The server then attaches the fork for the client
+	 * that forked (`#attachFork`), which snapshots it under the fork's own
+	 * handle, and the reply names it.
 	 */
 	#forkOnto(parent: ManagedSession, next: SessionRef): ManagedSession {
 		const fork = this.#container(next, {
@@ -1590,10 +1590,11 @@ export class SessionManager {
 	}
 
 	/**
-	 * One session's summary. Deliberately not `list().find()`: that walks both
-	 * backends' whole session stores (973 files on this machine, D9) to answer a
-	 * question about a session we are already holding open, on the path a session
-	 * switch takes.
+	 * One session's summary, a read for the tests since ark3/agentpane#90:
+	 * `attach` and `create` answer `#summary` of the container they landed on.
+	 * Deliberately not `list().find()`: that walks both backends' whole session
+	 * stores (973 files on this machine, D9) to answer a question about a
+	 * session we are already holding open.
 	 */
 	summaryOf(ref: SessionRef): LiveSessionSummary | null {
 		const session = this.#lookup(ref);

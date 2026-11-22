@@ -254,7 +254,8 @@ export interface BackendAdapter {
 	setModel(model: string): Promise<void>;
 	/**
 	 * Name the session, written through to the backend, and carried in
-	 * `getState().name` once the backend has accepted it (D27, OW-jamaha).
+	 * `getState().name` once the backend reports it, by its rename event (D27,
+	 * OW-jamaha, D34 point 5).
 	 * Not `rename`: a rename here is a ref change (`onRefChanged`). The server
 	 * refuses a blank name before it reaches this (`sessionName` in
 	 * `src/server/http/operations.ts`).

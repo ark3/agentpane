@@ -131,9 +131,8 @@ function updateSession(state: ClientState, handle: string, view: SessionView): C
  * the handle or the old ref, and `selected` where it named the old ref, move with it,
  * because they are compared by ref: `aria-pressed`, `selectedSummary`, and
  * the preview read of a dropped view, which goes by the selected ref, where
- * an old `virtual:` id reads an empty transcript while the server holds the
- * session and `gone` once it does not, whatever the new ref has on disk
- * (OW-vasubu, D26 point 5).
+ * an old `virtual:` id reads `gone`, whatever the new ref has on disk
+ * (OW-vasubu, D26 point 5, D35 point 1).
  *
  * With no view before the event -- a snapshot introducing one -- the old ref
  * is the one the summary carrying the handle holds, which a listing put
