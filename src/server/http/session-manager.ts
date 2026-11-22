@@ -474,14 +474,6 @@ export class SessionManager {
 		if (this.#names.get(key) === session.handle) this.#names.delete(key);
 	}
 
-	/**
-	 * The id this session actually has now, which is what every event carries.
-	 * Returns `ref` unchanged when we know nothing about it.
-	 */
-	canonicalRef(ref: SessionRef): SessionRef {
-		return this.#lookup(ref)?.ref ?? ref;
-	}
-
 	/** Refs with live state. */
 	liveRefs(): SessionRef[] {
 		return [...this.#sessions.values()].filter((s) => s.adapter).map((s) => s.ref);

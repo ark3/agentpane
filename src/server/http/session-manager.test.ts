@@ -196,7 +196,7 @@ describe("attach", () => {
 		expect(pi.created[0]?.startOptions).toEqual({ cwd: WORKSPACE, resumeId: canonical.id });
 		expect(sessions.adapterFor(canonical)).toBe(pi.created[0]);
 		expect(sessions.summaryOf(canonical)?.handle).toBe(attached.handle);
-		expect(sessions.canonicalRef(requested)).toEqual(requested);
+		expect(sessions.summaryOf(requested)).toBeNull();
 		expect(sessions.holds(requested)).toBe(false);
 	});
 
@@ -220,7 +220,7 @@ describe("attach", () => {
 		await expect(sessions.attach(requested)).rejects.toThrow("startup failed");
 
 		expect(failing.createdFor).toEqual([REF]);
-		expect(sessions.canonicalRef(requested)).toEqual(requested);
+		expect(sessions.holds(requested)).toBe(false);
 		expect(sessions.adapterFor(REF)).toBeUndefined();
 		expect(sessions.liveRefs()).toEqual([]);
 	});
@@ -250,7 +250,7 @@ describe("attach", () => {
 
 		expect(throughAlias).toEqual(expect.objectContaining({ ref: canonical, handle: first.handle }));
 		expect(pi.created).toHaveLength(1);
-		expect(sessions.canonicalRef(alias)).toEqual(alias);
+		expect(sessions.holds(alias)).toBe(false);
 		expect(sessions.liveRefs()).toEqual([canonical]);
 	});
 
@@ -286,8 +286,8 @@ describe("attach", () => {
 		expect(second.handle).toBe(first.handle);
 		expect(first.ref).toEqual(canonical);
 		expect(pi.created).toHaveLength(1);
-		expect(sessions.canonicalRef(aliasA)).toEqual(aliasA);
-		expect(sessions.canonicalRef(aliasB)).toEqual(aliasB);
+		expect(sessions.holds(aliasA)).toBe(false);
+		expect(sessions.holds(aliasB)).toBe(false);
 		expect(sessions.liveRefs()).toEqual([canonical]);
 	});
 
@@ -323,8 +323,8 @@ describe("attach", () => {
 
 		expect(results.map((result) => result.status)).toEqual(["rejected", "rejected"]);
 		expect(failing.created).toHaveLength(1);
-		expect(sessions.canonicalRef(aliasA)).toEqual(aliasA);
-		expect(sessions.canonicalRef(aliasB)).toEqual(aliasB);
+		expect(sessions.holds(aliasA)).toBe(false);
+		expect(sessions.holds(aliasB)).toBe(false);
 		expect(sessions.adapterFor(canonical)).toBeUndefined();
 		expect(sessions.liveRefs()).toEqual([]);
 	});
@@ -382,7 +382,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		await sessions.close(handle);
 
 		expect(sessions.liveRefs()).toEqual([]);
-		expect(sessions.canonicalRef(REF)).toEqual(REF);
+		expect(sessions.holds(REF)).toBe(false);
 		expect(sessions.holds({ backend: "pi", id: REAL })).toBe(false);
 		expect(renaming.created[0]?.disposed).toBe(true);
 	});
@@ -493,7 +493,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			await expect(sessions.attach(REF)).rejects.toThrow("get_messages failed");
 
 			expect(wire).toEqual([]);
-			expect(sessions.canonicalRef(REF)).toEqual(REF);
+			expect(sessions.holds(REF)).toBe(false);
 			expect(sessions.summaryOf(real)).toBeNull();
 			expect(sessions.liveRefs()).toEqual([]);
 			// A container left in the table would list a row of its own.
@@ -605,7 +605,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		// The returned ref is the new thread, distinct from the adapter's own ref.
 		expect(forked).toEqual({ backend: "codex", id: "thread-parent#fork-e1" });
 		// The parent session is still keyed by its original id -- no re-key, no rename.
-		expect(sessions.canonicalRef(codexRef)).toEqual(codexRef);
+		expect(sessions.holds(codexRef)).toBe(true);
 		expect(sessions.liveRefs()).toEqual([codexRef]);
 		expect(events.filter((event) => "session" in event && sessionKey(event.session) !== sessionKey(codexRef))).toEqual([]);
 	});
@@ -626,7 +626,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 
 		expect(forked).toEqual({ backend: "claude", id: "parent#fork-e1" });
 		// The parent is untouched: same ref, same live adapter.
-		expect(sessions.canonicalRef(claudeRef)).toEqual(claudeRef);
+		expect(sessions.holds(claudeRef)).toBe(true);
 		expect(sessions.adapterFor(claudeRef)).toBe(parent);
 
 		await sessions.attach(forked);
@@ -690,7 +690,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		// still resolved would hand a client a handle on the fork's agent.
 		expect(sessions.adapterFor(forked)).toBe(parentAdapter);
 		expect(sessions.adapterFor(REF)).toBeUndefined();
-		expect(sessions.canonicalRef(REF)).toEqual(REF);
+		expect(sessions.holds(REF)).toBe(false);
 		expect(sessions.summaryOf(REF)).toBeNull();
 	});
 
@@ -1770,7 +1770,7 @@ describe("lifecycle", () => {
 		expect(replacementB.handle).toBe(replacementA.handle);
 		expect(replacementA.ref).toEqual(canonical);
 		expect(pi.created).toHaveLength(2);
-		expect(sessions.canonicalRef(aliasA)).toEqual(aliasA);
+		expect(sessions.holds(aliasA)).toBe(false);
 		expect(sessions.liveRefs()).toEqual([canonical]);
 	});
 
