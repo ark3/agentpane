@@ -42,7 +42,6 @@ import {
 	type ThreadTurnsListParams,
 	type ThreadTurnsListResponse,
 	type Turn,
-	type TurnStartResponse,
 	type UserInput,
 } from "./protocol.ts";
 
@@ -113,10 +112,6 @@ interface ClientOwnership {
 	ready: boolean;
 }
 
-type TurnBusyState =
-	| { source: "submission"; turnId: string | null }
-	| { source: "lifecycle"; turnId: string };
-
 export class CodexAdapter implements BackendAdapter {
 	private currentRef: SessionRef;
 	private options: CodexAdapterOptions;
@@ -143,8 +138,9 @@ export class CodexAdapter implements BackendAdapter {
 	private startCalled = false;
 	private threadId: string | null = null;
 	/**
-	 * A known-safe lifecycle id that `abort()` may interrupt: from a
-	 * `turn/started` or a `turn/start` response.
+	 * The running turn, which `abort()` interrupts and `submit()` steers: set
+	 * by `turn/started` alone and cleared by its `turn/completed`, so it names
+	 * a turn app-server said is live (D34 point 5).
 	 */
 	private turnId: string | null = null;
 	/**
@@ -152,23 +148,20 @@ export class CodexAdapter implements BackendAdapter {
 	 * `turn/completed` arrives and clears `turnId` with it (OW-pefawi).
 	 */
 	private interruptedTurnId: string | null = null;
-	private turnStartPending = false;
 	/**
-	 * The single-flight admission gate. This is intentionally separate from
-	 * `turnId`: a successful response can prove a submission is live without
-	 * proving that its response id is safe to interrupt.
+	 * The gate from a `turn/start` or `thread/compact/start` until its
+	 * `turn/started`, which `submit` and `compact` wait on and refuse a second
+	 * request behind (`TURN_START_PENDING_ERROR`). Armed before the request, so
+	 * either order of reply and event releases it; what it relies on is that a
+	 * `turn/started` follows every successful reply, as it did for all 20
+	 * `turn/start` replies in the 14 wire captures that carry one, `codex-cli
+	 * 0.147.0` to `0.170.0` (docs/BACKENDS.md, "The running turn"). A
+	 * same-thread `turn/completed`, or a status that is not `active`, arriving
+	 * while it holds is that order broken, and is raised as a session error
+	 * before it releases (`unstarted`, D18). Total silence is not seen;
+	 * ark3/agentpane#91 is to bound it with a deadline.
 	 */
-	private turnBusy: TurnBusyState | null = null;
-	/**
-	 * The latest current-thread turn candidate observed while the single allowed
-	 * `turn/start` continuation can still resume. Keeping the latest candidate
-	 * lets a response followed by its lifecycle in the same chunk retain the
-	 * completion, while overflow still records that earlier ids made correlation
-	 * ambiguous.
-	 */
-	private pendingTurnCompletions = new Map<string, "started" | "completed">();
-	/** Candidate overflow makes an unknown response unsafe to install as active. */
-	private pendingTurnCompletionOverflow = false;
+	private starting: { method: string; resolve: () => void; reject: (error: Error) => void } | null = null;
 	private model: string | null = null;
 	/**
 	 * The effort sent on every `turn/start` like `model` --
@@ -491,6 +484,7 @@ export class CodexAdapter implements BackendAdapter {
 				const message =
 					error?.message ?? `codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`;
 				this.renaming?.reject(new Error(message));
+				this.starting?.reject(new Error(message));
 				this.emitError(message);
 			},
 		});
@@ -516,12 +510,10 @@ export class CodexAdapter implements BackendAdapter {
 		this.noticeListeners.clear();
 		this.turnId = null;
 		this.interruptedTurnId = null;
-		this.turnStartPending = false;
-		this.turnBusy = null;
-		this.pendingTurnCompletions.clear();
-		this.pendingTurnCompletionOverflow = false;
 		this.renaming?.reject(new Error("codex adapter disposed"));
 		this.renaming = null;
+		this.starting?.reject(new Error(TURN_START_ABORTED_ERROR));
+		this.starting = null;
 		// The child dies with the LAST holder, not with this one. A fork drives a
 		// thread only the parent's app-server may open, so killing on the first
 		// release would take the fork's session down with the parent's
@@ -540,7 +532,7 @@ export class CodexAdapter implements BackendAdapter {
 		if (!ownership || ownership.client !== client || !this.owns(ownership)) {
 			throw new Error("codex adapter not started");
 		}
-		if (this.turnStartPending) throw new Error(TURN_START_PENDING_ERROR);
+		if (this.starting) throw new Error(TURN_START_PENDING_ERROR);
 		const input: UserInput[] = [];
 		if (text) input.push({ type: "text", text, text_elements: [] });
 		for (const image of images ?? []) {
@@ -554,11 +546,11 @@ export class CodexAdapter implements BackendAdapter {
 		// second turn.
 		//
 		// `expectedTurnId` is a precondition app-server enforces, so this needs
-		// a turn id it knows is live: `turnId` is exactly that, set only from an
-		// unambiguously correlated id -- a `turn/started` notification or a
-		// `turn/start` response whose candidate nothing contradicts (see
-		// `turnId`). A `turnBusy` with no id is a submission the adapter cannot
-		// name, so there is nothing to steer and the rejection stands.
+		// a turn id it knows is live: `turnId` is exactly that, set only from
+		// `turn/started` (see `turnId`). Between a `turn/start` and its
+		// `turn/started` there is no id to steer with, and the gate above
+		// refuses; `SessionManager.#serially` holds the next prompt until
+		// `submit` answers, which is not before then.
 		//
 		// A compaction is the one live turn that must not be steered: `compact` is
 		// one of the two `NonSteerableTurnKind`s, and a compaction runs as its own
@@ -604,19 +596,15 @@ export class CodexAdapter implements BackendAdapter {
 			}
 			return "started";
 		}
-		if (this.turnBusy) throw new Error(TURN_ACTIVE_ERROR);
+		if (this.turnId) throw new Error(TURN_ACTIVE_ERROR);
 		// The turn's messages carry the reducer's identity, which otherwise knows
 		// only the model and effort `thread/start` or `thread/resume` reported.
 		// Set here rather than in `setModel`, since a turn already running keeps
 		// its model; and before the request, since the turn's first deltas can
 		// arrive with its response.
 		this.reducer.setIdentity({ model: this.model, reasoningEffort: this.effort });
-		this.turnStartPending = true;
-		this.turnBusy = { source: "submission", turnId: null };
-		let responseTurnId: string | undefined;
-		let responseAccepted = false;
-		try {
-			const response = await client.request<TurnStartResponse>("turn/start", {
+		await this.untilStarted("turn/start", () =>
+			client.request("turn/start", {
 				threadId,
 				input,
 				// TurnStartParams.model overrides "for this turn and subsequent
@@ -624,46 +612,48 @@ export class CodexAdapter implements BackendAdapter {
 				// where `setModel` takes effect.
 				...(this.model ? { model: this.model } : {}),
 				...(this.effort ? { effort: this.effort } : {}),
-			});
-			if (ownership.client !== client || !this.owns(ownership)) {
-				throw new Error(TURN_START_ABORTED_ERROR);
-			}
-			responseAccepted = true;
-			responseTurnId = response.turn?.id;
-			const completion = responseTurnId
-				? this.pendingTurnCompletions.get(responseTurnId)
-				: undefined;
-			this.turnBusy = { source: "submission", turnId: responseTurnId ?? null };
-			if (responseTurnId) {
-				// Keep a lifecycle-established active id: a matching id is direct
-				// evidence even after overflow, while a different id is authoritative.
-				if (completion === "completed") {
-					if (this.turnId === responseTurnId) this.turnId = null;
-					this.turnBusy = null;
-				} else if (
-					this.turnId === null &&
-					this.pendingTurnCompletions.size === 0 &&
-					!this.pendingTurnCompletionOverflow
-				) {
-					this.turnId = responseTurnId;
-				}
-				// With no active id, a mismatched candidate or overflow leaves the
-				// response untouched: it may name a submission steered into a turn that
-				// already completed, so failing closed avoids reviving it.
-			}
-		} finally {
-			if (ownership.client === client && this.owns(ownership)) {
-				if (responseTurnId) this.pendingTurnCompletions.delete(responseTurnId);
-				this.turnStartPending = false;
-				this.pendingTurnCompletions.clear();
-				this.pendingTurnCompletionOverflow = false;
-				if (!responseAccepted) this.turnBusy = null;
-				if (!this.turnBusy && this.turnId) {
-					this.turnBusy = { source: "lifecycle", turnId: this.turnId };
-				}
-			}
+			}),
+		);
+		if (ownership.client !== client || !this.owns(ownership)) {
+			throw new Error(TURN_START_ABORTED_ERROR);
 		}
 		return "started";
+	}
+
+	/**
+	 * Send `request` behind the gate (`starting`), and resolve once both its
+	 * reply and its `turn/started` have come, as `setName` waits on its
+	 * `thread/name/updated` (D34 point 5). The reply is awaited first, so a
+	 * request that fails answers with its own error, and the gate goes with it.
+	 */
+	private async untilStarted(method: string, request: () => Promise<unknown>): Promise<void> {
+		let gate!: NonNullable<typeof this.starting>;
+		const started = new Promise<void>((resolve, reject) => {
+			gate = { method, resolve, reject };
+		});
+		// Rejected by an exit or a disposal while the request is still out,
+		// which rejects that too and is what the caller hears.
+		started.catch(() => {});
+		this.starting = gate;
+		try {
+			await request();
+			await started;
+		} finally {
+			if (this.starting === gate) this.starting = null;
+		}
+	}
+
+	/**
+	 * `what` arrived while the gate held, where only a `turn/started` was
+	 * expected: the order `starting` relies on broke. Named once, and the gate
+	 * released, so the request answers and the session runs on (D18).
+	 */
+	private unstarted(what: string): void {
+		const gate = this.starting;
+		if (!gate) return;
+		this.starting = null;
+		this.emitError(`codex sent ${what} with no turn/started for agentpane's ${gate.method}`);
+		gate.resolve();
 	}
 
 	/**
@@ -692,22 +682,28 @@ export class CodexAdapter implements BackendAdapter {
 	 * `NonSteerableTurnKind`s, so there is no steering a compaction into a
 	 * running turn, and app-server will not start a second turn while one runs.
 	 * Admitting the request here only to have app-server reject it would turn a
-	 * well-defined "busy" into an opaque wire error. The gate
-	 * (`turnBusy`/`turnId`/`turnStartPending`) is the one `submit` used before
-	 * it gained a steer path.
+	 * well-defined "busy" into an opaque wire error. So it is refused while the
+	 * gate holds or `turnId` names a turn, as a `turn/start` would be.
+	 *
+	 * The compaction runs as a turn of its own, and this answers once its
+	 * `turn/started` has come, behind the same gate as `submit`'s, so a prompt
+	 * in the window between the reply and that event is refused rather than
+	 * taking the compaction's `turn/started` for its own.
 	 */
 	async compact(): Promise<void> {
 		const client = this.requireClient();
 		const threadId = this.requireThread();
-		if (this.turnStartPending) throw new Error(TURN_START_PENDING_ERROR);
-		if (this.turnBusy || this.turnId) throw new Error(TURN_ACTIVE_ERROR);
-		this.applyEffects(this.reducer.requestCompaction());
-		try {
-			await client.request("thread/compact/start", { threadId });
-		} catch (error) {
-			this.applyEffects(this.reducer.cancelCompaction());
-			throw error;
-		}
+		if (this.starting) throw new Error(TURN_START_PENDING_ERROR);
+		if (this.turnId) throw new Error(TURN_ACTIVE_ERROR);
+		await this.untilStarted("thread/compact/start", async () => {
+			this.applyEffects(this.reducer.requestCompaction());
+			try {
+				await client.request("thread/compact/start", { threadId });
+			} catch (error) {
+				this.applyEffects(this.reducer.cancelCompaction());
+				throw error;
+			}
+		});
 	}
 
 	// -- fork-from-past -----------------------------------------------------
@@ -977,25 +973,15 @@ export class CodexAdapter implements BackendAdapter {
 			switch (msg.method) {
 				case "turn/started": {
 					if (msg.params.threadId !== this.threadId) return;
-					const startedTurnId = msg.params.turn.id;
-					this.turnId = startedTurnId;
-					if (!this.turnStartPending) {
-						if (!this.turnBusy || this.turnBusy.source === "lifecycle") {
-							this.turnBusy = { source: "lifecycle", turnId: startedTurnId };
-						} else if (this.turnBusy.turnId === null) {
-							this.turnBusy = { source: "submission", turnId: startedTurnId };
-						}
-					}
-					if (this.turnStartPending && !this.pendingTurnCompletions.has(startedTurnId)) {
-						if (this.pendingTurnCompletions.size > 0) {
-							// `turn/started` has no JSON-RPC request id. If another
-							// same-thread producer exhausts the bounded candidate slots,
-							// an unknown response might already have completed. Prefer a
-							// no-op abort over reviving and interrupting that turn.
-							this.pendingTurnCompletionOverflow = true;
-						}
-						this.pendingTurnCompletions.clear();
-						this.pendingTurnCompletions.set(startedTurnId, "started");
+					this.turnId = msg.params.turn.id;
+					this.starting?.resolve();
+					this.starting = null;
+					break;
+				}
+				case "thread/status/changed": {
+					const { threadId, status } = msg.params;
+					if (threadId === this.threadId && status.type !== "active") {
+						this.unstarted(`thread/status/changed to ${status.type}`);
 					}
 					break;
 				}
@@ -1010,16 +996,9 @@ export class CodexAdapter implements BackendAdapter {
 				case "turn/completed": {
 					if (msg.params.threadId !== this.threadId) return;
 					const completedTurnId = msg.params.turn.id;
-					if (this.pendingTurnCompletions.has(completedTurnId)) {
-						this.pendingTurnCompletions.set(completedTurnId, "completed");
-					}
+					this.unstarted(`turn/completed for turn ${completedTurnId}`);
 					if (this.turnId === completedTurnId) this.turnId = null;
 					if (this.interruptedTurnId === completedTurnId) this.interruptedTurnId = null;
-					if (!this.turnStartPending && this.turnBusy?.turnId === completedTurnId) {
-						this.turnBusy = this.turnId
-							? { source: "lifecycle", turnId: this.turnId }
-							: null;
-					}
 					break;
 				}
 			}

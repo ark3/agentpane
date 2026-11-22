@@ -3065,6 +3065,47 @@ describe("a session's mutations run one at a time (D24, OW-sewewe)", () => {
 		gates[1]?.resolve();
 		await expect(two).resolves.toBeUndefined();
 	});
+
+	it("steers a Codex prompt sent after the first's turn/start reply, once that turn's turn/started lands (D34 point 5)", async () => {
+		// The real adapter, since what is under test is that its gate holds the
+		// queue: `CodexAdapter.submit` answers only at `turn/started`.
+		const ref: SessionRef = { backend: "codex", id: "thread-queued" };
+		const proc = new FakeCodexProcess();
+		proc.onWrite((message) => {
+			const id = message["id"];
+			if (typeof id !== "number") return;
+			const method = message["method"];
+			if (method === "initialize") proc.emit({ id, result: { userAgent: "test" } });
+			if (method === "thread/resume") proc.emit({ id, result: { thread: { id: ref.id, status: { type: "idle" }, turns: [] }, model: "m" } });
+			if (method === "thread/turns/list") proc.emit({ id, result: { data: [], nextCursor: null, backwardsCursor: null } });
+			if (method === "turn/start") proc.emit({ id, result: { turn: { id: "turn-1" } } });
+			if (method === "turn/steer") proc.emit({ id, result: { turnId: "turn-1" } });
+		});
+		index = new FakeSessionIndex([storedSession(ref, WORKSPACE)]);
+		const codex = new CodexAdapterFactory({ spawn: () => proc, codexRoot: join(tmpdir(), "agentpane-codex-no-store") });
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+		await sessions.attach(ref);
+
+		const first = sessions.submit(ref, "first");
+		await flush();
+		expect(proc.lastRequest("turn/start")).toBeDefined();
+		const second = sessions.submit(ref, "second");
+		await flush();
+		expect(proc.written.map((message) => message["method"])).not.toContain("turn/steer");
+
+		proc.emit({
+			method: "turn/started",
+			params: {
+				threadId: ref.id,
+				turn: { id: "turn-1", items: [], itemsView: "notLoaded", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null },
+			},
+		});
+		await expect(first).resolves.toBe("started");
+		await expect(second).resolves.toBe("started");
+
+		expect(proc.written.filter((message) => message["method"] === "turn/start")).toHaveLength(1);
+		expect(proc.lastRequest("turn/steer")?.["params"]).toMatchObject({ threadId: ref.id, expectedTurnId: "turn-1" });
+	});
 });
 
 describe("the idle reaper (D12)", () => {

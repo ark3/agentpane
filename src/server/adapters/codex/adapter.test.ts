@@ -135,10 +135,15 @@ interface HappyServerOptions {
 	/** `model/list`'s `data`, answered in one page. */
 	models?: unknown[];
 	holdTurnStart?: boolean;
-	holdTurnStartAt?: number;
+	/** Answer `turn/start` and send its `thread/status/changed`, but not its `turn/started`. */
+	holdTurnStarted?: boolean;
 	holdThreadStart?: boolean;
 	failCompact?: string;
 	failSteer?: string;
+	/** Refuse `turn/start` with this message. */
+	failTurnStart?: string;
+	/** End each turn `turn/start` begins in the same chunk as its reply, as a turn with nothing to say could. */
+	completeTurns?: boolean;
 	/** The stored thread's `historyMode`; `paginated` is what `thread/start` created as of `codex-cli` 0.156.0. */
 	historyMode?: "legacy" | "paginated";
 	/** The `thread.name` a `thread/start` or `thread/resume` answers with; absent, the thread has none. */
@@ -182,8 +187,32 @@ function turnsPage(turns: unknown[], params: Record<string, unknown>): unknown {
 	return { data, nextCursor: at + 1 < ordered.length ? String(at + 1) : null, backwardsCursor: null };
 }
 
+/** A `turn/started` or `turn/completed` turn, in progress or completed. */
+function wireTurn(id: string, status: "inProgress" | "completed" = "inProgress"): Record<string, unknown> {
+	return status === "inProgress"
+		? { id, items: [], itemsView: "notLoaded", status, error: null, startedAt: 1, completedAt: null, durationMs: null }
+		: { id, items: [], itemsView: "summary", status, error: null, startedAt: 1, completedAt: 2, durationMs: 1000 };
+}
+
+/**
+ * What followed every `turn/start` reply and both `thread/compact/start`
+ * replies in the wire captures, `codex-cli 0.147.0` to `0.170.0`: the thread
+ * going `active`, then the turn's `turn/started`.
+ */
+function startTurn(proc: AdapterProcess, threadId: unknown, turnId: string, withStarted = true): void {
+	proc.emit({ method: "thread/status/changed", params: { threadId, status: { type: "active", activeFlags: [] } } });
+	if (withStarted) proc.emit({ method: "turn/started", params: { threadId, turn: wireTurn(turnId) } });
+}
+
+/** How a turn ended in the wire captures: the thread going `idle`, then its `turn/completed`. */
+function endTurn(proc: AdapterProcess, threadId: unknown, turnId: string): void {
+	proc.emit({ method: "thread/status/changed", params: { threadId, status: { type: "idle" } } });
+	proc.emit({ method: "turn/completed", params: { threadId, turn: wireTurn(turnId, "completed") } });
+}
+
 function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions = {}): void {
 	let turn = 0;
+	let compactions = 0;
 	const historyMode = options.historyMode ?? "paginated";
 	proc.onWrite((message) => {
 		const id = message["id"];
@@ -224,9 +253,15 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 				break;
 			case "turn/start":
 				turn += 1;
-				if (!options.holdTurnStart && options.holdTurnStartAt !== turn) {
-					proc.emit({ id, result: { turn: { id: `turn-${turn}` } } });
+				if (options.failTurnStart) {
+					proc.emit({ id, error: { code: -32603, message: options.failTurnStart } });
+					break;
 				}
+				if (!options.holdTurnStart) {
+					proc.emit({ id, result: { turn: { id: `turn-${turn}` } } });
+					startTurn(proc, params["threadId"], `turn-${turn}`, !options.holdTurnStarted);
+				}
+				if (options.completeTurns) endTurn(proc, params["threadId"], `turn-${turn}`);
 				break;
 			case "thread/read": {
 				const full = params["includeTurns"] === true;
@@ -261,8 +296,13 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 				break;
 			case "thread/compact/start":
 				// OW-72: params `{ threadId }`, response an empty object.
-				if (options.failCompact) proc.emit({ id, error: { code: -32603, message: options.failCompact } });
-				else proc.emit({ id, result: {} });
+				if (options.failCompact) {
+					proc.emit({ id, error: { code: -32603, message: options.failCompact } });
+					break;
+				}
+				compactions += 1;
+				proc.emit({ id, result: {} });
+				startTurn(proc, params["threadId"], `turn-compaction-${compactions}`, !options.holdTurnStarted);
 				break;
 		}
 	});
@@ -992,13 +1032,17 @@ describe("CodexAdapter turns", () => {
 
 	it("compacts an idle thread via thread/compact/start with just the thread id (OW-72)", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-compact" });
-		const updates: ("requesting" | "running" | null)[] = [];
-		adapter.onUpdate((state) => updates.push(state.compaction));
+		const updates: [string | null, boolean][] = [];
+		adapter.onUpdate((state) => updates.push([state.compaction, state.isStreaming]));
 
 		await adapter.compact();
 
 		expect(request(proc, "thread/compact/start")["params"]).toEqual({ threadId: "thread-compact" });
-		expect(updates).toEqual(["requesting"]);
+		// Requesting at the call, then the thread going active for the compaction's turn.
+		expect(updates).toEqual([
+			["requesting", false],
+			["requesting", true],
+		]);
 	});
 
 	it("clears requesting when app-server rejects compaction", async () => {
@@ -1052,70 +1096,20 @@ describe("CodexAdapter turns", () => {
 		});
 	});
 
-	it("does not revive a turn completed in the same chunk as turn/start response", async () => {
-		const proc = new AdapterProcess();
-		proc.onWrite((message) => {
-			const id = message["id"];
-			if (typeof id !== "number") return;
-			switch (message["method"]) {
-				case "initialize":
-					proc.emit({ id, result: {} });
-					break;
-				case "thread/start":
-					proc.emit({
-						id,
-						result: {
-							thread: { id: "thread-same-chunk", turns: [] },
-							model: "gpt",
-							modelProvider: "openai",
-						},
-					});
-					break;
-				case "turn/start": {
-					const turn = {
-						id: "turn-same-chunk",
-						items: [],
-						itemsView: "notLoaded",
-						status: "inProgress",
-						error: null,
-						startedAt: 1,
-						completedAt: null,
-						durationMs: null,
-					};
-					proc.emit({ id, result: { turn } });
-					proc.emit({
-						method: "turn/started",
-						params: { threadId: "thread-same-chunk", turn },
-					});
-					proc.emit({
-						method: "turn/completed",
-						params: {
-							threadId: "thread-same-chunk",
-							turn: {
-								...turn,
-								itemsView: "summary",
-								status: "completed",
-								completedAt: 2,
-								durationMs: 1000,
-							},
-						},
-					});
-					break;
-				}
-				case "turn/interrupt":
-					proc.emit({ id, result: {} });
-					break;
-			}
-		});
-		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
-		await adapter.start({ cwd: "/workspace" });
+	it("leaves the adapter idle after a reply, turn/started and turn/completed in one chunk, and admits the next submit", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-same-chunk", completeTurns: true });
+		const errors = vi.fn();
+		adapter.onError(errors);
 
-		await adapter.submit("finish synchronously");
+		await expect(adapter.submit("finish synchronously")).resolves.toBe("started");
 		await adapter.abort();
+		await expect(adapter.submit("next")).resolves.toBe("started");
 
 		expect(methods(proc)).not.toContain("turn/interrupt");
+		expect(methods(proc)).not.toContain("turn/steer");
+		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(2);
+		expect(errors).not.toHaveBeenCalled();
 	});
-
 	it("rejects a settled submit disposed by its completion update without reviving turn state", async () => {
 		const { adapter, proc } = await startedAdapter({
 			threadId: "thread-dispose-completion",
@@ -1163,24 +1157,8 @@ describe("CodexAdapter turns", () => {
 
 		expect(disposal).toBeDefined();
 		await disposal;
-		expect(
-			adapter as unknown as {
-				turnId: string | null;
-				turnStartPending: boolean;
-				turnBusy: unknown;
-				pendingTurnCompletions: Map<string, string>;
-				pendingTurnCompletionOverflow: boolean;
-			},
-		).toMatchObject({
-			turnId: null,
-			turnStartPending: false,
-			turnBusy: null,
-			pendingTurnCompletionOverflow: false,
-		});
-		expect(
-			(adapter as unknown as { pendingTurnCompletions: Map<string, string> })
-				.pendingTurnCompletions.size,
-		).toBe(0);
+		await expect(adapter.abort()).rejects.toThrow("codex adapter not started");
+		expect(methods(proc)).not.toContain("turn/interrupt");
 		expect(proc.killCount).toBe(1);
 	});
 
@@ -1231,370 +1209,148 @@ describe("CodexAdapter turns", () => {
 		expect(methods(proc)).not.toContain("turn/interrupt");
 	});
 
-	it("bounds held-start tracking without reviving the real turn after completion floods", async () => {
-		const proc = new AdapterProcess();
-		configureHappyServer(proc, { threadId: "thread-bounded", holdTurnStart: true });
-		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
-		await adapter.start({ cwd: "/workspace" });
-		const submitting = adapter.submit("held prompt");
-		const held = request(proc, "turn/start");
-		const emitCompletion = (threadId: string, turnId: string): void => {
-			proc.emit({
-				method: "turn/completed",
-				params: {
-					threadId,
-					turn: {
-						id: turnId,
-						items: [],
-						itemsView: "summary",
-						status: "completed",
-						error: null,
-						startedAt: 1,
-						completedAt: 2,
-						durationMs: 1000,
-					},
-				},
-			});
-		};
-
-		for (let index = 0; index < 1000; index += 1) {
-			emitCompletion("thread-unrelated", `turn-unrelated-${index}`);
-			emitCompletion("thread-bounded", `turn-unmatched-${index}`);
-		}
-		const nonlocalTurn = {
-			id: "turn-nonlocal",
-			items: [],
-			itemsView: "notLoaded",
-			status: "inProgress",
-			error: null,
-			startedAt: 1,
-			completedAt: null,
-			durationMs: null,
-		};
-		proc.emit({
-			method: "turn/started",
-			params: { threadId: "thread-bounded", turn: nonlocalTurn },
-		});
-		emitCompletion("thread-bounded", nonlocalTurn.id);
-
-		const turn = {
-			id: "turn-held",
-			items: [],
-			itemsView: "notLoaded",
-			status: "inProgress",
-			error: null,
-			startedAt: 1,
-			completedAt: null,
-			durationMs: null,
-		};
-		proc.emit({
-			method: "turn/started",
-			params: { threadId: "thread-bounded", turn },
-		});
-		emitCompletion("thread-bounded", turn.id);
-		proc.emit({ id: held["id"], result: { turn } });
-		const retainedTurnIds = (
-			adapter as unknown as { pendingTurnCompletions: Map<string, string> }
-		).pendingTurnCompletions.size;
-
-		await submitting;
-		await adapter.abort();
-
-		expect(retainedTurnIds).toBeLessThanOrEqual(1);
-		expect(methods(proc)).not.toContain("turn/interrupt");
-	});
-
-	it("does not adopt a mismatched response after the sole candidate completed", async () => {
-		const proc = new AdapterProcess();
-		configureHappyServer(proc, { threadId: "thread-steered", holdTurnStart: true });
-		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
-		await adapter.start({ cwd: "/workspace" });
-		const submitting = adapter.submit("held prompt");
-		const held = request(proc, "turn/start");
-		const candidate = {
-			id: "turn-active-candidate",
-			items: [],
-			itemsView: "notLoaded",
-			status: "inProgress",
-			error: null,
-			startedAt: 1,
-			completedAt: null,
-			durationMs: null,
-		};
-		proc.emit({
-			method: "turn/started",
-			params: { threadId: "thread-steered", turn: candidate },
-		});
-		proc.emit({
-			method: "turn/completed",
-			params: {
-				threadId: "thread-steered",
-				turn: {
-					...candidate,
-					itemsView: "summary",
-					status: "completed",
-					completedAt: 2,
-					durationMs: 1000,
-				},
-			},
-		});
-		proc.emit({ id: held["id"], result: { turn: { id: "turn-submission-id" } } });
-
-		await submitting;
-		await adapter.abort();
-
-		expect(methods(proc)).not.toContain("turn/interrupt");
-	});
-
-	it("cannot steer an ambiguous submission, and stays blocked until its response lifecycle completes", async () => {
-		const proc = new AdapterProcess();
-		configureHappyServer(proc, {
-			threadId: "thread-ambiguous-response",
-			holdTurnStartAt: 1,
-		});
-		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
-		await adapter.start({ cwd: "/workspace" });
-		const submitting = adapter.submit("held prompt");
-		const held = request(proc, "turn/start");
-		const candidate = {
-			id: "turn-candidate",
-			items: [],
-			itemsView: "notLoaded",
-			status: "inProgress",
-			error: null,
-			startedAt: 1,
-			completedAt: null,
-			durationMs: null,
-		};
-		const completed = (turn: typeof candidate) => ({
-			...turn,
-			itemsView: "summary",
-			status: "completed",
-			completedAt: 2,
-			durationMs: 1000,
-		});
-		proc.emit({
-			method: "turn/started",
-			params: { threadId: "thread-ambiguous-response", turn: candidate },
-		});
-		proc.emit({
-			method: "turn/completed",
-			params: {
-				threadId: "thread-ambiguous-response",
-				turn: completed(candidate),
-			},
-		});
-		const responseTurn = { ...candidate, id: "turn-response" };
-		proc.emit({ id: held["id"], result: { turn: responseTurn } });
-
-		await submitting;
-		await adapter.abort();
-		// The mismatched candidate left no lifecycle-corroborated `turnId`, so
-		// there is no `expectedTurnId` to steer with (OW-tifuha) and the
-		// submission that is nonetheless still in flight keeps this blocked.
-		await expect(adapter.submit("must stay blocked")).rejects.toThrow(
-			"codex adapter cannot submit while a turn is active",
-		);
-		expect(methods(proc)).not.toContain("turn/interrupt");
-		expect(methods(proc)).not.toContain("turn/steer");
-		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
-
-		proc.emit({
-			method: "turn/completed",
-			params: {
-				threadId: "thread-ambiguous-response",
-				turn: completed(candidate),
-			},
-		});
-		await expect(adapter.submit("stale completion must not unblock")).rejects.toThrow(
-			"codex adapter cannot submit while a turn is active",
-		);
-		expect(methods(proc)).not.toContain("turn/steer");
-
-		proc.emit({
-			method: "turn/started",
-			params: { threadId: "thread-ambiguous-response", turn: responseTurn },
-		});
-		proc.emit({
-			method: "turn/completed",
-			params: {
-				threadId: "thread-ambiguous-response",
-				turn: completed(responseTurn),
-			},
-		});
-		await adapter.submit("allowed after correlated completion");
-
-		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(2);
-	});
-
-	it("observes response lifecycle completion before the submit continuation resumes", async () => {
-		const { adapter, proc } = await startedAdapter({
-			threadId: "thread-response-completed",
-			holdTurnStartAt: 1,
-		});
-		const submitting = adapter.submit("held prompt");
-		const held = request(proc, "turn/start");
-		const inProgressTurn = (id: string) => ({
-			id,
-			items: [],
-			itemsView: "notLoaded",
-			status: "inProgress",
-			error: null,
-			startedAt: 1,
-			completedAt: null,
-			durationMs: null,
-		});
-		const emitCompleted = (turn: ReturnType<typeof inProgressTurn>): void => {
-			proc.emit({
-				method: "turn/completed",
-				params: {
-					threadId: "thread-response-completed",
-					turn: {
-						...turn,
-						itemsView: "summary",
-						status: "completed",
-						completedAt: 2,
-						durationMs: 1000,
-					},
-				},
-			});
-		};
-		const candidate = inProgressTurn("turn-candidate-before-response");
-		proc.emit({
-			method: "turn/started",
-			params: { threadId: "thread-response-completed", turn: candidate },
-		});
-		emitCompleted(candidate);
-		const responseTurn = inProgressTurn("turn-response-completed");
-		proc.emit({ id: held["id"], result: { turn: responseTurn } });
-		proc.emit({
-			method: "turn/started",
-			params: { threadId: "thread-response-completed", turn: responseTurn },
-		});
-		emitCompleted(responseTurn);
-
-		await submitting;
-		await adapter.abort();
-		await adapter.submit("allowed after synchronous completion");
-
-		expect(methods(proc)).not.toContain("turn/interrupt");
-		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(2);
-	});
-
-	it("does not revive a retained candidate after a newer turn completed", async () => {
-		const proc = new AdapterProcess();
-		configureHappyServer(proc, { threadId: "thread-superseded", holdTurnStart: true });
-		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
-		await adapter.start({ cwd: "/workspace" });
-		const submitting = adapter.submit("held prompt");
-		const held = request(proc, "turn/start");
-		const inProgressTurn = (id: string) => ({
-			id,
-			items: [],
-			itemsView: "notLoaded",
-			status: "inProgress",
-			error: null,
-			startedAt: 1,
-			completedAt: null,
-			durationMs: null,
-		});
-		const retainedTurn = inProgressTurn("turn-retained");
-		const newerTurn = inProgressTurn("turn-newer");
-		for (const turn of [retainedTurn, newerTurn]) {
-			proc.emit({
-				method: "turn/started",
-				params: { threadId: "thread-superseded", turn },
-			});
-		}
-		proc.emit({
-			method: "turn/completed",
-			params: {
-				threadId: "thread-superseded",
-				turn: {
-					...newerTurn,
-					itemsView: "summary",
-					status: "completed",
-					completedAt: 2,
-					durationMs: 1000,
-				},
-			},
-		});
-		proc.emit({ id: held["id"], result: { turn: retainedTurn } });
-
-		await submitting;
-		await adapter.abort();
-
-		expect(methods(proc)).not.toContain("turn/interrupt");
-	});
-
-	it("keeps a matching started turn active after bounded candidate overflow", async () => {
-		const proc = new AdapterProcess();
-		configureHappyServer(proc, { threadId: "thread-overflow-active", holdTurnStart: true });
-		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
-		await adapter.start({ cwd: "/workspace" });
-		const submitting = adapter.submit("held prompt");
-		const held = request(proc, "turn/start");
-		const inProgressTurn = (id: string) => ({
-			id,
-			items: [],
-			itemsView: "notLoaded",
-			status: "inProgress",
-			error: null,
-			startedAt: 1,
-			completedAt: null,
-			durationMs: null,
-		});
-		proc.emit({
-			method: "turn/started",
-			params: {
-				threadId: "thread-overflow-active",
-				turn: inProgressTurn("turn-nonlocal"),
-			},
-		});
-		const realTurn = inProgressTurn("turn-real");
-		proc.emit({
-			method: "turn/started",
-			params: { threadId: "thread-overflow-active", turn: realTurn },
-		});
-		proc.emit({ id: held["id"], result: { turn: realTurn } });
-
-		await submitting;
-		await adapter.abort();
-
-		expect(request(proc, "turn/interrupt")["params"]).toEqual({
-			threadId: "thread-overflow-active",
-			turnId: "turn-real",
-		});
-	});
-
-	it("does not retain completion ids received without a pending turn start", async () => {
+	it("says nothing of a turn/completed or an idle status while no turn/start waits", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-idle-completions" });
+		const errors = vi.fn();
+		adapter.onError(errors);
 
-		for (let index = 0; index < 100; index += 1) {
-			proc.emit({
-				method: "turn/completed",
-				params: {
-					threadId: "thread-idle-completions",
-					turn: {
-						id: `turn-idle-${index}`,
-						items: [],
-						itemsView: "summary",
-						status: "completed",
-						error: null,
-						startedAt: 1,
-						completedAt: 2,
-						durationMs: 1000,
-					},
-				},
-			});
-		}
+		for (let index = 0; index < 100; index += 1) endTurn(proc, "thread-idle-completions", `turn-idle-${index}`);
+		await adapter.submit("admitted");
 
-		expect(
-			(adapter as unknown as { pendingTurnCompletions: Map<string, string> })
-				.pendingTurnCompletions.size,
-		).toBe(0);
+		expect(errors).not.toHaveBeenCalled();
+		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
 	});
 
+	describe("the gate from turn/start to its turn/started (D34 point 5)", () => {
+		const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+		it("refuses a second submit after the reply and before turn/started, with one turn/start on the wire", async () => {
+			const { adapter, proc } = await startedAdapter({ threadId: "thread-gate", holdTurnStarted: true });
+			let answered = false;
+			const first = adapter.submit("first").then((disposition) => {
+				answered = true;
+				return disposition;
+			});
+			await tick();
+
+			const second = expect(adapter.submit("second")).rejects.toThrow(
+				"codex adapter cannot submit while turn/start is pending",
+			);
+			await tick();
+			expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
+			await second;
+			expect(answered).toBe(false);
+
+			proc.emit({ method: "turn/started", params: { threadId: "thread-gate", turn: wireTurn("turn-1") } });
+			await expect(first).resolves.toBe("started");
+			await adapter.submit("third");
+
+			expect(request(proc, "turn/steer")["params"]).toMatchObject({ expectedTurnId: "turn-1" });
+			expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
+		});
+
+		it.each([
+			["an idle status", "thread/status/changed to idle", true],
+			["turn/completed", "turn/completed for turn turn-1", false],
+		])(
+			"raises one session error at a reply and %s with no turn/started, and releases the gate",
+			async (_arrival, named, withStatus) => {
+				const { adapter, proc } = await startedAdapter({ threadId: "thread-unstarted", holdTurnStarted: true });
+				const errors: string[] = [];
+				adapter.onError((message) => errors.push(message));
+				const submitting = adapter.submit("first");
+				await tick();
+
+				if (withStatus) endTurn(proc, "thread-unstarted", "turn-1");
+				else proc.emit({ method: "turn/completed", params: { threadId: "thread-unstarted", turn: wireTurn("turn-1", "completed") } });
+
+				expect(errors).toEqual([`codex sent ${named} with no turn/started for agentpane's turn/start`]);
+				await expect(submitting).resolves.toBe("started");
+				await adapter.abort();
+				const next = adapter.submit("next");
+				await tick();
+				proc.emit({ method: "turn/started", params: { threadId: "thread-unstarted", turn: wireTurn("turn-2") } });
+				await expect(next).resolves.toBe("started");
+				expect(errors).toHaveLength(1);
+				expect(methods(proc)).not.toContain("turn/interrupt");
+				expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(2);
+			},
+		);
+
+		it("raises nothing for a turn/started that comes on a later tick than its reply", async () => {
+			const { adapter, proc } = await startedAdapter({ threadId: "thread-later", holdTurnStarted: true });
+			const errors = vi.fn();
+			adapter.onError(errors);
+			const submitting = adapter.submit("first");
+			await tick();
+			await tick();
+
+			proc.emit({ method: "turn/started", params: { threadId: "thread-later", turn: wireTurn("turn-1") } });
+
+			await expect(submitting).resolves.toBe("started");
+			expect(errors).not.toHaveBeenCalled();
+		});
+
+		it("releases the gate on an error reply", async () => {
+			const { adapter, proc } = await startedAdapter({ threadId: "thread-refused", failTurnStart: "turn refused" });
+
+			await expect(adapter.submit("first")).rejects.toThrow("turn refused");
+			await expect(adapter.submit("second")).rejects.toThrow("turn refused");
+
+			expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(2);
+		});
+
+		it("fails a submit still waiting for its turn/started when app-server exits", async () => {
+			const { adapter, proc } = await startedAdapter({ threadId: "thread-exit", holdTurnStarted: true });
+			adapter.onError(() => {});
+			const submitting = adapter.submit("first");
+			await tick();
+
+			proc.exit(1, null, new Error("app-server died"));
+
+			await expect(submitting).rejects.toThrow("app-server died");
+		});
+
+		it("fails a submit still waiting for its turn/started when the adapter is disposed", async () => {
+			const { adapter } = await startedAdapter({ threadId: "thread-disposed", holdTurnStarted: true });
+			const submitting = adapter.submit("first");
+			await tick();
+
+			await adapter.dispose();
+
+			await expect(submitting).rejects.toThrow("codex adapter submit aborted: disposed during turn startup");
+		});
+
+		it("refuses a prompt between a compaction's reply and its turn/started, so that turn/started releases no prompt's gate", async () => {
+			const { adapter, proc } = await startedAdapter({ threadId: "thread-compacting", holdTurnStarted: true });
+			let answered = false;
+			const compacting = adapter.compact().then(() => {
+				answered = true;
+			});
+			await tick();
+
+			expect(answered).toBe(false);
+			const inWindow = expect(adapter.submit("in the window")).rejects.toThrow(
+				"codex adapter cannot submit while turn/start is pending",
+			);
+			await tick();
+			expect(methods(proc)).not.toContain("turn/start");
+			await inWindow;
+
+			proc.emit({ method: "turn/started", params: { threadId: "thread-compacting", turn: wireTurn("turn-compaction-1") } });
+			proc.emit({
+				method: "item/started",
+				params: { threadId: "thread-compacting", turnId: "turn-compaction-1", item: { type: "contextCompaction", id: "item-compaction" } },
+			});
+			await compacting;
+
+			await expect(adapter.submit("during the compaction")).rejects.toThrow(
+				"codex adapter cannot submit while a turn is active",
+			);
+			expect(methods(proc)).not.toContain("turn/start");
+			expect(methods(proc)).not.toContain("turn/steer");
+		});
+	});
 	it("applies a selected model to subsequent turns", async () => {
 		const { adapter, proc } = await startedAdapter();
 
@@ -2473,6 +2229,7 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 					break;
 				case "turn/start":
 					proc.emit({ id, result: { turn: { id: "turn-x" } } });
+					startTurn(proc, params["threadId"], "turn-x");
 					break;
 				case "turn/steer":
 					proc.emit({ id, result: { turnId: params["expectedTurnId"] } });

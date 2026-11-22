@@ -125,12 +125,14 @@ Exempt and writing no session state: `initialize`'s model list; `interrupt`, who
 
 Each fact `CodexAdapter` (`src/server/adapters/codex/adapter.ts`) and `CodexReducer` (`reducer.ts`) write from a JSON-RPC reply, laid out as under Pi's.
 "The wire captures" are the 12 Codex fixtures under `resources/fixtures/codex/` that record app-server's stdout, every one but `fork.jsonl`, which is a rollout, and the four `settings-*` captures ark3/agentpane#83 added later, cited by name: `codex-cli 0.147.0` for `text`, `tool-read`, `tool-edit` and `compact`, `0.153.4` for `subagent`, and `0.157.1` for the other seven.
-They carry 15 `turn/start` replies, four of them in `compact.jsonl`, and no `thread/resume`.
+The settings captures are all `codex-cli 0.170.0`.
+The 14 that carry a `turn/start` reply carry 20, four of them in `compact.jsonl`, three in `settings-1` and two in `settings-4`; `settings-2` and `settings-3` carry none.
+The settings captures carry four `thread/resume` replies, two in `settings-1`, a re-attach's and a fork's borrower's, and one cold in each of `settings-2` and `settings-3`, and no `turn/start` follows any of them.
 
 - **Thread id**, from the `thread/start` or `thread/resume` reply, into the adapter's `threadId`, the reducer's identity and the connection's claim; exempt, since it names what the request created or asked for.
   Event: `thread/started`, which the reducer also takes when it holds no id.
-  Order: the `thread/start` reply came before `thread/started` in all 12 wire captures, `codex-cli 0.147.0` to `0.157.1`; the reducer takes the first either way, so none is relied on.
-  Whether a `thread/resume` sends `thread/started` is in no capture.
+  Order: the `thread/start` reply came before `thread/started` in all 14 wire captures that carry one, `codex-cli 0.147.0` to `0.170.0`, as `settings-1`'s `thread/fork` reply did; the reducer takes the first either way, so none is relied on.
+  None of the four `thread/resume` replies was followed by a `thread/started`, on `codex-cli 0.170.0`.
   D18: first group.
 - **Model, provider and effort the reducer names**, from the `thread/start` or `thread/resume` reply's `model`, `modelProvider` and `reasoningEffort`, under the rollout's last `turn_context` (D23, the docblock on `effort`); before each `turn/start` the adapter sets them from its own choice, which is no reply.
   Event: `thread/started` carries `thread.modelProvider`, which the reducer takes too; `thread/settings/updated` carries `model`, `modelProvider` and `effort`, and the reducer drops it, since it cannot stand in for the replies (ark3/agentpane#83).
@@ -148,11 +150,13 @@ They carry 15 `turn/start` replies, four of them in `compact.jsonl`, and no `thr
   Order: the reply came first, then the event, on `codex-cli 0.154.0` and mid-turn on `0.160.0`, 4.961s against 4.967s (`docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire" and OW-kametu); the wait is armed before the request, so either order resolves it, but the event's arrival is relied on.
   D18: third group, **licenses absent code**: were a release to stop sending the event, `setName` would wait until the session closed or app-server exited, holding every verb `SessionManager.#serially` queued behind it, with nothing to say so.
   Not asserted: what would be loud is an absence, which only a timer could see, and agentpane times out no backend answer but a start (D35); a `thread/name/set` reply that never came would hold it the same way.
-- **The running turn**, from the `turn/start` reply's `turn.id`, into `turnBusy` and, where nothing contradicts it, `turnId`; `turnBusy` itself is set as a submission before the request goes out.
-  Event: `turn/started` names the same id, and `turn/completed` ends it.
-  Order: the reply came before `thread/status/changed` `active` and `turn/started` for all 15 `turn/start` replies in the wire captures, `codex-cli 0.147.0` to `0.157.1`.
-  Not relied on: `pendingTurnCompletions` covers lifecycle lines handled before the awaited reply resumes (`codex/adapter.test.ts`, "does not revive a turn completed in the same chunk as turn/start response").
-  D18: first group.
+- **The running turn**, which since ark3/agentpane#84 the adapter takes from `turn/started` alone, into `turnId`, and which `turn/completed` ends; the `turn/start` reply's `turn.id` is not read.
+  A gate armed before the request, `CodexAdapter.starting`, holds from `turn/start` until that `turn/started`, refusing a second `turn/start` or `thread/compact/start` meanwhile (`TURN_START_PENDING_ERROR`), and `submit` answers once both the reply and the event have come, so `SessionManager.#serially` holds the next prompt until the turn is live and it steers.
+  Order: the reply came before `thread/status/changed` `active` and `turn/started` for all 20 `turn/start` replies in the wire captures, `codex-cli 0.147.0` to `0.170.0`; the gate is released by `turn/started` whichever comes first, but its arrival after every successful reply is relied on.
+  Not measured on any version: a `turn/start` after a `thread/resume`, one on a borrowed fork, one with images, and an error reply.
+  D18: third group, **licenses absent code**: were a release to stop sending `turn/started` for a turn it ran, `submit` would hold every verb queued behind it, and no turn would be steerable or interruptable.
+  Asserted since #84: a same-thread `turn/completed`, or a `thread/status/changed` that is not `active`, arriving while the gate holds raises one session error naming what arrived, and releases the gate (`CodexAdapter.unstarted`).
+  Not asserted: total silence after a reply, which only a timer could see; ark3/agentpane#91 is to bound it with a deadline.
 - **The running turn at a re-attach**, from the `thread/resume` reply's `thread.status` on a re-attach over a live app-server: `active` refuses the attach with `TurnRunningError`, `turn_running` on both wires, before any page is read (`CodexAdapter.startBorrowed`, D34); it writes no session state, since the refused attach starts nothing.
   Event: none; the resume named no turn and replayed no `turn/started` on `codex-cli 0.156.0` (`docs/MANUAL_TESTING.md` OW-dirazu), and no line arrived between its request and its answer on `0.170.0` (ark3/agentpane#78).
   Measured: `{"type": "active", "activeFlags": []}` mid-turn in all eight samples on `codex-cli 0.156.0`, compaction included (OW-dirazu), and in the one `agentMessage` sample on `0.170.0` (ark3/agentpane#78).
@@ -165,8 +169,9 @@ They carry 15 `turn/start` replies, four of them in `compact.jsonl`, and no `thr
   D18: first group.
 - **Compaction**: `compact()` writes `"requesting"` before `thread/compact/start` and clears it on a failed reply; `item/started` for `contextCompaction` owns `running`, and its `item/completed` or `turn/completed` the end.
   Event: those three; for a refused request, not measured.
-  Order: the `{}` reply came before the compaction's `turn/started` in `compact.jsonl` (`codex-cli 0.147.0`) and `compact-rollout.jsonl` (`0.157.1`); not relied on.
-  D18: first group.
+  Since #84 `compact()` arms the running turn's gate too, and answers once the compaction's `turn/started` has come, so no prompt takes that `turn/started` for its own.
+  Order: the `{}` reply came before the compaction's `turn/started` in `compact.jsonl` (`codex-cli 0.147.0`) and `compact-rollout.jsonl` (`0.157.1`); the gate does not rely on it, but on the event's arrival, as above.
+  D18: third group, with the running turn's assertion.
 - **An interrupted turn**: `abort()` writes `interruptedTurnId` before `turn/interrupt`, the reply writes nothing, and `turn/completed` clears it.
   Order: the `{}` reply came before `turn/completed` with status `interrupted` in `interrupt.jsonl` (`codex-cli 0.157.1`); not relied on.
   D18: first group.
