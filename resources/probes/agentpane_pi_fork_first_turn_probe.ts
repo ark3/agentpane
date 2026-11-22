@@ -8,8 +8,8 @@
  * `agentpane_pi_fork_first_turn_probe.py`, which drives `pi --mode rpc`
  * directly. This was its `agentpane` part, over HTTP and the event stream,
  * until ark3/agentpane#54 moved it here. That part drove the fork route alone,
- * which the socket keeps but neither client sends since D30 made an edit one
- * operation, so each fork here is a `sessions/forkAndPrompt`, which forks at a
+ * which the socket kept, sent by neither client after D30 made an edit one
+ * operation, until ark3/agentpane#75 took it off both wires (D33); so each fork here is a `sessions/forkAndPrompt`, which forks at a
  * fork point's transcript index, attaches the fork under its own handle, and
  * prompts it. The fork route aborted nothing before it forked when the Python
  * part first ran; since ark3/agentpane#47 `PiAdapter.fork` sends `clear_queue`

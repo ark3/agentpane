@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """What does the live stream carry while an adapter reads a session's history back? (OW-dutute)
 
-D24's "Hydrate" paragraph makes every hydrate of a live session a merge, and
-the shape of each merge turns on what the backend says in the window between
-asking for the history and getting it.  This probe asks each CLI directly,
+D24's "Hydrate" paragraph made every hydrate of a live session a merge, whose
+shape turned on what the backend says in the window between asking for the
+history and getting it, until D34 refused a Codex re-attach meeting a running
+turn (ark3/agentpane#78) and ark3/agentpane#86 made the settled one a replace.  This probe asks each CLI directly,
 with no agentpane in the picture, and records every line in wire order.
 
   codex  A turn is started and gated on a streaming `agentMessage` (its
@@ -498,8 +499,9 @@ def run_pi() -> dict[str, Any]:
 def run_codex_orphan() -> dict[str, Any]:
     """A turn whose app-server died mid-stream, resumed and listed by a fresh one, as `CodexAdapter.start` does.
 
-    The control for trusting a listed `inProgress` turn only on a thread whose
-    resume says it is `active` (OW-dirazu).
+    Until ark3/agentpane#78, the control for trusting a listed `inProgress`
+    turn only on a thread whose resume says it is `active` (OW-dirazu); now,
+    what a fresh app-server's resume reads for D34's refusal.
     """
     codex_home = make_state_home(Path.home() / ".codex", ("auth.json", "config.toml"), "agentpane-hydrate-codexhome-")
     workspace = make_workspace("agentpane-hydrate-codexwork-")

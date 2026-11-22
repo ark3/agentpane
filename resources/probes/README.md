@@ -592,7 +592,7 @@ Verified with the socket: `claude 2.1.328` on the home server, 2026-11-19; see `
 
 ## `hydrate_window_probe.py`
 
-Proves: **what each backend sends while an adapter reads a live session's history back** (OW-dutute), the window D24's merge-on-hydrate has to reconcile.
+Proves: **what each backend sends while an adapter reads a live session's history back** (OW-dutute), the window D24's merge-on-hydrate had to reconcile until ark3/agentpane#78 and #86; on Pi it is the fork window #79's assertion guards.
 Since D34 a Codex re-attach meeting a running turn is refused rather than merged, on the `thread.status` the resume reports, so on Codex the reading that now matters is that status (ark3/agentpane#78).
 `--backend codex` lists a thread's turns mid-stream the way a re-attach does and reports whether the streaming item is listed, and with how much of its text; `--backend pi` forks a streaming turn and resumes the abandoned file, recording every line from each request to the `get_messages` answer.
 It reuses `AppServer` from `codex_fork_same_process_probe.py` and `PiSession` from `fork_probe.py`, and spawns `pi` with the pinned `--model`.

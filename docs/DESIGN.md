@@ -36,7 +36,7 @@ It is intent, not orders: where it names a specific file or type, that is verifi
 ```
 Browser (SPA, Svelte 5 + Vite), or the Emacs helper
    │  HTTP:       the static bundle, and the upgrade to the socket
-   │  WebSocket:  one per client (D31) — commands (prompt/abort/fork/set-model)
+   │  WebSocket:  one per client (D31) — commands (prompt/abort/fork-and-prompt/set-model)
    │              and queries (sessions, models, fork points) in; their replies
    │              and every session's snapshots and tail upserts out, in order
    ▼
@@ -44,7 +44,7 @@ One server process (Bun)
    ├── SessionIndex:    walks the Pi, Codex, and Claude Code session stores
    │      • metadata only (id, cwd, timestamp, preview) — no process
    ├── SessionManager:  {backend, id} → { child: sbox subprocess, adapter }
-   │      • spawn on attach (cwd = that session's workspace), not on list
+   │      • spawn on attach, create, a prompt by ref, or a fork and prompt (D30), never on list (cwd = that session's workspace)
    │      • subprocess outlives the connection; closed after 15 idle minutes or past 16 live (D12), and at shutdown
    │      • never killed by a dropped browser connection
    ├── Backend adapter (per session):  Pi | Codex | Claude Code
@@ -171,7 +171,7 @@ The reasoning matters more than the conclusion: if a premise turns out to be wro
 - [D21](decisions/D21.md). Each open of the socket is followed by one session listing
 - [D22](decisions/D22.md). The Emacs client is a native `agentpane-mode` over a JSON-RPC helper agentpane owns, not `agent-shell` over an ACP shim
 - [D23](decisions/D23.md). A conversation's model and effort are read back from its store's last turn, never kept by agentpane
-- [D24](decisions/D24.md). A live session is keyed by a handle agentpane mints, its mutations run one at a time, a hydrate merges history with the live stream, and a guard that misses a case means the state has the wrong owner
+- [D24](decisions/D24.md). A live session is keyed by a handle agentpane mints, its mutations run one at a time, a hydrate replaces the transcript with the backend's history (a merge on Codex until ark3/agentpane#86), and a guard that misses a case means the state has the wrong owner
 - [D25](decisions/D25.md). Only a request that makes a session live starts an agent, and a client that loses its socket holds nothing live
 - [D26](decisions/D26.md). The server says a handle has ended, and the preview says a ref is gone
 - [D27](decisions/D27.md). A session's row carries a name, a mark and its fork parent, and both clients label it by one rule
