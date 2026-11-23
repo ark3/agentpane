@@ -529,8 +529,8 @@ describe("App", () => {
 	});
 
 	/**
-	 * Driven by the real controller, whose gates are what a system-only
-	 * transcript used to trip: a Pi fork at the first user message keeps only
+	 * Driven by the real controller, whose gates a system-only transcript must
+	 * pass as unprompted: a Pi fork at the first user message keeps only
 	 * the session's leading system message, and is no more prompted than an
 	 * empty one (OW-widozi).
 	 */
@@ -791,11 +791,10 @@ describe("App", () => {
 	/**
 	 * The three tests below reach the menu's entries with `hidden: true`, and
 	 * without opening the menu first, because jsdom implements none of the
-	 * Popover API the menu is now built on (OW-80) while still applying the UA
+	 * Popover API the menu is built on (OW-80) while still applying the UA
 	 * rule that hides a `[popover]`: `showPopover` is `undefined`, a
 	 * `popovertarget` click is a no-op, and the entries are therefore
-	 * permanently `display: none` and out of the accessibility tree. What each
-	 * one asserts is unchanged. That the menu *dismisses* is the part jsdom
+	 * permanently `display: none` and out of the accessibility tree. That the menu *dismisses* is the part jsdom
 	 * cannot host at all, and it lives in `e2e/tools-menu.spec.ts`.
 	 */
 	it("the composer's New conversation inherits the selected session's workspace AND backend (OW-72)", async () => {
@@ -1037,7 +1036,7 @@ describe("App", () => {
 		const changed = reduceServerEvent(current, { type: "sessions-changed" });
 		expect(changed.refreshSessions).toBe(true);
 		// The refresh it asks for reads the list *before* the JSONL has the user
-		// turn, so preview comes back null -- that is the whole bug.
+		// turn, so preview comes back null -- the case this guards.
 		current = { ...changed.state, summaries: [summary(virtualRef, null, { handle })] };
 		current = reduceServerEvent(current, {
 			type: "snapshot",
@@ -1592,7 +1591,7 @@ describe("App", () => {
 
 	// A drop takes every view and leaves each row its handle (`onDisconnect`),
 	// so a mark filed under a view's handle outlives the view; selecting the
-	// row is what clears it, as it does for a live one (owner, 2026-11-20).
+	// row is what clears it, as it does for a live one (the owner's call).
 	it("keeps a finished-turn marker through a socket drop until its row is selected", async () => {
 		const summaries = [summary(piSession, "Selected turn", { handle: "h-pi" }), summary(codexSession, "Other turn", { handle: "h-codex" })];
 		const live = (codexStreaming: boolean) => ({
@@ -1826,9 +1825,8 @@ describe("App", () => {
 
 		// Session B has no scroll memory yet -- it lands at its own tail. 200,
 		// not 700: the tail is scrollHeight - clientHeight, and `applyScrollTop`
-		// clamps to it. jsdom would have accepted the un-clamped 700 that no
-		// browser ever holds, and accepting it stranded `suppressScrollHandling`
-		// on an assignment the browser turned into a no-op (OW-60).
+		// clamps to it. jsdom would accept the un-clamped 700 that no browser
+		// ever holds, which would hide a missing clamp (OW-60).
 		mockScrollMetrics(el, { scrollHeight: 700, clientHeight: 500 });
 		controller.publish(view({ state: state({ selected: codexSession, sessions }) }));
 		await tick();
@@ -3181,7 +3179,7 @@ describe("App", () => {
 	 * Two user messages get an Edit control and the steered one does not, inside
 	 * a single turn. That is visibly uneven and it is the point: it says what the
 	 * backend can do. The control the third message *does* carry addresses index
-	 * 4 -- the message under it -- where counting user messages made it the third
+	 * 4 -- the message under it -- where counting user messages would make it the third
 	 * ordinal, which on this transcript is a turn that does not exist and on a
 	 * longer one is the turn after the one clicked.
 	 */
@@ -3472,7 +3470,7 @@ describe("App", () => {
 	 * The badge marks turns this viewer started, and a fork is one of them. The
 	 * arming goes on the *fork*, not on whatever `state.selected` happens to be
 	 * while the fork is out. A click mid-fork moves the selection and the
-	 * controller now honours it, so the handle `forkAndSubmit` hands over from
+	 * controller honours it, so the handle `forkAndSubmit` hands over from
 	 * the fork-and-prompt's reply is the only thing that names the right one
 	 * (OW-mifuki, OW-koledi).
 	 */
@@ -3522,7 +3520,7 @@ describe("App", () => {
 	 * Driven by the real controller, not the fake: the re-entrancy rule lives in
 	 * `forkAndSubmit`, and what makes the second press safe is that the composer
 	 * never reaches the controller with it at all (OW-kelede). Reaching it and
-	 * being *refused* would now be harmless on this path, though not on the
+	 * being *refused* would be harmless on this path, though not on the
 	 * plain one: a refusal resolves null and `send()` disarms, but a fork arms
 	 * its follow and badge only at its request's reply, which a refused press
 	 * never reaches, so it has no key to disarm (OW-vitefo).
@@ -4034,10 +4032,10 @@ describe("App", () => {
 
 	/**
 	 * The follow, like the badge, is the fork's from the moment its handle is
-	 * known. Armed on a parent that is streaming, the parent's own transcript
-	 * already holds the edited message, so the arming engaged there at once --
-	 * and the parent's turn ending mid-fork (Pi's stop inside the fork; Codex
-	 * finishing on its own) released it before it ever reached the fork
+	 * known. Armed on a parent that is streaming, whose own transcript already
+	 * holds the edited message, the arming would engage there at once -- and
+	 * the parent's turn ending mid-fork (Pi's stop inside the fork; Codex
+	 * finishing on its own) would release it before it ever reached the fork
 	 * (OW-vitefo).
 	 */
 	it.each(["pi", "codex"] as const)("follows the fork's turn when forked from a streaming %s parent whose turn ends mid-fork (OW-vitefo)", async (backend) => {
@@ -4359,7 +4357,7 @@ describe("App", () => {
 	});
 
 	/**
-	 * OW-hezidi's constraint, on the exit that broke it: a draft typed before
+	 * OW-hezidi's constraint, on the commonest exit: a draft typed before
 	 * clicking edit is never lost, and a fork that lands is the usual way an
 	 * edit ends (OW-kijuju). The fork's prompt clears the text it sent, so the
 	 * draft comes back as it was.

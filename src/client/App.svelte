@@ -33,11 +33,11 @@
 	let { controller }: { controller: AgentpaneController } = $props();
 	/**
 	 * `$state.raw`, and that is load-bearing rather than a micro-optimisation
-	 * (OW-detepa). A deep `$state` proxies the whole view, and `publish()`
+	 * (OW-detepa). A deep `$state` would proxy the whole view, and `publish()`
 	 * swaps a fresh `ControllerView` per event, so every settled markdown
-	 * block in the selected transcript re-parsed on every event -- including
-	 * events for sessions that are not on screen, at ~92ms each on a 180-message
-	 * transcript. Raw keeps object identity for the parts that did not change,
+	 * block in the selected transcript would re-parse on every event --
+	 * including events for sessions that are not on screen, at ~92ms each on a
+	 * 180-message transcript. Raw keeps object identity for the parts that did not change,
 	 * and the derived equality check stops propagation at the top.
 	 *
 	 * It stops working silently the moment anything mutates `view` in place:
@@ -122,8 +122,7 @@
 	 * there, a click to another session -- gives it back too, once
 	 * no send is out, ahead of whatever the composer holds then: after a fork
 	 * that lands that is normally nothing, so the draft comes back as it was.
-	 * Dropping it at the fork lost a note typed before the click, which
-	 * OW-hezidi had ruled out. No edit opens while a send is out (`startEdit`),
+	 * No edit opens while a send is out (`startEdit`),
 	 * so the composer it would displace is never text already on its way, nor
 	 * while the external editor is rewriting it (OW-momejo).
 	 *
@@ -139,8 +138,8 @@
 	 * carrying one. On Codex that is visibly uneven inside a single turn -- a
 	 * turn steered mid-flight holds two user messages and the backend can only
 	 * cut before the first -- and that unevenness is the intended outcome: it
-	 * says what the backend can actually do, where hiding it forked somewhere
-	 * the user never pointed.
+	 * says what the backend can actually do, where hiding it would fork
+	 * somewhere the user never pointed.
 	 */
 	let editing = $state<{
 		index: number;
@@ -239,9 +238,8 @@
 	let followFrame: number | null = null;
 	/**
 	 * Which right-rail segments are inert (OW-60). The rail itself is always
-	 * present -- it lives outside the scroller, so unlike the button it replaced
-	 * it cannot scroll away from the reader -- and only its four segments come
-	 * and go, by going disabled.
+	 * present -- it lives outside the scroller, so it cannot scroll away from
+	 * the reader -- and only its four segments come and go, by going disabled.
 	 */
 	let navDisabled = $state({ start: true, prev: true, next: true, end: true });
 	/** Sub-pixel scroll positions are routine; treat this much as "already there". */
@@ -342,14 +340,13 @@
 	const compaction = $derived(selectedSession?.compaction ?? null);
 	/**
 	 * Whether the Tools menu may offer Detach (OW-tewave). This is D12's
-	 * exemption predicate for its reaper, minus the `virtual` exemption, which
-	 * the owner lifted on 2026-09-16: a virtual session is a workspace choice
-	 * with nothing on disk, so there is no transcript to lose, and what that
-	 * exemption guarded against was a reaper removing a session the user had
-	 * just created -- which a deliberate click is not. Such a session lists as
-	 * `attached`; a row whose status is `virtual` has been a create mid-start
-	 * since D30, which a close names no handle for and is not offered (D35
-	 * point 3).
+	 * exemption predicate for its reaper, minus the `virtual` exemption: a
+	 * virtual session is a workspace choice with nothing on disk, so there is
+	 * no transcript to lose, and what that exemption guards against is a reaper
+	 * removing a session the user has just created -- which a deliberate click
+	 * is not. Such a session lists as `attached`; a row whose status is
+	 * `virtual` is a create mid-start (D30), which a close names no handle for
+	 * and is not offered (D35 point 3).
 	 *
 	 * The rest is kept because `close()` kills mid-turn, and on Claude Code a
 	 * kill mid-turn loses the whole reply (OW-japuzo). `view.sending` is in it
@@ -447,7 +444,7 @@
 	 * which is the same bargain the transcript's own control takes. Deliberately
 	 * *not* a search backwards for the newest forkable message: this button says
 	 * "last message", and quietly loading an older one would be the silent
-	 * mis-targeting this card exists to remove. Absent is the honest answer, and
+	 * mis-targeting this control exists to prevent. Absent is the honest answer, and
 	 * the control comes back as soon as the backend can name the point -- which
 	 * on a turn just started may be a moment after the prompt lands.
 	 */
@@ -571,8 +568,7 @@
 	 * finished mark filed under the gone view's handle stays until the row is
 	 * selected (`selectionKey`); else its ref. A restarted server's listing
 	 * carries none of the old handles, so a mark filed under one is drawn on
-	 * no row: the owner accepted on 2026-11-20 that a restart drops it
-	 * (ark3/agentpane#64).
+	 * no row: the owner accepted that a restart drops it (ark3/agentpane#64).
 	 */
 	function rowKey(summary: SessionSummary): string {
 		return viewHandles.get(sessionKey(summary.ref)) ?? summary.handle ?? sessionKey(summary.ref);
@@ -592,7 +588,7 @@
 	 * Move this tab's own per-session state -- follow, remembered scroll -- from
 	 * one session key to another.
 	 *
-	 * A rename moves nothing: it leaves the handle alone. What still moves a key
+	 * A rename moves nothing: it leaves the handle alone. What moves a key
 	 * is a selection that stays on one ref while its key moves, as a stored
 	 * session's does from its ref to the handle its attach gives it -- see the
 	 * switch effect below, which moves the badge's turn watch as well. A fork,
@@ -637,11 +633,9 @@
 		// over-range value can pass the guard, change nothing, and fire no
 		// `scroll` event -- stranding a pending suppression for an event
 		// that never comes, which then swallows the reader's next genuine scroll.
-		// Measured in a real browser (OW-60): the session-switch effect below
-		// runs `applyScrollTop(el, el.scrollHeight)`, which is always a full
-		// clientHeight past the bottom, so attaching a session left the flag set;
-		// a subsequent 4960px scroll fired its event and was discarded, and the
-		// nav rail kept reporting the reader was still at the top.
+		// The session-switch effect below runs `applyScrollTop(el, el.scrollHeight)`,
+		// always a full clientHeight past the bottom, so it relies on this clamp
+		// (OW-60).
 		const clamped = Math.max(0, Math.min(value, el.scrollHeight - el.clientHeight));
 		// No-op guard matters here: assigning scrollTop fires a native `scroll`
 		// event even when the value does not change, which would arm the
@@ -886,9 +880,8 @@
 	/**
 	 * The one mover behind all four rail segments. `start`/`end` are the true top
 	 * and bottom of the scroller, not the first/last user turn. Every one of them
-	 * is a manual reading action, so -- exactly like a manual scroll, and like the
-	 * jump-to-latest button this rail replaces -- it disengages follow and never
-	 * re-arms it. Only a fresh submit arms follow.
+	 * is a manual reading action, so -- exactly like a manual scroll -- it
+	 * disengages follow and never re-arms it. Only a fresh submit arms follow.
 	 */
 	function navigate(to: "start" | "prev" | "next" | "end"): void {
 		const el = conversationEl;
@@ -1022,9 +1015,8 @@
 	 * A key that moves while the selection stays on one ref is not a switch
 	 * (OW-kimaya): a stored session attached from its preview is keyed by its
 	 * ref until the attach gives it a handle, and a detach takes it back. The
-	 * pane stays where the reader left it and the edit survives, as they did
-	 * when both were keyed by the ref; the state held under the old key moves
-	 * to the new one. A rename is not a switch either, and needs no case here:
+	 * pane stays where the reader left it and the edit survives; the state
+	 * held under the old key moves to the new one. A rename is not a switch either, and needs no case here:
 	 * the selection follows the ref and the handle does not move.
 	 */
 	$effect(() => {
@@ -1043,9 +1035,9 @@
 		// pane moving to another one: the mark would land on an unrelated message
 		// and the index would address the wrong session's fork points. Its
 		// displaced draft then comes back to the composer through the release
-		// below `stop`, as from every exit but Cancel (OW-kijuju). A switch used
-		// to leave the composer alone, but a fork's own selection move ends the
-		// edit here too, and singling it out would be a check at the site.
+		// below `stop`, as from every exit but Cancel (OW-kijuju). A fork's own
+		// selection move ends the edit here too, so no check at the fork's site
+		// singles it out.
 		editing = null;
 		handledKey = null;
 
@@ -1081,11 +1073,8 @@
 		// the turn actually *started* -- tracked per-anchor via `hasStreamed`,
 		// set the first time this session reads isStreaming:true while armed.
 		// Without that distinction, an early
-		// false reading disarms follow before the assistant ever gets going.
-		// Caught live (OW-27): a synthetic submit, followed by upserts for both
-		// the echoed user message and the assistant's opening content, with the
-		// matching status:true event arriving only after both, reproduced
-		// exactly this.
+		// false reading disarms follow before the assistant ever gets going
+		// (OW-27).
 		const existing = sessionScroll.get(key);
 		if (existing?.anchorIndex != null) {
 			if (streaming) existing.hasStreamed = true;
@@ -1144,7 +1133,7 @@
 	 * and is written before the call: `controller.preview` publishes
 	 * synchronously before it awaits, which re-invalidates this effect while
 	 * `selected` is still null, so a guard that only clears on the async resolve
-	 * never converges (OW-41 -- it threw `effect_update_depth_exceeded`).
+	 * never converges: it throws `effect_update_depth_exceeded` (OW-41).
 	 */
 	let autoWorkspace: string | null = null;
 	let autoPreviewedKey: string | null = null;
@@ -1244,8 +1233,8 @@
 	 * declarative `popovertargetaction="hide"` cannot close the menu here
 	 * (OW-natiha): the request going out disables the entry synchronously in
 	 * this same click, and a button that is disabled by the time its activation
-	 * behavior runs skips that behavior -- observed in Chromium, the menu
-	 * stayed open. So this closes it by hand; jsdom has no Popover API, hence
+	 * behavior runs skips that behavior, so in Chromium the menu stays open.
+	 * This closes it by hand; jsdom has no Popover API, hence
 	 * the existence check.
 	 */
 	function compactSession(): void {
@@ -1266,8 +1255,8 @@
 	}
 
 	/**
-	 * Rename the selected session (OW-bumonu). The browser's own prompt is a
-	 * first cut, chosen because its Cancel is the way out D14 asks for at no
+	 * Rename the selected session (OW-bumonu). The browser's own prompt is
+	 * used because its Cancel is the way out D14 asks for at no
 	 * cost. Cancel and a name blank once trimmed both send nothing; the server
 	 * would refuse the blank one anyway.
 	 */
@@ -1487,11 +1476,11 @@
 		// A fork's follow and badge are both armed on the fork itself, from the
 		// reply that names its handle, never on the parent: a parent still
 		// streaming ends its own turn during the fork -- Pi's fork stops it, Codex
-		// and Claude Code may simply finish it -- and a watch on the parent took
-		// that end for the fork's (OW-koledi). A follow armed there fared no
-		// better: the parent's transcript already holds the edited message, so it
-		// engaged on the parent at once, and that turn's end released it before
-		// the fork ever saw it (OW-vitefo).
+		// and Claude Code may simply finish it -- and a watch on the parent would
+		// take that end for the fork's (OW-koledi). A follow armed there would
+		// engage on the parent at once, whose transcript already holds the edited
+		// message, and that turn's end would release it before the fork ever saw
+		// it (OW-vitefo).
 		//
 		// From the reply, which comes once the fork's prompt is admitted (D30), so
 		// its turn can already be streaming: the follow engages on the edited
@@ -1517,7 +1506,7 @@
 		// request does, wherever the label says the fork stops
 		// the turn: the server stops it inside the request, and its `status:false`
 		// can reach this tab before the reply does (OW-rihanu). A refusal before
-		// the fork leaves that turn running unwatched, as a failed stop did.
+		// the fork leaves that turn running unwatched, as a failed stop does.
 		if (stopsBeforeFork && armedKey) turnWatch = watchAbandon(turnWatch, armedKey);
 		void controller.forkAndSubmit(edit.index, edit.images).then((landed) => {
 			// Nothing was sent, so nothing will stream for this tab to follow or
@@ -1676,7 +1665,7 @@
 
 		{#if selectedSession?.notices.length}
 			<!-- The backend's non-fatal notices (OW-tujiya): not the error banner above,
-			     and nothing dismisses them yet; a first cut. -->
+			     and nothing dismisses them. -->
 			<ul class="notices" role="status" aria-label="Backend notices">
 				{#each selectedSession.notices as notice, i (i)}
 					<li>
@@ -1690,7 +1679,7 @@
 
 		{#if selectedSession?.unrestoredModel}
 			<!-- D23's "says why not" (OW-pubeju). It follows the field, which the
-			     server clears only on a successful model change; a first cut. -->
+			     server clears only on a successful model change. -->
 			<p class="warning" role="status" aria-label="Unrestored model">
 				This conversation last ran on {selectedSession.unrestoredModel}, which could not be restored; it is running on {selectedModelLabel} instead.
 			</p>
@@ -1771,9 +1760,8 @@
 			     "New conversation", and `session` is the protocol's word.
 
 			     The sentence says nothing about the partial reply a stopped Pi
-			     turn leaves in the kept conversation, which is a decision and not
-			     an omission: the owner took it on 2026-09-15 with that
-			     measurement in hand (D15, OW-lukaju). -->
+			     turn leaves in the kept conversation, which is the owner's decision
+			     with that measurement in hand and not an omission (D15, OW-lukaju). -->
 			{#if editing}
 				<p class="edit-banner" role="status">
 					<span>Editing an earlier message. Forking starts a new conversation from here and keeps this one.</span>
@@ -1836,12 +1824,12 @@
 				{:else if selectedSession}
 					<span class="model-label">{selectedModelLabel}</span>
 				{/if}
-				<!-- A popover, not the <details> OW-72 first reached for (OW-80): a
-				     disclosure widget never light-dismisses, while an auto popover
-				     gets outside-click and Escape for free, with no JS. The entries
-				     hide it declaratively because activating a control *inside* an
-				     auto popover does not dismiss it -- verified in Chromium, the
-				     menu stayed open -- so only a click outside would close it.
+				<!-- A popover, not a <details> (OW-80): a disclosure widget never
+				     light-dismisses, while an auto popover gets outside-click and
+				     Escape for free, with no JS. The entries hide it declaratively
+				     because activating a control *inside* an auto popover does not
+				     dismiss it -- in Chromium the menu stays open -- so only a click
+				     outside would close it.
 				     Compact alone also hides it by hand; `compactSession` says why. -->
 				<button type="button" class="tools-menu" popovertarget="tools-menu">Tools</button>
 				<button
@@ -1879,7 +1867,7 @@
 					     (OW-lepoki) would otherwise claim a live agent until the server
 					     restarts. A truthful indicator, not resource management --
 					     D12's reaper still owns the latter, and the two are not
-					     exclusive (owner, 2026-09-16). -->
+					     exclusive (the owner's call). -->
 					<button
 						type="button"
 						role="menuitem"
