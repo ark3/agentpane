@@ -1016,7 +1016,8 @@
 	 * (OW-kimaya): a stored session attached from its preview is keyed by its
 	 * ref until the attach gives it a handle, and a detach takes it back. The
 	 * pane stays where the reader left it and the edit survives; the state
-	 * held under the old key moves to the new one. A rename is not a switch either, and needs no case here:
+	 * held under the old key moves to the new one. A rename is not a switch
+	 * either, and needs no case here:
 	 * the selection follows the ref and the handle does not move.
 	 */
 	$effect(() => {

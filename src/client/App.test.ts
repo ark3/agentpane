@@ -794,8 +794,9 @@ describe("App", () => {
 	 * Popover API the menu is built on (OW-80) while still applying the UA
 	 * rule that hides a `[popover]`: `showPopover` is `undefined`, a
 	 * `popovertarget` click is a no-op, and the entries are therefore
-	 * permanently `display: none` and out of the accessibility tree. That the menu *dismisses* is the part jsdom
-	 * cannot host at all, and it lives in `e2e/tools-menu.spec.ts`.
+	 * permanently `display: none` and out of the accessibility tree. That the
+	 * menu *dismisses* is the part jsdom cannot host at all, and it lives in
+	 * `e2e/tools-menu.spec.ts`.
 	 */
 	it("the composer's New conversation inherits the selected session's workspace AND backend (OW-72)", async () => {
 		// Unlike the configured New button (which reads the two selects), this

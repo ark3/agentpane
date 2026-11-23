@@ -476,8 +476,9 @@ export function createController(
 	 * next publish (OW-nizemu). That rides the superseding gesture's own
 	 * publish rather than adding one: a publish of its own between `preview`'s
 	 * bump and its read becoming the click's would ask a read of the row being
-	 * left, under the click's intent, whose `gone` clears the selection. Every bump publishes at once but the
-	 * fork's, whose `busy` is its own `"submitting"` by then.
+	 * left, under the click's intent, whose `gone` clears the selection. Every
+	 * bump publishes at once but the fork's, whose `busy` is its own
+	 * `"submitting"` by then.
 	 */
 	function publish(next: Partial<Omit<ControllerView, Flag>>): void {
 		if (disposed) return;
@@ -831,11 +832,12 @@ export function createController(
 	// A press that arrives meanwhile owns the owed listing's failure, which it
 	// reports, and no more; silence is only for the listings nobody asked for.
 	// Without that, a Refresh during a broadcast re-list -- likely, since turns
-	// broadcast -- would report nothing at all when its listing fails. It does not get the owed listing's start: that
-	// comes after the press, possibly after a gesture made in between, and
-	// announcing it there would wipe an attach's unread error and read
-	// `"listing"` over its `"attaching"` -- the clobbering the paragraph above
-	// forbids. Only a press that asks a listing itself announces it.
+	// broadcast -- would report nothing at all when its listing fails. It does
+	// not get the owed listing's start: that comes after the press, possibly
+	// after a gesture made in between, and announcing it there would wipe an
+	// attach's unread error and read `"listing"` over its `"attaching"` -- the
+	// clobbering the paragraph above forbids. Only a press that asks a listing
+	// itself announces it.
 	//
 	// The owed listing refreshes the preview on screen too, as every listing
 	// does (OW-76): a press waiting on it expects the transcript to move with
