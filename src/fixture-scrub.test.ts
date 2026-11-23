@@ -2,13 +2,10 @@
  * Fixture scrub guard. Not owned by any workstream.
  *
  * `capture_fixtures.py`'s `SCRUB_KEYS` substitutes by JSON *key*, so it never
- * visits free-form content. A Codex fork capture folded the host skills
- * manifest into the turn context and carried the operator's home path and
- * private `SKILL.md` list in message text and in the `host_skills` block, past
- * the key scrub and into a commit (OW-mewiga). It was caught in review, by a
- * human. `resources/fixtures/README.md` ("Scrubbed values") then asked the next
- * person to grep before committing -- which is enforcement by whoever remembers
- * to read it. This test is the actual enforcement.
+ * visits free-form content, where a Codex fork capture once carried the
+ * operator's home path into a commit (OW-mewiga). This test enforces the
+ * home-path half of the grep `resources/fixtures/README.md`, "Scrubbed
+ * values", asks for.
  *
  * **What it scans for: absolute paths into a home directory**, the three roots
  * `/home/`, `/Users/`, `/root/`. That is the shape that leaked, it is
@@ -16,16 +13,13 @@
  *
  * **Where the shapes come from: a fixed list, not the running environment.**
  * Bare identifiers read from the environment do not survive contact with these
- * fixtures. This machine's hostname is `may`; it matches 113 times across the
- * committed fixtures, every one of them the English modal verb inside Codex's
- * own ~14.7k-character vendor system prompt in `codex/fork.jsonl`, which is
- * legitimately captured and must stay. Word boundaries do not separate the two,
- * and `$USER` carries the same hazard on a machine whose username is a word.
- * Environment-derived shapes also change what the guard means per machine --
- * this project is authored on a laptop and implemented on a server -- so a
- * fixture could pass on one clone and fail on the other. All three home roots
- * are listed for the same reason: the guard should not depend on which host
- * captured the fixture.
+ * fixtures: the home server's hostname is `may`, which the committed fixtures
+ * held 210 times on 2026-11-23, each the English modal verb, much of it in
+ * Codex's own vendor system prompt, legitimately captured. Word boundaries do
+ * not separate the two, and `$USER` carries the same hazard on a machine
+ * whose username is a word. An environment-derived shape would also let a
+ * fixture pass on one clone and fail on another, which is why all three home
+ * roots are listed, whichever host captured the fixture.
  *
  * **Data files only** (`*.jsonl`, `*.meta.json`). The README beside them quotes
  * the leak it is warning about, so scanning the whole directory flags the

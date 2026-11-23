@@ -8,23 +8,18 @@
  * API, and those are what the specs beside this file are claims about.
  *
  * The synthetic backend implements the `AgentpaneApi` port directly rather
- * than mocking the socket. That layer is already covered by
- * `api.test.ts` and is not what any of these specs are about; what matters is
- * that the *controller* sees a real event sequence in real time,
- * which it does. Each command writes what it causes before it answers, as
- * the server does (D31 point 3), and what a turn emits comes after its
- * prompt's answer. The event ordering below (echoed user message, assistant
- * placeholder, only then `status:true`) is the ordering a live Pi turn was
- * observed to produce -- see OW-27's close note.
+ * than mocking the socket, which `api.test.ts` covers; what matters is that
+ * the *controller* sees a real event sequence in real time. Each command
+ * writes what it causes before it answers, as the server does (D31 point 3),
+ * and what a turn emits comes after its prompt's answer, in the order
+ * `runTurn` gives, which a live Pi turn was observed to produce (OW-27's
+ * close note).
  *
  * Deliberately narrow: one session, one turn shape, no rename, and no error
- * path beyond the banners `showBanners` snapshots in place.
- * This is the harness under the browser UI suite -- follow mode, the nav rail,
- * the composer's action row, the assistant footer row, the edit-and-fork
- * chrome, and the turn-done favicon badge -- but it has no server: no backend,
- * no subprocess, and no production socket. Crossing that boundary is
- * OW-24's job. Run `bunx playwright test --list` for what the specs beside it
- * cover.
+ * path beyond the banners `showBanners` snapshots in place. It has no
+ * server: no backend, no subprocess, and no production socket; crossing that
+ * boundary is ark3/agentpane#29's job. Run `bunx playwright test --list` for
+ * what the specs beside it cover.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";

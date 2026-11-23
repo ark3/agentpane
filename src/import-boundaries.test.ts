@@ -20,26 +20,18 @@ export const TYPE_ONLY_PACKAGES = ["@earendil-works/pi-agent-core", "@earendil-w
 /**
  * Match every import statement and capture its clause and module specifier.
  *
- * Matching *all* specifiers rather than only the interesting ones is what
+ * Matching *all* specifiers rather than only the restricted ones is what
  * makes this correct: lazy matching binds each `import` to the nearest
- * following `from`, so statements cannot bleed into each other. An earlier
- * version hardcoded the package into the pattern, which forced the lazy span
- * to run past unrelated imports and flag innocent files.
+ * following `from`, so statements cannot bleed into each other, where a
+ * pattern naming the package runs its lazy span past unrelated imports.
  *
  * `(?:^|;)[ \t]*` anchors the clause to where a real import statement can
- * begin: the start of a line (indented inside a `<script>` block, in a
- * .svelte file), or straight after a `;`. Prose containing the word `import`
- * mid-sentence does not start a match, and `stripComments` removes the
- * docblocks such prose lives in anyway. Both were needed: a docblock
- * explaining that "every import here is `import type`, so nothing from them
- * reaches the bundle" flagged its own file, because the lazy span ran from
- * the word `import` in the sentence to the specifier of the real (legal)
- * import below it.
- *
- * The `;` alternative is not decoration. `const a = 1; import { Agent } from
- * "pkg";` is valid TypeScript -- confirmed with tsc, which reports only
- * module resolution and no syntax error -- so a line anchor alone let a real
- * value import through.
+ * begin: the start of a line, indented as in a .svelte `<script>` block, or
+ * straight after a `;`, since `const a = 1; import { Agent } from "pkg";` is
+ * valid TypeScript (tsc reports no syntax error). Prose containing the word
+ * `import` mid-sentence starts no match, and `stripComments` removes the
+ * docblocks such prose lives in; both are needed, or a docblock's `import`
+ * binds to the specifier of the real import below it.
  */
 const IMPORT_RE = /(?:^|;)[ \t]*import\s+([\s\S]*?)\s+from\s+["']([^"']+)["']/gm;
 /** Side-effect import: `import "pkg"`. Never legitimate for a type-only package. */
