@@ -79,9 +79,11 @@ function summary(
 	};
 }
 
-type TestSessionView = Omit<SessionView, "model" | "effort" | "notices"> & {
+type TestSessionView = Omit<SessionView, "compaction" | "model" | "effort" | "unrestoredModel" | "notices"> & {
+	compaction?: SessionView["compaction"];
 	model?: string | null;
 	effort?: string | null;
+	unrestoredModel?: string | null;
 	notices?: SessionView["notices"];
 };
 
@@ -94,8 +96,10 @@ function state(
 			key,
 			{
 				...session,
+				compaction: session.compaction ?? null,
 				model: session.model ?? null,
 				effort: session.effort ?? null,
+				unrestoredModel: session.unrestoredModel ?? null,
 				notices: session.notices ?? [],
 			} satisfies SessionView,
 		]),
@@ -241,7 +245,7 @@ class FakeController implements AgentpaneController {
 				selected: ref,
 				sessions: {
 					...this.current.state.sessions,
-					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, model: null, effort: null, seq: 1, error: null, errorId: null, notices: [] },
+					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, seq: 1, error: null, errorId: null, notices: [] },
 				},
 			},
 		});

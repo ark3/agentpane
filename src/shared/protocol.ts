@@ -159,6 +159,51 @@ export interface AgentNotice {
 // ---------------------------------------------------------------------------
 
 /**
+ * A live session's status: what the adapter reports beside the transcript,
+ * carried whole from `AdapterState` to the `snapshot` and `status` events, the
+ * browser's `SessionView` and the helper's `SessionStatusParams`, and flat on
+ * each wire.
+ */
+export interface LiveStatus {
+	isStreaming: boolean;
+	compaction: "requesting" | "running" | null;
+	/** The backend-accepted model id currently governing this conversation. */
+	model: string | null;
+	/** The reasoning effort governing the conversation's next turn, or null when there is none to report. */
+	effort: string | null;
+	/**
+	 * The model the conversation's store last recorded, when the backend
+	 * did not restore it on a resume or fork and `model` is another in its
+	 * place (D23, OW-jitoni); null otherwise. Only Pi reports one. It
+	 * outlives the first turn on `model`, which records `model` as though
+	 * chosen, and clears once a model is set.
+	 */
+	unrestoredModel: string | null;
+}
+
+/** Every `LiveStatus` key, in wire order; the type keeps it complete. */
+const LIVE_STATUS_KEYS: Record<keyof LiveStatus, true> = {
+	isStreaming: true,
+	compaction: true,
+	model: true,
+	effort: true,
+	unrestoredModel: true,
+};
+
+/**
+ * Just the `LiveStatus` fields of what carries them: an adapter's state, a
+ * `snapshot` or `status` event, a view. A field holding `undefined` is left
+ * out, as JSON leaves it out of the frame.
+ */
+export function liveStatusOf(from: LiveStatus): LiveStatus {
+	const status: Partial<Record<keyof LiveStatus, unknown>> = {};
+	for (const key of Object.keys(LIVE_STATUS_KEYS) as (keyof LiveStatus)[]) {
+		if (from[key] !== undefined) status[key] = from[key];
+	}
+	return status as LiveStatus;
+}
+
+/**
  * Every session's events on one socket, each naming its session (D31).
  *
  * `seq` is monotonic *per session*. A gap means the client missed an update;
@@ -181,25 +226,12 @@ export interface AgentNotice {
  * preview, so a client takes the new ref from the first event that carries it.
  */
 export type ServerEvent =
-	| {
+	| ({
 			type: "snapshot";
 			session: SessionRef;
 			handle: string;
 			seq: number;
 			messages: PaneMessage[];
-			isStreaming: boolean;
-			compaction: "requesting" | "running" | null;
-			model: string | null;
-			/** The reasoning effort governing the conversation's next turn, or null when there is none to report. */
-			effort: string | null;
-			/**
-			 * The model the conversation's store last recorded, when the backend
-			 * did not restore it on a resume or fork and `model` is another in its
-			 * place (D23, OW-jitoni); null otherwise. Only Pi reports one. It
-			 * outlives the first turn on `model`, which records `model` as though
-			 * chosen, and clears once a model is set.
-			 */
-			unrestoredModel: string | null;
 			/**
 			 * What the `error` and `notice` events below have told the
 			 * session's clients so far, as the server still holds it (OW-bipume):
@@ -218,7 +250,7 @@ export type ServerEvent =
 			 */
 			errorId: string | null;
 			notices: AgentNotice[];
-	  }
+	  } & LiveStatus)
 	| {
 			/**
 			 * Streaming only ever touches the tail, and completed messages are
@@ -233,7 +265,7 @@ export type ServerEvent =
 			index: number;
 			message: PaneMessage;
 	  }
-	| { type: "status"; session: SessionRef; handle: string; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null; unrestoredModel: string | null }
+	| ({ type: "status"; session: SessionRef; handle: string; seq: number } & LiveStatus)
 	| {
 			/**
 			 * A turn ended in an error the transcript alone would not convey.

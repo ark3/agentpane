@@ -165,10 +165,10 @@ import { ApiClientError, ConnectionLostError, createAgentpaneApi, type ApiOption
 import { emptyTurnWatch, watchAbandon, watchClose, watchSessions, watchSubmit, type TurnWatch } from "$client/favicon.ts";
 import { previewMessages } from "$client/preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
-import type { BackendId, ModelInfo, ServerEvent, SessionRef, SessionSummary } from "$shared/protocol.ts";
+import { liveStatusOf, type BackendId, type ModelInfo, type ServerEvent, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { locateUpsert, projectTarget, projectTranscript, type Render, type UpsertTarget } from "./nodes.ts";
-import type { HelperNotification, HelperRequests, TranscriptNode } from "./protocol.ts";
+import type { HelperNotification, HelperRequests, SessionStatusParams, TranscriptNode } from "./protocol.ts";
 import type { ApiToken } from "./token.ts";
 
 export interface HelperOptions {
@@ -395,16 +395,12 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		);
 	};
 
-	const statusOf = (view: SessionView, bound: View, handle: string) => ({
+	const statusOf = (view: SessionView, bound: View, handle: string): SessionStatusParams => ({
 		session: view.ref,
 		view: bound,
 		handle,
-		isStreaming: view.isStreaming,
-		compaction: view.compaction ?? null,
-		model: view.model,
-		effort: view.effort,
+		...liveStatusOf(view),
 		defaultEffort: defaultEffortOf(view),
-		unrestoredModel: view.unrestoredModel ?? null,
 	});
 
 	/** Send `view` to the view `bound` as a snapshot under `handle`. */

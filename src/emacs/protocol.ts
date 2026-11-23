@@ -633,6 +633,7 @@ import type {
 	DismissErrorRequest,
 	ForkAndPromptRequest,
 	ForkAndPromptResponse,
+	LiveStatus,
 	ModelInfo,
 	PromptRequest,
 	PromptResponse,
@@ -674,16 +675,11 @@ export interface HelperRequests {
 	"sessions/forkAndPrompt": { params: ViewParams & ForkAndPromptRequest & { forkView: number; stops?: boolean }; result: Naming<ForkAndPromptResponse> };
 }
 
-export interface SessionStatusParams {
+export interface SessionStatusParams extends LiveStatus {
 	session: SessionRef;
 	view: number;
 	handle: string;
-	isStreaming: boolean;
-	compaction: "requesting" | "running" | null;
-	model: string | null;
-	effort: string | null;
 	defaultEffort: string | null;
-	unrestoredModel: string | null;
 }
 
 export type HelperNotification =

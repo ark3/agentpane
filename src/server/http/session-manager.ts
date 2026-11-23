@@ -15,17 +15,19 @@
  *    it, and so does server shutdown.
  */
 
+import { isDeepStrictEqual } from "node:util";
 import type {
 	AgentNotice,
 	BackendId,
 	ListSessionsQuery,
+	LiveStatus,
 	PromptDisposition,
 	SessionRef,
 	SessionStatus,
 	LiveSessionSummary,
 	SessionSummary,
 } from "../../shared/protocol.ts";
-import { sessionKey } from "../../shared/protocol.ts";
+import { liveStatusOf, sessionKey } from "../../shared/protocol.ts";
 import type {
 	AdapterState,
 	BackendAdapter,
@@ -215,12 +217,8 @@ interface ManagedSession {
 	 * and a close reaches none (D35 point 3).
 	 */
 	starting?: PendingStart;
-	/** Last state we broadcast, so we can tell a status flip from a message change. */
-	lastStreaming: boolean;
-	lastCompaction: "requesting" | "running" | null;
-	lastModel: string | null;
-	lastEffort: string | null;
-	lastUnrestoredModel: string | null;
+	/** Last status we broadcast, so we can tell a status flip from a message change. */
+	lastStatus: LiveStatus;
 	/** The adapter's `name` as last seen; a change is announced as `sessions-changed`, never a `status`. */
 	lastName: string | null;
 	/**
@@ -407,9 +405,11 @@ export class SessionManager {
 			if (!session?.adapter) return null;
 			// Every write below replaces these arrays rather than mutating them, so
 			// they are handed over as they are.
+			const state = session.adapter.getState();
 			return {
 				ref: session.ref,
-				...session.adapter.getState(),
+				messages: state.messages,
+				status: liveStatusOf(state),
 				error: session.error,
 				errorId: session.error === null ? null : session.errorId,
 				notices: session.notices,
@@ -445,11 +445,7 @@ export class SessionManager {
 			ref,
 			...init,
 			subscriptions: [],
-			lastStreaming: false,
-			lastCompaction: null,
-			lastModel: null,
-			lastEffort: null,
-			lastUnrestoredModel: null,
+			lastStatus: { isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null },
 			lastName: null,
 			error: null,
 			errorId: "",
@@ -1110,11 +1106,7 @@ export class SessionManager {
 		fork.queue = parent.queue;
 		fork.subscriptions = parent.subscriptions.splice(0);
 		fork.notices = parent.notices;
-		fork.lastStreaming = parent.lastStreaming;
-		fork.lastCompaction = parent.lastCompaction;
-		fork.lastModel = parent.lastModel;
-		fork.lastEffort = parent.lastEffort;
-		fork.lastUnrestoredModel = parent.lastUnrestoredModel;
+		fork.lastStatus = parent.lastStatus;
 		fork.lastName = parent.lastName;
 		fork.attachedAt = parent.attachedAt;
 		this.#remove(parent);
@@ -1322,11 +1314,7 @@ export class SessionManager {
 		bound.starting = undefined;
 		this.#startups.delete(pending);
 		const initialState = adapter.getState();
-		bound.lastStreaming = initialState.isStreaming;
-		bound.lastCompaction = initialState.compaction;
-		bound.lastModel = initialState.model;
-		bound.lastEffort = initialState.effort;
-		bound.lastUnrestoredModel = initialState.unrestoredModel ?? null;
+		bound.lastStatus = liveStatusOf(initialState);
 		bound.lastName = initialState.name;
 		// A rename inside `start()` -- a `virtual` id becoming the backend's own
 		// (D9) -- was held off the wire until the start could no longer fail;
@@ -1346,28 +1334,22 @@ export class SessionManager {
 	 * cleared, when both turn boundaries still snapshotted (OW-yirosu).
 	 */
 	#onUpdate(session: ManagedSession, state: AdapterState, change: StateChange): void {
-		const streamingChanged = state.isStreaming !== session.lastStreaming;
-		const compactionChanged = state.compaction !== session.lastCompaction;
-		// The effort rides with the model: a model change can move it (OW-kokalo).
-		// So does a recorded model the resume could not restore (OW-jitoni).
-		const unrestoredModel = state.unrestoredModel ?? null;
-		const settingsChanged =
-			state.model !== session.lastModel || state.effort !== session.lastEffort || unrestoredModel !== session.lastUnrestoredModel;
-		session.lastStreaming = state.isStreaming;
-		if (streamingChanged && !state.isStreaming) this.#active(session);
-		if (compactionChanged && state.compaction === null) this.#active(session);
-		session.lastCompaction = state.compaction;
-		session.lastModel = state.model;
-		session.lastEffort = state.effort;
-		session.lastUnrestoredModel = unrestoredModel;
+		const status = liveStatusOf(state);
+		const last = session.lastStatus;
+		const streamingChanged = status.isStreaming !== last.isStreaming;
+		const compactionChanged = status.compaction !== last.compaction;
+		// By value, not identity: the adapter builds a new status at every update.
+		const statusChanged = !isDeepStrictEqual(status, last);
+		session.lastStatus = status;
+		if (streamingChanged && !status.isStreaming) this.#active(session);
+		if (compactionChanged && status.compaction === null) this.#active(session);
 
-		const statusChanged = streamingChanged || compactionChanged || settingsChanged;
 		const message = typeof change === "number" ? state.messages[change] : undefined;
 		if (change === "status") {
-			if (statusChanged) this.broadcaster.status(session, state.isStreaming, state.compaction, state.model, state.effort, unrestoredModel);
+			if (statusChanged) this.broadcaster.status(session, status);
 		} else if (typeof change === "number" && message && !compactionChanged) {
 			this.broadcaster.upsert(session, change, message);
-			if (statusChanged) this.broadcaster.status(session, state.isStreaming, state.compaction, state.model, state.effort, unrestoredModel);
+			if (statusChanged) this.broadcaster.status(session, status);
 		} else {
 			// A replaced transcript, and an index naming no message, which no upsert
 			// can express. And a changed message whose compaction moved with it:

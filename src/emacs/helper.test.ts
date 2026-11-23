@@ -912,6 +912,25 @@ describe("notifications", () => {
 		});
 	});
 
+	it("carries only the status on session/snapshot and session/status, whatever else an event holds (#108)", async () => {
+		const leak = { turnDiff: "diff" };
+		const { io, server } = start({
+			"sessions/attach": (_params, server) => {
+				server.emit({ ...snapshot(pi, h(pi)), ...leak });
+				return { session: summary(pi) };
+			},
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, view: 1 } });
+		await io.until(2);
+		server.emit({ ...status(pi, h(pi), 2), ...leak });
+		await io.until(3);
+		const [snapshotOut, statusOut] = io.notifications();
+		expect(snapshotOut).toMatchObject({ method: "session/snapshot" });
+		expect(snapshotOut!["params"]).not.toHaveProperty("turnDiff");
+		expect(statusOut).toMatchObject({ method: "session/status", params: { isStreaming: true } });
+		expect(statusOut!["params"]).not.toHaveProperty("turnDiff");
+	});
+
 	it("carries its model's default effort on session/status, from one models/list per backend that it holds (D32 point 8)", async () => {
 		const models = [
 			{ id: "m", label: "M", efforts: [{ id: "low", description: "" }], defaultEffort: "low" },

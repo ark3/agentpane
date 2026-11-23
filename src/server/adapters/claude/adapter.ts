@@ -512,7 +512,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { ...this.reducer.getState(), model: this.model, effort: this.effort, name: this.name };
+		return { ...this.reducer.getState(), model: this.model, effort: this.effort, unrestoredModel: null, name: this.name };
 	}
 
 	onUpdate(cb: (state: AdapterState, change: StateChange) => void): Unsubscribe {

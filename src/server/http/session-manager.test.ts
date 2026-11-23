@@ -2445,6 +2445,28 @@ describe("turn boundaries", () => {
 			expect.objectContaining({ type: "snapshot", session: REF, model: "openrouter/fallback", unrestoredModel: "openrouter/recorded" }),
 		]);
 	});
+
+	it("carries only the status on status and snapshot, whatever else the adapter's state holds (#108)", async () => {
+		const leak = { turnDiff: "diff" };
+		const leaky = new FakeAdapterFactory({
+			onStart: (adapter) => {
+				const getState = adapter.getState.bind(adapter);
+				adapter.getState = () => ({ ...getState(), ...leak });
+			},
+		});
+		const manager = new SessionManager({ index, adapters: { pi: leaky } }, broadcaster);
+		const events = collectEvents();
+
+		await manager.attach(REF);
+		const adapter = leaky.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+		adapter.setStreaming(true);
+		adapter.emitTranscriptReplaced();
+
+		const carried = events.filter((event) => event.type === "status" || event.type === "snapshot");
+		expect(carried.map((event) => event.type)).toEqual(["snapshot", "status", "snapshot"]);
+		for (const event of carried) expect(event).not.toHaveProperty("turnDiff");
+	});
 });
 
 describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () => {

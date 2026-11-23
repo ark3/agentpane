@@ -21,7 +21,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AgentNotice, ServerEvent, SessionRef } from "../../shared/protocol.ts";
+import type { AgentNotice, LiveStatus, ServerEvent, SessionRef } from "../../shared/protocol.ts";
 
 /** A connected client: one per socket that has said hello. */
 export interface EventClient {
@@ -44,18 +44,14 @@ export interface Addressed {
 /**
  * State the broadcaster needs to build a snapshot of the session a handle
  * names, supplied by the session manager: the session's current ref, the
- * adapter's state, and the error and notices the manager holds for
+ * adapter's messages and status, and the error and notices the manager holds for
  * it (OW-bipume). Null for a handle the manager holds no live session under.
  */
 export interface SnapshotSource {
 	(handle: string): {
 		ref: SessionRef;
 		messages: AgentMessage[];
-		isStreaming: boolean;
-		compaction: "requesting" | "running" | null;
-		model: string | null;
-		effort: string | null;
-		unrestoredModel?: string | null;
+		status: LiveStatus;
 		error: string | null;
 		errorId: string | null;
 		notices: AgentNotice[];
@@ -109,11 +105,7 @@ export class Broadcaster {
 			handle,
 			seq: this.#seq.get(handle) ?? 0,
 			messages: state.messages,
-			isStreaming: state.isStreaming,
-			compaction: state.compaction,
-			model: state.model,
-			effort: state.effort,
-			unrestoredModel: state.unrestoredModel ?? null,
+			...state.status,
 			error: state.error,
 			errorId: state.errorId,
 			notices: state.notices,
@@ -132,11 +124,7 @@ export class Broadcaster {
 			handle,
 			seq: 0,
 			messages: state.messages,
-			isStreaming: state.isStreaming,
-			compaction: state.compaction,
-			model: state.model,
-			effort: state.effort,
-			unrestoredModel: state.unrestoredModel ?? null,
+			...state.status,
 			error: state.error,
 			errorId: state.errorId,
 			notices: state.notices,
@@ -147,15 +135,8 @@ export class Broadcaster {
 		this.#fanout({ type: "upsert", ...this.#address(session), index, message });
 	}
 
-	status(
-		session: Addressed,
-		isStreaming: boolean,
-		compaction: "requesting" | "running" | null,
-		model: string | null,
-		effort: string | null,
-		unrestoredModel: string | null,
-	): void {
-		this.#fanout({ type: "status", ...this.#address(session), isStreaming, compaction, model, effort, unrestoredModel });
+	status(session: Addressed, status: LiveStatus): void {
+		this.#fanout({ type: "status", ...this.#address(session), ...status });
 	}
 
 	error(session: Addressed, message: string, errorId: string): void {

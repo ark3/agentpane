@@ -15,7 +15,7 @@ import type {
 	ServerFrame,
 	SessionRef,
 } from "$shared/protocol.ts";
-import { sessionKey } from "$shared/protocol.ts";
+import { liveStatusOf, sessionKey } from "$shared/protocol.ts";
 import { ApiClientError, createAgentpaneApi, type AgentpaneApi, type ApiOptions, type SocketLike } from "./api.ts";
 
 /** One socket: what the client sent, and the server's end driven by hand. */
@@ -203,10 +203,7 @@ export function socketServer(script: Script = {}): SocketServer {
 		if (!session) return;
 		session.ref = event.session;
 		session.seq = event.seq;
-		if (event.type === "status") {
-			const { isStreaming, compaction, model, effort, unrestoredModel } = event;
-			session.snapshot = { ...session.snapshot, isStreaming, compaction, model, effort, unrestoredModel };
-		}
+		if (event.type === "status") session.snapshot = { ...session.snapshot, ...liveStatusOf(event) };
 		if (event.type === "error") session.errorId = event.errorId;
 		if (event.type === "error-cleared") session.errorId = null;
 	}
@@ -249,8 +246,7 @@ export function socketServer(script: Script = {}): SocketServer {
 		},
 		"sessions/compact": ({ handle }) => {
 			const { snapshot } = live(handle);
-			const { isStreaming, model, effort, unrestoredModel } = snapshot;
-			server.emit({ type: "status", ...next(handle), isStreaming, compaction: "requesting", model, effort, unrestoredModel });
+			server.emit({ type: "status", ...next(handle), ...liveStatusOf(snapshot), compaction: "requesting" });
 			return null;
 		},
 		"sessions/dismissError": ({ handle, errorId }) => {

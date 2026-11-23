@@ -4,19 +4,20 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { ServerEvent, SessionRef } from "../../shared/protocol.ts";
+import type { LiveStatus, ServerEvent, SessionRef } from "../../shared/protocol.ts";
 import { Broadcaster } from "./broadcaster.ts";
 import { userMessage } from "./testing/fakes.ts";
 
 const REF: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/a.jsonl" };
 const HANDLE = "h1";
+const IDLE: LiveStatus = { isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null };
 
 function oneSession() {
 	const broadcaster = new Broadcaster();
 	const session = { handle: HANDLE, ref: REF };
 	broadcaster.setSnapshotSource((handle) =>
 		handle === session.handle
-			? { ref: session.ref, messages: [], isStreaming: false, compaction: null, model: null, effort: null, error: null, errorId: null, notices: [] }
+			? { ref: session.ref, messages: [], status: IDLE, error: null, errorId: null, notices: [] }
 			: null,
 	);
 	const events: ServerEvent[] = [];
@@ -27,7 +28,7 @@ function oneSession() {
 describe("sequence bookkeeping", () => {
 	it("forgets a closed session's counter rather than growing with uptime", () => {
 		const { broadcaster, session } = oneSession();
-		broadcaster.status(session, true, null, null, null, null);
+		broadcaster.status(session, { ...IDLE, isStreaming: true });
 		expect(broadcaster.seqOf(HANDLE)).toBe(1);
 
 		broadcaster.forget(HANDLE);
@@ -36,7 +37,7 @@ describe("sequence bookkeeping", () => {
 
 	it("keeps one counter across a rename, since the handle it is keyed by does not move (D24)", () => {
 		const { broadcaster, session, events } = oneSession();
-		broadcaster.status(session, true, null, null, null, null);
+		broadcaster.status(session, { ...IDLE, isStreaming: true });
 		broadcaster.upsert(session, 0, userMessage("hi"));
 		const renamed: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/b.jsonl" };
 
@@ -58,7 +59,7 @@ describe("sequence bookkeeping", () => {
 
 	it("says a handle ended with no seq, and does not bring back the counter its forget dropped (D26)", () => {
 		const { broadcaster, session, events } = oneSession();
-		broadcaster.status(session, true, null, null, null, null);
+		broadcaster.status(session, { ...IDLE, isStreaming: true });
 
 		broadcaster.forget(HANDLE);
 		broadcaster.ended(session);
@@ -75,7 +76,7 @@ describe("the handle (D24, OW-suyinu)", () => {
 
 		broadcaster.broadcastSnapshot(HANDLE);
 		broadcaster.upsert(session, 0, userMessage("hi"));
-		broadcaster.status(session, true, null, null, null, null);
+		broadcaster.status(session, { ...IDLE, isStreaming: true });
 		broadcaster.error(session, "boom", "e1");
 		broadcaster.notice(session, notice);
 

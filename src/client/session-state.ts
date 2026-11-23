@@ -1,21 +1,17 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
 	type AgentNotice,
+	type LiveStatus,
 	type ServerEvent,
 	type SessionRef,
 	type SessionSummary,
+	liveStatusOf,
 	sessionKey,
 } from "$shared/protocol.ts";
 
-export interface SessionView {
+export interface SessionView extends LiveStatus {
 	ref: SessionRef;
 	messages: AgentMessage[];
-	isStreaming: boolean;
-	compaction?: "requesting" | "running" | null;
-	model: string | null;
-	effort: string | null;
-	/** The wire's `unrestoredModel`: a recorded model the backend could not restore (OW-jitoni). */
-	unrestoredModel?: string | null;
 	seq: number | null;
 	error: string | null;
 	/**
@@ -94,21 +90,6 @@ export function viewOf(state: ClientState, ref: SessionRef | null): SessionView 
 	return handle === undefined ? undefined : state.sessions[handle];
 }
 
-function emptySession(ref: SessionRef): SessionView {
-	return {
-		ref,
-		messages: [],
-		isStreaming: false,
-		compaction: null,
-		model: null,
-		effort: null,
-		seq: null,
-		error: null,
-		errorId: null,
-		notices: [],
-	};
-}
-
 function result(state: ClientState, recover: Recovery[] = [], refreshSessions = false): ReduceResult {
 	return { state, recover, refreshSessions };
 }
@@ -177,14 +158,9 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 	if (event.type === "snapshot") {
 		const previous = state.sessions[event.handle];
 		const view: SessionView = {
-			...(previous ?? emptySession(event.session)),
 			ref: event.session,
 			messages: [...event.messages],
-			isStreaming: event.isStreaming,
-			compaction: event.compaction,
-			model: event.model,
-			effort: event.effort,
-			unrestoredModel: event.unrestoredModel,
+			...liveStatusOf(event),
 			seq: event.seq,
 			error: event.error,
 			errorId: event.errorId,
@@ -253,11 +229,7 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			break;
 		}
 		case "status":
-			view.isStreaming = event.isStreaming;
-			view.compaction = event.compaction;
-			view.model = event.model;
-			view.effort = event.effort;
-			view.unrestoredModel = event.unrestoredModel;
+			Object.assign(view, liveStatusOf(event));
 			break;
 		case "error":
 			view.error = event.message;

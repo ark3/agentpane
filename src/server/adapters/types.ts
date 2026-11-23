@@ -14,28 +14,18 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AgentNotice, ForkPoint, ModelInfo, PromptDisposition, SessionRef } from "../../shared/protocol.ts";
+import type { AgentNotice, ForkPoint, LiveStatus, ModelInfo, PromptDisposition, SessionRef } from "../../shared/protocol.ts";
 
-export interface AdapterState {
+/**
+ * The transcript, the session's status and its name. Of the status, `effort`
+ * is the one `setEffort` chose, or else the one the backend reported; null for
+ * a backend that reports none. `unrestoredModel` is null for every backend but
+ * Pi, which reports one only by inference: as of `pi 0.87.1` it fell back
+ * without a word over RPC (docs/MANUAL_TESTING.md, OW-zujofa). What causes
+ * it, and when it is set and cleared, is `PiAdapter`'s docblock on the field.
+ */
+export interface AdapterState extends LiveStatus {
 	messages: AgentMessage[];
-	isStreaming: boolean;
-	compaction: "requesting" | "running" | null;
-	/** The backend-accepted model id currently governing this conversation. */
-	model: string | null;
-	/**
-	 * The reasoning effort the next turn runs at: the one `setEffort` chose, or
-	 * else the one the backend reported; null for a backend that reports none.
-	 */
-	effort: string | null;
-	/**
-	 * The model the conversation's store last recorded, when the backend did
-	 * not restore it and `model` is another in its place (D23, OW-jitoni);
-	 * null or absent otherwise. Only Pi reports one, and only by inference:
-	 * as of `pi 0.87.1` it fell back without a word over RPC
-	 * (docs/MANUAL_TESTING.md, OW-zujofa). What causes it, and when it is set
-	 * and cleared, is `PiAdapter`'s docblock on the field.
-	 */
-	unrestoredModel?: string | null;
 	/**
 	 * The session's name as the backend holds it: the one the backend
 	 * reported -- at attach where the adapter has it in hand, and for Codex at
@@ -54,9 +44,9 @@ export interface AdapterState {
  *
  *  - a number: the index of the one message that was added or changed, sent
  *    as an upsert. The status fields may have moved with it.
- *  - `"status"`: no message changed; only `isStreaming`, `compaction`,
- *    `model`, `effort`, `unrestoredModel` or `name` may have, sent as a
- *    `status` event -- save `name`, which goes out as `sessions-changed`.
+ *  - `"status"`: no message changed; only the `LiveStatus` fields or `name`
+ *    may have, sent as a `status` event -- save `name`, which goes out as
+ *    `sessions-changed`.
  *    A turn's start and end are this (OW-yirosu).
  *  - `"transcript"`: the messages were replaced wholesale -- a hydrate, a
  *    reset, a fork's rewind -- which only a snapshot can report.

@@ -661,7 +661,7 @@ describe("CodexAdapter lifecycle", () => {
 		});
 		proc.emit({ id: 9, method: "item/fileChange/requestApproval", params: {} });
 
-		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: "gpt-started", effort: null, name: null });
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: "gpt-started", effort: null, unrestoredModel: null, name: null });
 		expect(updates).not.toHaveBeenCalled();
 		expect(responses(proc)).toEqual([]);
 	});
@@ -690,7 +690,7 @@ describe("CodexAdapter lifecycle", () => {
 
 		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("registration-time exit");
 
-		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: null, effort: null, name: null });
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, name: null });
 		expect(responses(proc)).toEqual([]);
 		expect(proc.killCount).toBe(1);
 	});
@@ -2065,7 +2065,7 @@ describe("CodexAdapter reducer effects", () => {
 		});
 
 		// The turn's start moved the status alone (OW-yirosu).
-		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null, model: "gpt-started", effort: null, name: null }, "status");
+		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null, model: "gpt-started", effort: null, unrestoredModel: null, name: null }, "status");
 		expect(updates).toHaveBeenNthCalledWith(
 			2,
 			expect.objectContaining({ isStreaming: true, messages: [expect.objectContaining({ role: "assistant" })] }),

@@ -875,7 +875,7 @@ export class CodexAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { ...this.reducer.getState(), model: this.model, effort: this.effort ?? this.reducer.effort, name: this.name };
+		return { ...this.reducer.getState(), model: this.model, effort: this.effort ?? this.reducer.effort, unrestoredModel: null, name: this.name };
 	}
 
 	onUpdate(cb: (state: AdapterState, change: StateChange) => void): Unsubscribe {
