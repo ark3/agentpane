@@ -5,6 +5,7 @@ const childProcess = vi.hoisted(() => ({ spawn: vi.fn() }));
 
 vi.mock("node:child_process", () => ({ spawn: childProcess.spawn }));
 
+import { CodexAdapter } from "./adapter.ts";
 import { CodexClient } from "./jsonrpc.ts";
 import { spawnCodex } from "./process.ts";
 
@@ -232,5 +233,53 @@ describe("Codex process lifecycle", () => {
 		child.emit("close", 0, null);
 
 		expect(() => proc.write('{"id":1}')).toThrow("Codex process is not running");
+	});
+});
+
+describe("a line the adapter throws on (#96)", () => {
+	it("is an error on the session, named on stderr by its method alone, and later lines still arrive", async () => {
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const child = new FakeChild();
+			childProcess.spawn.mockReturnValue(child);
+			const send = (message: unknown) => child.stdout.emit("data", `${JSON.stringify(message)}\n`);
+			// Just enough app-server to start a thread.
+			child.stdin.write = (chunk: string) => {
+				const { id, method } = JSON.parse(chunk) as { id: number; method: string };
+				if (method === "initialize") send({ id, result: { userAgent: "test" } });
+				if (method === "thread/start") {
+					send({
+						id,
+						result: {
+							thread: { id: "thread-real", historyMode: "paginated", status: { type: "idle" }, turns: [] },
+							model: "gpt-started",
+							modelProvider: "openai",
+							reasoningEffort: null,
+						},
+					});
+				}
+				return true;
+			};
+			const adapter = new CodexAdapter({ backend: "codex", id: "virtual:test" }, { spawn: spawnCodex });
+			const errors: string[] = [];
+			adapter.onError((message) => errors.push(message));
+			await adapter.start({ cwd: "/workspace" });
+
+			// A `turn/started` with no `turn`: the adapter reads `params.turn.id`.
+			expect(() => send({ method: "turn/started", params: { threadId: "thread-real" } })).not.toThrow();
+			expect(errors).toHaveLength(1);
+			expect(errors[0]).toContain("turn/started");
+
+			send({ method: "thread/name/updated", params: { threadId: "thread-real", threadName: "still heard" } });
+			expect(adapter.getState().name).toBe("still heard");
+
+			expect(logged).toHaveBeenCalledOnce();
+			const report = String(logged.mock.calls[0]?.[0]);
+			expect(report).toContain("Codex");
+			expect(report).toContain("turn/started");
+			expect(report).not.toContain("thread-real");
+		} finally {
+			logged.mockRestore();
+		}
 	});
 });

@@ -895,6 +895,25 @@ describe("PiAdapter stdout framing", () => {
 		expect(h.errors[0]).toContain("non-JSON");
 		expect(h.adapter.getState().messages).toHaveLength(1);
 	});
+
+	it("reports a line the adapter throws on as an error, and keeps consuming the stream (#96)", async () => {
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const h = makeHarness();
+			await startAdapter(h);
+
+			// A `message_start` with no `message`.
+			expect(() => h.child.emitLine({ type: "message_start" })).not.toThrow();
+			h.child.emitLine({ type: "message_start", message: assistantMessage("still here") });
+
+			expect(h.errors).toHaveLength(1);
+			expect(h.errors[0]).toContain("message_start");
+			expect(h.adapter.getState().messages).toHaveLength(1);
+			expect(logged).toHaveBeenCalledOnce();
+		} finally {
+			logged.mockRestore();
+		}
+	});
 });
 
 describe("PiAdapter notification fan-out", () => {

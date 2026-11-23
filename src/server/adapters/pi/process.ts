@@ -292,7 +292,12 @@ export class PiAdapter implements BackendAdapter {
 			stdin: "Pi",
 		});
 		this.proc = proc;
-		proc.onLine((line) => this.handleLine(line));
+		proc.onLine(
+			(line) => this.handleLine(line),
+			(message) => {
+				if (!this.disposed) this.emitError(message);
+			},
+		);
 		proc.onExit((_code, _signal, error) => this.handleClose(error));
 
 		// Readiness probe: pipane's process pool found spawning alone isn't

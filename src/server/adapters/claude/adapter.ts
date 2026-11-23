@@ -717,10 +717,15 @@ export class ClaudeAdapter implements BackendAdapter {
 			spawned = true;
 			resolveSpawn();
 		});
-		proc.onLine((line) => {
-			if (!ownership.live) return;
-			this.handleLine(line);
-		});
+		proc.onLine(
+			(line) => {
+				if (!ownership.live) return;
+				this.handleLine(line);
+			},
+			(message) => {
+				if (ownership.live) this.emitError(message);
+			},
+		);
 		proc.onExit((code, signal, error) => {
 			const exitError =
 				error ?? new Error(`claude exited (code=${code ?? "null"}, signal=${signal ?? "null"})`);

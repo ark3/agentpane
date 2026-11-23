@@ -16,7 +16,8 @@ export interface ClaudeProcess {
 	reply(line: string): void;
 	/** Observe successful OS-level process creation. Never fires after a spawn failure. */
 	onSpawn(cb: () => void): void;
-	onLine(cb: (line: string) => void): void;
+	/** `onThrow` hears a line `cb` threw on (`ChildProcessShell.onLine`). */
+	onLine(cb: (line: string) => void, onThrow?: (message: string) => void): void;
 	onExit(cb: (code: number | null, signal: string | null, error?: Error) => void): void;
 	/** Signal termination and settle after close or bounded SIGKILL escalation. */
 	kill(): Promise<void>;

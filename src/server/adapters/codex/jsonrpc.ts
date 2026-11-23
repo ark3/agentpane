@@ -56,6 +56,8 @@ export class CodexClient implements CodexClientView {
 			onMessage: (msg: CodexServerMessage) => void;
 			/** A line that was not JSON. Rare, but never fatal. */
 			onMalformed?: (line: string) => void;
+			/** A line whose handling threw, as the shell reports it. */
+			onThrow?: (message: string) => void;
 			onExit?: (code: number | null, signal: string | null, error?: Error) => void;
 		},
 	) {
@@ -80,7 +82,7 @@ export class CodexClient implements CodexClientView {
 				return;
 			}
 			handlers.onMalformed?.(line);
-		});
+		}, handlers.onThrow);
 
 		proc.onExit((code, signal, cause) => {
 			const error = new CodexRpcError(

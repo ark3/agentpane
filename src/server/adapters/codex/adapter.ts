@@ -503,6 +503,9 @@ export class CodexAdapter implements BackendAdapter {
 				if (!this.owns(ownership)) return;
 				this.onServerMessage(msg);
 			},
+			onError: (message) => {
+				if (this.owns(ownership)) this.emitError(message);
+			},
 			onExit: (code, signal, error) => {
 				if (!this.owns(ownership)) return;
 				const message =

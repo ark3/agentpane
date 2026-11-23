@@ -70,7 +70,7 @@ const KILL_GRACE_MS = 1_000;
 export class ChildProcessShell {
 	private readonly splitter = new LfLineSplitter();
 	private readonly spawnHandlers: (() => void)[] = [];
-	private readonly lineHandlers: ((line: string) => void)[] = [];
+	private readonly lineHandlers: { cb: (line: string) => void; onThrow?: (message: string) => void }[] = [];
 	private readonly exitHandlers: ExitHandler[] = [];
 	private stderrTail = "";
 	/** Populated by the `error` event, which on a failed spawn is the only account of why. */
@@ -149,10 +149,9 @@ export class ChildProcessShell {
 	 * Answer a request the child sent, or drop the answer if the child is going
 	 * or gone. Every adapter refuses an agent request from inside its line
 	 * handler (D2a), and a child that died on its own can still have a request
-	 * line draining from stdout after its stdin is destroyed; a throw there
-	 * escapes the stdout listener as an uncaught exception and takes the server
-	 * down (OW-yofoli). Nobody is left to read the answer, and the death is
-	 * reported once, through `onExit`, so there is nothing to add here.
+	 * line draining from stdout after its stdin is destroyed (OW-yofoli).
+	 * Nobody is left to read the answer, and the death is reported once,
+	 * through `onExit`, so a throw here would only add a second report.
 	 */
 	reply(line: string): void {
 		if (this.gone()) return;
@@ -168,8 +167,13 @@ export class ChildProcessShell {
 		this.spawnHandlers.push(cb);
 	}
 
-	onLine(cb: (line: string) => void): void {
-		this.lineHandlers.push(cb);
+	/**
+	 * A throw from `cb` stays here: it is written to the server's stderr and
+	 * handed to `onThrow`, and the next line is delivered as usual. Both name
+	 * the backend and the line's `type` or `method`, never the line itself.
+	 */
+	onLine(cb: (line: string) => void, onThrow?: (message: string) => void): void {
+		this.lineHandlers.push({ cb, onThrow });
 	}
 
 	/**
@@ -242,8 +246,20 @@ export class ChildProcessShell {
 		return this.killed || this.closed || this.child.stdin.destroyed || this.child.stdin.writableEnded === true;
 	}
 
+	// Unguarded, a throw here escapes the stdout listener and exits the server
+	// with every session in it, and the handlers read backend messages whose
+	// shape a CLI update can change.
 	private emitLine(line: string): void {
-		for (const handler of this.lineHandlers) handler(line);
+		for (const handler of this.lineHandlers) {
+			try {
+				handler.cb(line);
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error);
+				const message = `${this.labels.name} sent a line agentpane could not handle (${kindOf(line)}): ${reason}`;
+				console.error(message);
+				handler.onThrow?.(message);
+			}
+		}
 	}
 
 	private handleSpawn(): void {
@@ -281,4 +297,19 @@ export class ChildProcessShell {
 		const error = cause ? new Error(message, { cause }) : new Error(message);
 		for (const handler of this.exitHandlers) handler(code, signal, error);
 	}
+}
+
+/** A line's `type` or `method`, which is all of it a report may carry. */
+function kindOf(line: string): string {
+	try {
+		const parsed: unknown = JSON.parse(line);
+		if (typeof parsed === "object" && parsed !== null) {
+			const { type, method } = parsed as Record<string, unknown>;
+			if (typeof type === "string") return type;
+			if (typeof method === "string") return method;
+		}
+	} catch {
+		return "not JSON";
+	}
+	return "no type or method";
 }

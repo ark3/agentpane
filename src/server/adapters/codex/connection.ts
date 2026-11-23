@@ -39,6 +39,8 @@ import { isCodexNotification, isCodexServerRequest, isRecord, type CodexServerMe
 export interface CodexConnectionHandlers {
 	/** Notifications and `ServerRequest`s -- everything we did not ask for. */
 	onMessage: (msg: CodexServerMessage) => void;
+	/** A line whose handling threw, as the shell reports it. */
+	onError: (message: string) => void;
 	onExit: (code: number | null, signal: string | null, error?: Error) => void;
 }
 
@@ -54,6 +56,11 @@ export class CodexConnection {
 	) {
 		this.client = new CodexClient(proc, {
 			onMessage: (msg) => this.#deliver(msg),
+			// Every holder: the shell cannot say whose handler threw, and the
+			// holders after it in `#deliver` never had the line.
+			onThrow: (message) => {
+				for (const holder of [...this.#holders]) holder.handlers.onError(message);
+			},
 			onExit: (code, signal, error) => {
 				// A dead app-server holds nothing, so nothing may be sent back here.
 				this.registry?.forget(this);
