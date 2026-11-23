@@ -65,6 +65,10 @@ Some older files are still hard-wrapped and may stay so; a paragraph you substan
 State the why only where there is a body behind it, an incident that happened or a default the reader would otherwise follow, and keep it to a clause; the incident itself belongs in the commit message.
 Refuting something nobody would have tried costs twice: it argues with no one, and it plants the bad move next to the instruction.
 
+Comments and docstrings describe the code as it is now, and why, as far as a caller or maintainer needs; what it did before, and the changes that brought it here, belong in git.
+A pointer to the decision or issue behind a choice is welcome; a list of them is history.
+A measured fact the code relies on stays at the code, cut to the fact, the version it was measured on, and what the code does about it, with a pointer to the evidence where there is some; the story of how it was found belongs with that evidence.
+
 ## Evidence
 
 - Verify at the source.
