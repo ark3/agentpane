@@ -129,6 +129,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		compacting: false,
 		preview: null,
 		previewFailure: null,
+		exits: {},
 		forkIndices: null,
 		forkStopsTurn,
 		...overrides,
@@ -336,6 +337,8 @@ class FakeController implements AgentpaneController {
 		this.clearErrorCalls += 1;
 		this.publish({ ...this.current, error: null });
 	}
+
+	dismissExit() {}
 
 	publish(next: ControllerView) {
 		this.current = next;

@@ -112,6 +112,7 @@ class PublishingController implements AgentpaneController {
 	reconnect() {}
 	async refreshPreview() {}
 	clearError() {}
+	dismissExit() {}
 }
 
 function summary(ref: SessionRef, updatedAt: string): SessionSummary {
@@ -182,6 +183,7 @@ function initialView(selectedTurns: number): ControllerView {
 		compacting: false,
 		preview: null,
 		previewFailure: null,
+		exits: {},
 		forkIndices: null,
 		forkStopsTurn: {},
 	};

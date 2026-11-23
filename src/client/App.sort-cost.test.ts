@@ -134,6 +134,7 @@ class PublishingController implements AgentpaneController {
 	reconnect() {}
 	async refreshPreview() {}
 	clearError() {}
+	dismissExit() {}
 }
 
 function summary(ref: SessionRef, index: number): SessionSummary {
@@ -189,6 +190,7 @@ async function mounted(): Promise<PublishingController> {
 		compacting: false,
 		preview: null,
 		previewFailure: null,
+		exits: {},
 		forkIndices: null,
 		forkStopsTurn: {},
 	});

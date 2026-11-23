@@ -101,6 +101,14 @@ export interface ControllerView {
 	 */
 	previewFailure: { ref: SessionRef; message: string } | null;
 	/**
+	 * The death report each session's `ended` carried when its backend exited
+	 * on its own (D26), by `sessionKey` of its ref, since the view it ended is
+	 * gone. The detached pane shows the selected session's in place of its
+	 * Attach button. `dismissExit` drops it, and `publish` drops it once the
+	 * tab holds a live view of that session again; a reload forgets it.
+	 */
+	exits: Readonly<Record<string, string>>;
+	/**
 	 * Transcript indices the *selected* session can be forked at, as of the last
 	 * `sessions/forkPoints` (OW-roveze), or null while nobody has been told yet.
 	 * Whether a user message is offered an Edit control at all reads this.
@@ -342,6 +350,8 @@ export interface AgentpaneController {
 	refreshPreview(): Promise<void>;
 	/** Dismiss the current error -- the view-level one and, if selected, the session's own. */
 	clearError(): void;
+	/** Dismiss the selected session's death report (`ControllerView.exits`). */
+	dismissExit(): void;
 }
 
 /**
@@ -371,6 +381,15 @@ const PREVIEW_READ_TIMEOUT_MS = 10_000;
  */
 function isGone(error: unknown): boolean {
 	return error instanceof ApiClientError && error.code === "gone";
+}
+
+/** `exits` less the reports of sessions `state` holds a live view of. */
+function withoutLive(exits: Readonly<Record<string, string>>, state: ClientState): Readonly<Record<string, string>> {
+	const live = Object.values(state.sessions).map((session) => sessionKey(session.ref)).filter((key) => key in exits);
+	if (live.length === 0) return exits;
+	const kept = { ...exits };
+	for (const key of live) delete kept[key];
+	return kept;
 }
 
 /** A preview read out -- see `loadPreview`, which says who owns its answer. */
@@ -411,6 +430,7 @@ export function createController(
 		compacting: false,
 		preview: null,
 		previewFailure: null,
+		exits: {},
 		forkIndices: null,
 		forkStopsTurn: {},
 	};
@@ -479,6 +499,7 @@ export function createController(
 			view = { ...view, previewFailure: null };
 			previewHeld = false;
 		}
+		if (Object.keys(view.exits).length > 0) view = { ...view, exits: withoutLive(view.exits, view.state) };
 		for (const listener of listeners) listener(view);
 		if (mode === "loading") loadPreview();
 	}
@@ -608,7 +629,10 @@ export function createController(
 		}
 		if (!owned || (!clicked && !onPane)) return;
 		if (isGone(error)) {
-			publish({ state: { ...view.state, selected: null } });
+			// A first cut: with no detached pane left to carry the session's
+			// death report, the error slot does.
+			const { [key]: report, ...exits } = view.exits;
+			publish({ state: { ...view.state, selected: null }, ...(report === undefined ? {} : { error: report, exits }) });
 			return;
 		}
 		// A click's failure goes on the pane when it was the selected
@@ -1104,7 +1128,12 @@ export function createController(
 				event.type !== "sessions-changed" &&
 				view.state.sessions[event.handle]?.isStreaming === true;
 			const result = reduceServerEvent(view.state, event);
-			if (result.state !== view.state) publish({ state: result.state });
+			// Kept whether or not the tab held the view, so a session a gap
+			// detached still says why it died.
+			const died = event.type === "ended" && event.exit !== undefined ? { [sessionKey(event.session)]: event.exit } : null;
+			if (result.state !== view.state || died !== null) {
+				publish({ state: result.state, ...(died === null ? {} : { exits: { ...view.exits, ...died } }) });
+			}
 			if (event.type === "snapshot" && selects(event.handle)) {
 				void loadModelsForSelected(selectionIntent);
 			}
@@ -1599,6 +1628,12 @@ export function createController(
 			// shows it again, which is the truth about where it stands.
 			if (handle !== undefined && dismissed !== null) void api.dismissError(handle, dismissed).catch(() => {});
 			publish({ error: null, state });
+		},
+		dismissExit() {
+			const selected = view.state.selected;
+			if (selected === null || !(sessionKey(selected) in view.exits)) return;
+			const { [sessionKey(selected)]: _dismissed, ...exits } = view.exits;
+			publish({ exits });
 		},
 	};
 

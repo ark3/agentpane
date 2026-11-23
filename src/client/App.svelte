@@ -58,6 +58,7 @@
 		compacting: false,
 		preview: null,
 		previewFailure: null,
+		exits: {},
 		forkIndices: null,
 		forkStopsTurn: {},
 	});

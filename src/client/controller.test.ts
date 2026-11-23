@@ -3726,3 +3726,120 @@ describe("client controller", () => {
 		}
 	});
 });
+
+// A backend that exited on its own: its `ended` carries the death report
+// (D26, ark3/agentpane#97), which the tab holds by the session's ref, the
+// view being gone, until a dismissal or an attach of that session.
+describe("a death report (#109)", () => {
+	const report = "pi exited (code=1, signal=null)\nError: out of memory";
+	const otherRef: SessionRef = { backend: "codex", id: "thread-other" };
+
+	it("holds the report an ended carries for the selected session, whose pane falls to its preview", async () => {
+		const server = fakeServer();
+		const controller = createController(server.api());
+		await controller.start();
+		await controller.select(ref);
+		await settle();
+
+		server.emit({ type: "ended", session: ref, handle: h(ref), exit: report });
+		server.emit({ type: "sessions-changed" });
+		await settle();
+
+		const landed = controller.getView();
+		expect(landed.state.selected).toEqual(ref);
+		expect(paneMode(landed)).toBe("preview");
+		expect(landed.exits).toEqual({ [sessionKey(ref)]: report });
+		expect(landed.error).toBeNull();
+		controller.dispose();
+	});
+
+	it("holds no report for an ended that carries none", async () => {
+		const server = fakeServer();
+		const controller = createController(server.api());
+		await controller.start();
+		await controller.select(ref);
+		await settle();
+
+		server.emit({ type: "ended", session: ref, handle: h(ref) });
+		await settle();
+
+		expect(paneMode(controller.getView())).toBe("preview");
+		expect(controller.getView().exits).toStrictEqual({});
+		controller.dispose();
+	});
+
+	it("holds the report for a session not on screen, and has it there when that session is opened", async () => {
+		const server = fakeServer();
+		const controller = createController(server.api());
+		await controller.start();
+		await controller.select(ref);
+		await settle();
+		server.attached(otherRef);
+
+		server.emit({ type: "ended", session: otherRef, handle: h(otherRef), exit: report });
+		await settle();
+
+		expect(controller.getView().state.selected).toEqual(ref);
+		expect(paneMode(controller.getView())).toBe("live");
+		expect(controller.getView().exits).toEqual({ [sessionKey(otherRef)]: report });
+
+		await controller.preview(otherRef);
+
+		expect(controller.getView().state.selected).toEqual(otherRef);
+		expect(paneMode(controller.getView())).toBe("preview");
+		expect(controller.getView().exits).toEqual({ [sessionKey(otherRef)]: report });
+		controller.dispose();
+	});
+
+	it("drops the selected session's report at its dismissal, leaving the pane on its preview", async () => {
+		const server = fakeServer();
+		const controller = createController(server.api());
+		await controller.start();
+		await controller.select(ref);
+		await settle();
+		server.emit({ type: "ended", session: ref, handle: h(ref), exit: report });
+		await settle();
+
+		controller.dismissExit();
+
+		expect(controller.getView().exits).toEqual({});
+		expect(paneMode(controller.getView())).toBe("preview");
+		controller.dispose();
+	});
+
+	it("drops the report at an attach of that session", async () => {
+		const server = fakeServer();
+		const controller = createController(server.api());
+		await controller.start();
+		await controller.select(ref);
+		await settle();
+		server.emit({ type: "ended", session: ref, handle: h(ref), exit: report });
+		await settle();
+
+		await controller.select(ref);
+
+		expect(paneMode(controller.getView())).toBe("live");
+		expect(controller.getView().exits).toEqual({});
+		controller.dispose();
+	});
+
+	// A first cut: a session never prompted has nothing on disk, so its pane
+	// has no preview to fall to and the selection clears (D26 point 6).
+	it("shows the report of a selected session with nothing on disk in the error slot once its preview answers gone", async () => {
+		const server = fakeServer();
+		const controller = createController(server.api());
+		await controller.start();
+		await controller.select(ref);
+		await settle();
+		server.on["sessions/preview"].mockRejectedValue(gone());
+
+		server.emit({ type: "ended", session: ref, handle: h(ref), exit: report });
+		await settle();
+
+		const landed = controller.getView();
+		expect(landed.state.selected).toBeNull();
+		expect(landed.error).toBe(report);
+		expect(landed.exits).toEqual({});
+		controller.dispose();
+	});
+});
