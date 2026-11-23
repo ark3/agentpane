@@ -65,9 +65,22 @@ Some older files are still hard-wrapped and may stay so; a paragraph you substan
 State the why only where there is a body behind it, an incident that happened or a default the reader would otherwise follow, and keep it to a clause; the incident itself belongs in the commit message.
 Refuting something nobody would have tried costs twice: it argues with no one, and it plants the bad move next to the instruction.
 
-Comments and docstrings describe the code as it is now, and why, as far as a caller or maintainer needs; what it did before, and the changes that brought it here, belong in git.
-A pointer to the decision or issue behind a choice is welcome; a list of them is history.
-A measured fact the code relies on stays at the code, cut to the fact, the version it was measured on, and what the code does about it, with a pointer to the evidence where there is some; the story of how it was found belongs with that evidence.
+Comments and docstrings are written for one of two readers, and the reader decides what goes in.
+
+The owner reads Emacs's help: the docstrings of interactive commands, user options, faces and modes (`C-h m`), and the package Commentary.
+These say how to use the thing, in the user's terms: what it does, what the user sees, and which keys and options bear on it, written with `\\[command]` and `\\{map}` so the keys stay true.
+They carry no decision or card ids, source paths or internals; the reasoning behind a command goes in `;;` comments in its body.
+
+Agents read everything else: every comment in `src/`, `e2e/` and the tests, and the internal `agentpane--` docstrings and `;;` comments.
+These carry only what the code cannot show its reader:
+- a contract that crosses a file or the wire;
+- a measured fact the code relies on, cut to the fact, the version it was measured on, and what the code does about it, with a pointer to the evidence where there is some;
+- why the obvious simpler code is wrong, in a clause;
+- an invariant that spans functions.
+
+They do not restate what the code does: a second copy drifts, and the reader trusts the comment over the code.
+What the code did before, and the changes that brought it here, belong in git; a pointer to the decision or issue behind a choice is welcome, a list of them is history.
+A lesson worth keeping goes into a test that fails without it where one can, else a one-clause warning at the code, and its story into the commit message.
 
 ## Evidence
 
