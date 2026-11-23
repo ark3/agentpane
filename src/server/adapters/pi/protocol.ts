@@ -1,24 +1,15 @@
 /**
- * Pi RPC wire protocol (`pi --mode rpc`), hand-written.
+ * Pi RPC wire protocol (`pi --mode rpc`), hand-written:
+ * `@earendil-works/pi-coding-agent` is the CLI, not a dependency (D10), so
+ * its shapes are transcribed from its `docs/rpc.md` and cross-checked against
+ * the installed CLI's `dist/modes/rpc/rpc-types.d.ts`. Only what this adapter
+ * speaks is here.
  *
- * This is NOT imported from `@earendil-works/pi-coding-agent` on purpose:
- * that package is not a project dependency (only `pi-agent-core` and
- * `pi-ai` are, and only for types -- D10). It only exists on this machine
- * as a global bun install used as reference documentation. The shapes below
- * are transcribed from `pi-coding-agent/docs/rpc.md` and cross-checked
- * against the installed CLI's `dist/modes/rpc/rpc-types.d.ts`.
- *
- * Only the commands/events/responses this adapter actually speaks are
- * included -- not the full RPC surface (bash-as-a-command, cycling, etc.
- * are all real commands we simply never send). The manual-compaction
- * `compact` command IS spoken (OW-72), transcribed from rpc.md's
- * "Compaction" section, and so is `set_thinking_level` with the
- * `thinking_level_changed` event (OW-ruzuhu), from `rpc-commands.md`'s
- * "Thinking" and `json.md` as of `pi 0.87.1`, and `set_session_name` with
- * `get_state`'s `sessionName` (OW-jamaha), from `rpc-types.d.ts` and
- * `rpc-mode.js` as installed at `pi 1.0.0`, with the `session_info_changed`
- * event (ark3/agentpane#80), from `json.md` as of `pi 1.5.2`, and `clear_queue`, which Stop
- * sends ahead of `abort` (OW-wisifo), from `rpc-commands.md` "clear_queue"
+ * Transcribed from elsewhere: `set_thinking_level` and
+ * `thinking_level_changed` from `rpc-commands.md` "Thinking" and `json.md` as
+ * of `pi 0.87.1`; `set_session_name` and `get_state`'s `sessionName` from
+ * `rpc-types.d.ts` and `rpc-mode.js` at `pi 1.0.0`; `session_info_changed`
+ * from `json.md` as of `pi 1.5.2`; and `clear_queue` from `rpc-commands.md`
  * and the response `pi 1.2.0` gave (docs/MANUAL_TESTING.md, OW-yewiku).
  */
 
@@ -300,11 +291,9 @@ export type PiOutputLine = PiResponse | PiNotification;
 // ---------------------------------------------------------------------------
 // Model refs
 //
-// `ModelInfo` (frozen, src/shared/protocol.ts) is `{ id, label }` with no
-// separate provider field, but Pi's `set_model` command needs `provider` and
-// `modelId` split. We bridge this the same way Pi's own `--model` CLI flag
-// documents ("supports `provider/id`"): `ModelInfo.id` is `provider/modelId`.
-//
+// `ModelInfo` (frozen, src/shared/protocol.ts) has no provider field, but
+// Pi's `set_model` takes `provider` and `modelId` apart, so `ModelInfo.id` is
+// `provider/modelId`, as Pi's own `--model` flag "supports `provider/id`".
 // This is the one statement of which model strings each path takes; the spawn
 // flag's docblock in `spawn.ts` and `PiAdapter.setModel` cite it.
 //
@@ -314,11 +303,9 @@ export type PiOutputLine = PiResponse | PiNotification;
 //  - The spawn flag `--model` takes more: "Model pattern or ID (supports
 //    "provider/id" and optional ":<thinking>")", Pi's own help text as of
 //    `pi 0.87.1`. So `provider/modelId:thinkingLevel`, the form AGENTS.md's
-//    model pin is written in, starts a session and sets its level too, and
-//    sets it again at every fork in that process (OW-dojebo), which is why
-//    `PiAdapter.fork` re-sends a chosen level. The model it names comes back
-//    at every fork too, over one `set_model` chose (OW-sinoha), so the fork
-//    re-sends a chosen model first.
+//    model pin is written in, starts a session at that level too, and a fork
+//    in that process puts the flag's model and level back in force
+//    (`PiAdapter.chosenModel` and `thinkingLevel`).
 //
 // That suffix is the gap: sent to `set_model` it answered "Model not found"
 // (`pi 0.85.1`, 2026-09-16, OW-pizaki). Nothing strips it, because the level
