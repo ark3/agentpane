@@ -499,6 +499,8 @@ HTTP route attached first; it now waits only on a backend already
 running, and whether it wants
 jsonrpc.el's default instead, as `sessions/setModel' takes, has not been
 weighed.  Until ark3/agentpane#76 `sessions/forkPoints' took it too.
+`sessions/abort' takes it to outlast the server's bound on a Pi stop
+\(`agentpane-abort').
 Past this the reply is discarded even if it comes, so a request that ran
 long but succeeded reads as a failure and leaves the buffer unattached
 though its session is live.  jsonrpc.el's default is 10s, and the one
@@ -2944,6 +2946,12 @@ The first prompt on a previewed session attaches it."
 (defun agentpane-abort ()
   "Abort the running turn of this buffer's session through `sessions/abort'.
 
+The request waits up to `agentpane--spawn-timeout' for its answer.  On Pi
+the server holds a stop behind the prompts already written to Pi for up
+to 5s (`stopWaitMs' in src/server/adapters/pi/process.ts, D16) before
+Pi's own abort runs, and an answer dropped at jsonrpc.el's 10s default
+would take its `:queued' texts with it.
+
 On Pi the abort also clears the prompts steered into the turn that Pi had
 not yet delivered, and answers with their text, `:queued', or nil when
 it cleared nothing (D16, OW-wisifo).  They are the user's own undelivered
@@ -2999,7 +3007,7 @@ buffer."
                           (setq agentpane--held-queued
                                 (append agentpane--held-queued (plist-get answer :queued) nil))
                           (agentpane--release-queued))
-                        t)))
+                        t nil agentpane--spawn-timeout)))
 
 (defun agentpane-compact ()
   "Compact this buffer's session through `sessions/compact'.

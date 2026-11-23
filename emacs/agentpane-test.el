@@ -3440,6 +3440,19 @@ the region as it was (OW-seleri)."
           (should (equal (mapcar #'car sent) '(sessions/abort)))
           (should (equal (agentpane-test--draft) (nth 2 case))))))))
 
+(ert-deftest agentpane-test-abort-outlasts-the-servers-bound-on-a-pi-stop ()
+  "`agentpane-abort' sends `sessions/abort' with `agentpane--spawn-timeout',
+past the server's 5s bound on a Pi Stop's wait, so a late answer and its
+`:queued' texts are not dropped at jsonrpc.el's 10s default (D16)."
+  (agentpane-test--with-session '(:backend "pi" :id "/s/parent.jsonl")
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'agentpane--request)
+                 (lambda (method _params _callback &optional _always _failed timeout _erred)
+                   (push (cons method timeout) sent))))
+        (setq agentpane--handle "h1")
+        (agentpane-abort)
+        (should (equal sent `((sessions/abort . ,agentpane--spawn-timeout))))))))
+
 (ert-deftest agentpane-test-edit-last-holds-pis-queue-out-of-the-edit ()
   "`agentpane-edit-last' on a streaming Pi session whose abort answers with
 a prompt it took out of Pi's queue leaves the prompt region holding only
