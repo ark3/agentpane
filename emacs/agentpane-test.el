@@ -6768,6 +6768,9 @@ ends the helper ahead of the shutdown (`respond' in src/emacs/helper.ts)."
       (should (eql (process-exit-status process) 0))
       (should-not (process-attributes pid)))))
 
+(ert-deftest agentpane-test-issue98-fails-on-purpose ()
+  (should (equal 1 2)))
+
 (provide 'agentpane-test)
 
 ;;; agentpane-test.el ends here
