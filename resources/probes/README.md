@@ -258,6 +258,22 @@ Costs tokens: one one-word turn.
 
 Verified with: `pi` 1.5.2 on the home server, 2026-11-22, at 0dfbcb14 and again once ark3/agentpane#90 had built D35 point 1; see `docs/MANUAL_TESTING.md`, "Attaching a stored Pi session makes no rename".
 
+## `agentpane_pi_stop_command_probe.ts`
+
+Proves: **a Stop pressed behind a Pi extension command that awaits idle stops the turn at `PiAdapter`'s deadline** (D16, ark3/agentpane#93), through the production server and its socket.
+It creates a Pi session on the pinned model, sends `LONG_PROMPT`, and once its text streams sends `/probe-wait-idle`, the command `pi_stop_compact_probe.ts` loads; 1 s later it sends `sessions/abort`, and records when the turn reported idle and when the abort and the command were answered, from the Stop.
+The command goes in the `extensions/` directory of a throwaway `PI_CODING_AGENT_DIR` under `/var/tmp`, holding copies of the machine's state files and passed in the server's environment, since agentpane's spawn passes no `-e`.
+
+```bash
+bun agentpane_pi_stop_command_probe.ts                 # builds the client first
+bun agentpane_pi_stop_command_probe.ts --skip-build    # --model <ref>, --slack <s> past the deadline (default 3), --out FILE
+```
+
+It exits 0 when the command was answered `handled`, the turn was streaming at the Stop, and it reported idle within `stopWaitMs` and the slack, and 1 otherwise.
+Costs tokens: one long turn, stopped about 6 s in.
+
+Verified with: `pi` 1.6.0 on the home server, 2026-11-23; see `docs/MANUAL_TESTING.md`, "A Stop behind a Pi extension command that awaits idle ends at the deadline".
+
 ## `loopback_token_repro_probe.ts`
 
 Proves: **a separate process holding no token gets no command run over the socket** (D29, D31 point 5).
