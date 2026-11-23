@@ -15,6 +15,23 @@
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
 ;;
+;; which needs `bun' on the PATH and `bun install' done, and skips the
+;; three tests tagged `tty': they drive `vertical-motion', which cuts a long
+;; fold header in three layouts where a binary search takes one per step,
+;; and which on Emacs 31.1 (measured 2026-09-25) does not move in batch
+;; Emacs.  They run in a tty Emacs that `script' gives a terminal, pinned
+;; to 80 by 24, with the terminal's drawing thrown away and ERT's report
+;; sent to standard error by `agentpane-test-run-tty':
+;;
+;;     timeout 60 env TERM=xterm-256color script -qec 'stty cols 80 rows 24; \
+;;       emacs -nw -Q -L emacs -l ert -l agentpane -l agentpane-test \
+;;       -f agentpane-test-run-tty 2>&3' /dev/null 3>&2 >/dev/null </dev/null
+;;
+;; which on Emacs 31.1 and util-linux 2.42.3 (measured 2026-09-25) exits 0,
+;; 1 when a test fails, or 2 when the run itself signals.  The `timeout'
+;; ends a run that cannot start: a file that signals as it loads leaves
+;; `emacs -nw' waiting at its echo area, and the command exits 124.
+;;
 ;; The nodes below are in the shape `jsonrpc.el' delivers -- plists with
 ;; keyword keys, arrays as vectors -- and their HTML is what `renderMarkdown'
 ;; emits for the markdown beside it.
