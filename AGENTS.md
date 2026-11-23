@@ -38,6 +38,10 @@ Run tests through the `test` script, which pins `TZ=Asia/Kolkata`; plain `vitest
 It is not part of `bun run check`, and CI runs it only after the push, so run it by hand before committing when you touch follow-mode scrolling in `App.svelte`, `.conversation` or the `.shell` grid in `app.css`, the composer's action row, the message footer rows in `src/client/render/`, or anything under `public/`: jsdom sees no layout, no real scrolling and no Popover API.
 In a claude.ai cloud container it needs an uncommitted config to find the browser (`docs/ENVIRONMENT.md`, "Cloud containers").
 
+`bun run test:emacs` runs the ERT suite in `emacs/agentpane-test.el` on Emacs 31 (~12s).
+It must pass before any commit touching `emacs/` or `src/emacs/`.
+It is not part of `bun run check`, which must pass in a claude.ai cloud container, where there is no Emacs; there, CI runs it once the work reaches `main`.
+
 Never run `/code-review ultra` in a session doing the work: it has cost a full budget window.
 
 ## Code
