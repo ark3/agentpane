@@ -5143,8 +5143,7 @@ selected\".  The mark is made by `session/turnEnded' (D32 point 6).  The
 death leaves the buffer holding no handle, so only its ref finds it as
 seen."
   (agentpane-test--listing
-    (let ((agentpane--connection nil)
-          (replacement nil))
+    (let ((agentpane--connection nil))
       (cl-letf (((symbol-function 'agentpane--start-helper) #'agentpane-test--mute-helper))
         (unwind-protect
             (let* ((dead (agentpane--connection))
@@ -5158,7 +5157,7 @@ seen."
               (agentpane-test--heard-out dead)
               (should-not (buffer-local-value 'agentpane--handle a))
               (should (agentpane-test--finished-p picker "h-a"))
-              (setq replacement (agentpane--connection))
+              (agentpane--connection)
               (funcall relist (agentpane-test--summary "a" nil))
               (should (agentpane-test--finished-p picker "h-a"))
               (with-current-buffer picker
@@ -5167,7 +5166,7 @@ seen."
               (should (eq (window-buffer (selected-window)) a))
               (agentpane-test--show a)
               (should-not (agentpane-test--finished-p picker "h-a")))
-          (agentpane-test--end-helper replacement))))))
+          (agentpane-test--end-helper agentpane--connection))))))
 
 (ert-deftest agentpane-test-picker-forgets-a-handle-the-server-let-go ()
   "A handle the listing no longer carries, which the server never mints
@@ -5608,14 +5607,19 @@ it wrote last (`agentpane--helper-exited', `agentpane--helper-gone')."
 (defun agentpane-test--end-helper (connection)
   "Kill CONNECTION's process, when CONNECTION is non-nil and its process
 is live, and wait until it has left the process table and been torn
-down, so that no teardown of it runs in a later test."
+down, then run the timers queued in the pass that tore it down, such as
+a node's `agentpane--draw-recorded', so that nothing of it runs in a
+later test, whose `agentpane--connection' its teardown would forget.
+A test that drives a helper process calls this on its way out, so that
+a failure ends the helper too (ark3/agentpane#33)."
   (when (and connection (process-live-p (jsonrpc--process connection)))
     (kill-process (jsonrpc--process connection)))
   (when connection
     (agentpane-test--wait-for
      (lambda () (not (or (memq (jsonrpc--process connection) (process-list))
                          (eq connection agentpane--connection))))
-     (+ (float-time) 10))))
+     (+ (float-time) 10))
+    (accept-process-output nil 0)))
 
 (defmacro agentpane-test--outliving (last-words &rest body)
   "Run BODY in a fresh transcript buffer for the session `ref', with no
@@ -5683,7 +5687,7 @@ last one's teardown."
               (should-not agentpane--connection)
               (setq replacement (agentpane--connection))
               (should (jsonrpc-running-p replacement)))
-          (agentpane-test--end-helper replacement))))))
+          (agentpane-test--end-helper agentpane--connection))))))
 
 (ert-deftest agentpane-test-no-re-attach-before-the-teardown ()
   "A buffer whose helper has exited, attached again before that helper's
@@ -6121,16 +6125,19 @@ jsonrpc.el 1.0.29, measured 2026-09-28; OW-bukupu)."
     (agentpane-test--with-session '(:backend "codex" :id "t1")
       (cl-letf (((symbol-function 'agentpane--start-helper) #'agentpane-test--answers-then-dies)
                 ((symbol-function 'message) #'ignore))
-        (agentpane--request 'sessions/prompt nil (lambda (_) (cl-incf answers)) t
-                            (lambda () (cl-incf failures)))
-        (let ((dead agentpane--connection))
-          (should-error (jsonrpc-request dead 'models/list nil :timeout 5))
-          (agentpane-test--heard-out dead)
-          (with-current-buffer (jsonrpc-events-buffer dead)
-            (should (string-search "anxious continuation to 1 running now" (buffer-string))))
-          ;; Let the held answer, handed on from a timer, run.
-          (accept-process-output nil 0.1)
-          (should (equal (list answers failures) '(1 0))))))))
+        (unwind-protect
+            (progn
+              (agentpane--request 'sessions/prompt nil (lambda (_) (cl-incf answers)) t
+                                  (lambda () (cl-incf failures)))
+              (let ((dead agentpane--connection))
+                (should-error (jsonrpc-request dead 'models/list nil :timeout 5))
+                (agentpane-test--heard-out dead)
+                (with-current-buffer (jsonrpc-events-buffer dead)
+                  (should (string-search "anxious continuation to 1 running now" (buffer-string))))
+                ;; Let the held answer, handed on from a timer, run.
+                (accept-process-output nil 0.1)
+                (should (equal (list answers failures) '(1 0)))))
+          (agentpane-test--end-helper agentpane--connection))))))
 
 (defun agentpane-test--lost (id)
   "The helper's answer to the request ID still out at its socket's close:
@@ -6167,13 +6174,15 @@ counted once the teardown has run and Emacs has waited a beat more."
                       :connection-type 'pipe
                       :noquery t)))
                   ((symbol-function 'message) #'ignore))
-          (let ((dead (agentpane--connection)))
-            (funcall send (lambda () (cl-incf failures)))
-            (should-error (jsonrpc-request dead 'models/list nil :timeout 5))
-            (agentpane-test--heard-out dead)
-            (accept-process-output nil 0.1)
-            (should-not agentpane--sending)
-            failures))))))
+          (unwind-protect
+              (let ((dead (agentpane--connection)))
+                (funcall send (lambda () (cl-incf failures)))
+                (should-error (jsonrpc-request dead 'models/list nil :timeout 5))
+                (agentpane-test--heard-out dead)
+                (accept-process-output nil 0.1)
+                (should-not agentpane--sending)
+                failures)
+            (agentpane-test--end-helper agentpane--connection)))))))
 
 (ert-deftest agentpane-test-close-answers-a-prompt-behind-a-synchronous-request ()
   "A prompt still out when its helper's socket closes, with a synchronous
