@@ -5,127 +5,11 @@
  * reads this as JSON with no type checker behind it, and this docblock is what
  * the elisp author reads. It names every field, its JSON type, and when it is
  * present; the TypeScript below says the same thing to the compiler. Change
- * the two together, and raise it before changing either. D24 raised it twice:
- * the `handle` every per-session notification carries, and every request
- * accepts, below (OW-suyinu); and the retirement of `session/renamed`, whose
- * one use no other notification covered -- joining the ref an attach asked
- * for to the handle it was answered under -- `session/snapshot`'s
- * `askedFor` took over (OW-mofuho). OW-gusaru raised it a third time, for
- * `session/snapshot`'s `movedFrom`, and OW-yibijo a fourth, retiring
- * `movedFrom` for `session/detached`. OW-jokoto raised it a fifth, for the
- * `errorId` that names a turn error on `session/error` and
- * `session/snapshot`, and that `sessions/dismissError` and `sessions/prompt`
- * send back. OW-nufafi raised it a sixth, opening the event stream at the
- * first `sessions/list` as well as at the first `sessions/attach`, so
- * `sessions/changed` flows to a picker before anything is attached.
- * OW-mareju raised it a seventh, for `stream/changed`, which says the event
- * stream dropped and came back, where the helper had reopened it silently.
- * OW-filuge raised it an eighth, sending `session/detached` for a session
- * whose `seq` gapped, where the helper had attached it again. OW-mepufi
- * raised it a ninth, retiring `stream/changed`: the helper exits when its
- * event stream drops or its first open fails (D25 point 4), and reopens
- * nothing. OW-rebawa raised it a tenth: the reply to `sessions/attach` no
- * longer says a buffer is attached, only the `session/snapshot` that
- * answers the attach does; the reply goes out after that snapshot, or once
- * none will; and `askedFor` rides every snapshot that answers an attach,
- * one for each, whatever ref it names. OW-letevu raised it an eleventh,
- * retiring the request that answered an agent request, the two
- * notifications that published and retracted one, and `session/snapshot`'s
- * `requests`: agentpane never holds an agent request (D2a), so there is
- * nothing pending to carry or answer, and the refusal reaches Emacs as a
- * `session/error` naming the request's kind. OW-likopo raised it a twelfth,
- * under D26: `session/detached` for a handle the server let go of follows
- * the server's own `ended` under it, where it followed a listing the helper
- * asked at each `sessions/changed`; and `sessions/list` and
- * `sessions/attach` wait for the event stream's open before their own call.
- * OW-kutome raised it a thirteenth, for `session/detached`'s `cause`, which
- * tells the server letting go of the handle from a `seq` gap, since only
- * the first says a turn running under it is over. OW-wukako raised it a
- * fourteenth, correlating an attach by a token rather than by the ref it
- * asked for: `sessions/attach` carries a `token` agentpane-mode mints, the
- * snapshot that answers it carries that `token` where it carried
- * `askedFor`, and `sessions/detach` and `sessions/close` carry one too,
- * giving up that attach alone where they gave up every attach of the ref;
- * no snapshot answers an attach before its reply names the handle; and an
- * attach given up on while the stream's open is pending is never sent.
- * OW-linowe raised it a fifteenth: a `sessions/detach` or `sessions/close`
- * with no `handle` stops the attachment the snapshot answering its
- * `token`'s attach created, if that snapshot created one, where it stopped
- * whatever the helper had last named to Emacs by `session`, which another
- * buffer attached to that ref since could hold. OW-nowihu raised it a
- * sixteenth: `sessions/detach` and `sessions/close` carry `tokens`, every
- * attach their buffer sent and every one a buffer it absorbed sent, where
- * they carried one `token`, and stop the attachment under a handle once
- * every token answered under it is released, where the handle stopped it,
- * or without one the token whose answer created it. OW-novuye raised it a
- * seventeenth, deciding before changing it: what the elisp needs of a tool
- * call reaches it as typed fields on the tool part, derived in
- * `src/emacs/nodes.ts`, never as something the elisp parses out of `args`,
- * which is display text. OW-gakide added `threadIds`, the child threads a
- * subagent call names. OW-4 is to add `files`, one entry per file an edit
- * or write touches carrying its path, its kind where the backend names one,
- * and its diff lines, retiring the flat `diff`.
- * OW-jamaha raised it an eighteenth, under D27: `sessions/setName`, and
- * `name` on the `SessionSummary` that `sessions/list` answers.
- * OW-wavini raised it a nineteenth: the `"system"` role and its `system`
- * part, for the system-role message `pi 1.2.0` opens every session with and
- * sends again whenever its configuration changes.
- * ark3/agentpane#51 raised it a twentieth, under D30: `sessions/forkAndPrompt`
- * carries a `token` and attaches the fork for the buffer that minted it, as
- * `sessions/attach` does, so an edit sends one request.
- * ark3/agentpane#48 raised it a twenty-first, under D30: `sessions/create`
- * starts the session's agent, carries a `token` and answers the session's
- * summary, attaching it for the token as `sessions/attach` does.
- * ark3/agentpane#49 raised it a twenty-second, under D30: `sessions/prompt`
- * sends its `handle` to the server, which prompts only the live session
- * under it, and one naming none carries a `token` and attaches its session
- * for the buffer that minted it, as `sessions/attach` does.
- * D31 raised it a twenty-third, moving the helper onto one socket: every
- * request on a live session names its `handle`, which the server refuses
- * once it has ended; an error the server refused carries its `code` and no
- * HTTP status; an attach's reply follows its snapshot, so nothing waits on
- * a snapshot or on an open; and a request that reached no server is refused
- * as such, where it answered `-32603`.
- * D32 raised it a twenty-fourth, under points 1 to 3: a transcript buffer
- * is a view, named by an integer agentpane-mode mints, and every
- * per-session request carries `view` where it carried `token`, `tokens` or
- * `handle`, the helper holding each view's binding and filling in the
- * handle; every per-session notification carries `view` beside `handle`;
- * `sessions/prompt` carries `live`; `sessions/forkAndPrompt` carries
- * `forkView`; and a reply, or a refusal's `attached` or `fork`, names the
- * view holding the session where another does. The tokens of OW-wukako,
- * OW-linowe and OW-nowihu, and those ark3/agentpane#48, #49 and #51 put on
- * `sessions/create`, `sessions/prompt` and `sessions/forkAndPrompt`, are
- * history.
- * D32 raised it a twenty-fifth, under point 4 (ark3/agentpane#71): the
- * helper holds each view's requests still out, refusing a second send
- * from a view `busy`, and a send or a second compact while a compact from
- * the view is out, joining a second attach from a view to its first
- * still out, holding a prompt from an unbound view until the view's
- * attach still out has bound it, and refusing an attach or a by-ref
- * prompt of a session a `sessions/forkAndPrompt` still out forks
- * `forking`.
- * D32 raised it a twenty-sixth, under point 6 (ark3/agentpane#72): the
- * helper holds the turn-done watch and the streaming levels, and sends
- * `session/turnEnded` for every live session whose turn ends, saying
- * whether this Emacs's prompt was watching it; `sessions/forkAndPrompt`
- * carries `stops`; `sessions/abort` and `sessions/fork` carry `unwatch`; and
- * `session/detached` loses OW-kutome's `cause`, its only reader the watch
- * agentpane-mode no longer keeps.
- * D32 raised it a twenty-seventh, under point 7 (ark3/agentpane#73): a
- * request still out when the socket closes is answered `-32001` before
- * the helper exits, where it got no reply and agentpane-mode's teardown
- * answered it as the helper's death.
- * ark3/agentpane#75 raised it a twenty-eighth, under D33: `sessions/fork`
- * goes, agentpane-mode forking only by an edit, and with it the `unwatch`
- * on `sessions/abort` and on that fork.
- * ark3/agentpane#76 raised it a twenty-ninth, under D33 point 4: the helper
- * fetches each bound view's fork points and sends them as
- * `session/forkPoints`, and the `sessions/forkPoints` request goes,
- * agentpane-mode reading the set it was sent rather than asking at the
- * press.
- * ark3/agentpane#97 raised it a thirtieth: `session/detached` carries
- * `exit`, the death report of a backend whose process exited on its own.
+ * the two together, and raise it before changing either.
+ *
+ * What the elisp needs of a tool call reaches it as typed fields on the tool
+ * part, derived in `src/emacs/nodes.ts`, never as something the elisp parses
+ * out of `args`, which is display text (OW-novuye).
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -143,7 +27,8 @@
  *   slice can start mid-turn), `"compactionSummary"` (the seam the backend
  *   folded its context at), `"system"` (a system-role message: the system
  *   prompt, or a later change to it, carrying one `system` part and no role
- *   label of its own), or another backend-defined role the elisp should draw
+ *   label of its own; `pi 1.2.0` opens every session with one and sends one
+ *   again whenever its configuration changes), or another backend-defined role the elisp should draw
  *   generically.
  * - `parts` (array, always, possibly empty). The node's content in display
  *   order; each element is one of the parts below, told apart by `type`.
@@ -260,7 +145,7 @@
  * 9). A view is bound by the `session/snapshot` that answers its attach,
  * and unbound by its own `sessions/detach`, by the server's `ended` under
  * its handle, and by a `seq` gap, the last two said by `session/detached`.
- * No request carries `handle`, `token` or `tokens`.
+ * No request carries `handle`.
  * `compaction` is `"requesting"`, `"running"` or `null`;
  * `model` is a string or `null`; so is `effort`, the reasoning effort the
  * session's next turn runs at, `null` when the backend reports none; so is
@@ -280,8 +165,8 @@
  *   listing, unchanged: `ref`, `cwd`, `preview`, `createdAt`, `updatedAt`,
  *   `status`, `isStreaming`, `onDisk`, `name`, and `handle` for a session
  *   the server holds, virtual or attached). `name` (string or `null`) is
- *   the session's name as its backend holds it; as of OW-jamaha only an
- *   attached session's is known, and a change to it sends
+ *   the session's name as its backend holds it; only an attached session's
+ *   is known, and a change to it sends
  *   `sessions/changed`. `sessions/changed` flows from the helper's first
  *   request on, whether or not anything is attached: that request opens
  *   the helper's socket, and the listing is ordered against the events
@@ -300,8 +185,7 @@
  *   `sessions/forkAndPrompt` is, for `view`, the buffer agentpane-mode made
  *   for the session before sending (D32 point 3): the `session/snapshot`
  *   under the reply's handle binds `view`, sent as for `sessions/attach` and
- *   before the reply. Until ark3/agentpane#48 it started nothing, and
- *   answered the bare ref.
+ *   before the reply.
  * - `models/list` -- `{ backend }` -> array of `{ id, label, efforts,
  *   defaultEffort }`, the server's listing unchanged. `efforts` is an array of
  *   `{ id, description }`, the reasoning efforts that model accepts, empty
@@ -415,10 +299,7 @@
  *   session goes on running on the server. Sent when a buffer is killed,
  *   and for a Pi fork's parent at an edit's send. Every attach from `view` still out is given
  *   up: its reply still goes out, and no snapshot answers it. The view's
- *   binding goes, and the notifications under its handle stop. Until D32 it
- *   carried `tokens`, every attach its buffer and every buffer it absorbed
- *   had sent, and the notifications under a handle stopped once every token
- *   answered under it was released (OW-nowihu).
+ *   binding goes, and the notifications under its handle stop.
  * - `sessions/setModel` -- `{ session, view, model }` -> `null`. A chosen effort the
  *   new model does not list falls back to that model's `defaultEffort`, or
  *   where that is `null` to whatever the backend then picks, which the
@@ -457,9 +338,7 @@
  *   from `view` is out, and while it is out an attach, or a
  *   by-ref prompt, of the session forked, by the ref it names or the one
  *   the helper holds under the handle, is refused `forking` from any view
- *   (D30, D32 point 4). Until ark3/agentpane#71 agentpane-mode refused its
- *   own buffer's attach meanwhile, and nothing refused another's.
- *   Until ark3/agentpane#51 it attached nothing.
+ *   (D30, D32 point 4).
  *   `stops` (boolean, absent meaning false) says the edit's hint read the
  *   fork as stopping a running turn (`forkStopsTurn` on
  *   `session/forkPoints` below): the turn-done
@@ -529,12 +408,10 @@
  *   The snapshot that answers an attach is the first notification under
  *   the view it binds; it is sent under the view that asked, whatever ref
  *   it names, and the view, not the reply, is what binds it (OW-rebawa).
- *   Until D32 it carried that attach's `token`, and until OW-wukako
- *   `askedFor`, the ref asked for. Nor could the receiver rely on handling
- *   the reply first -- as of jsonrpc.el 1.0.29 on Emacs 31.1, the reply to
- *   an asynchronous request that arrives while a synchronous one is
- *   outstanding runs only once that one returns, while notifications are
- *   handled at once (docs/MANUAL_TESTING.md, "jsonrpc.el runs an async reply
+ *   The receiver cannot rely on handling the reply first: as of jsonrpc.el
+ *   1.0.29 on Emacs 31.1, the reply to an asynchronous request that arrives
+ *   while a synchronous one is outstanding runs only once that one returns,
+ *   while notifications are handled at once (docs/MANUAL_TESTING.md, "jsonrpc.el runs an async reply
  *   after later notifications").
  * - `session/node` -- `{ session, view, handle, node }`. One node to replace by
  *   `index`.
@@ -547,7 +424,9 @@
  *   server mints one twice, a restarted one included, so one a buffer kept
  *   across a restart names nothing the new process raised. Every later
  *   `session/snapshot` carries it again, in `error` and `errorId`, until it
- *   is cleared, which `session/errorCleared` says.
+ *   is cleared, which `session/errorCleared` says. An agent request the
+ *   adapter refused at arrival reaches Emacs as one of these, naming the
+ *   request's kind (D2a).
  * - `session/errorCleared` -- `{ session, view, handle }`. The server no longer
  *   holds the session's turn error: a prompt that started or joined a turn
  *   was admitted over it, it being still the one its sender held, or a
@@ -580,8 +459,7 @@
  *   whatever handle and ref the session has now, if any, as a first attach
  *   is. `exit` (string, only when the backend's process exited without
  *   being asked) is the death report: its reason and the tail of its
- *   stderr. Until D32 point 6 it carried `cause`, `"ended"` or `"gapped"`,
- *   which agentpane-mode's turn-done watch read (OW-kutome).
+ *   stderr.
  * - `session/turnEnded` -- `{ session, handle, watched, view? }`. A turn
  *   ended in the live session under `handle`, whether or not a view of
  *   Emacs's is bound to it, and `view` (integer) names the one that is, if
@@ -617,15 +495,13 @@
  *   the last set stands (D33 point 4). Until one arrives the view's set is
  *   unknown, and every user message is offered, as the browser offers
  *   each while its set is unknown. None is sent for an unbound view.
- *   Until ark3/agentpane#76 agentpane-mode asked for them by a
- *   `sessions/forkPoints` request at the press.
  * - `sessions/changed` -- no `params`. Refetch the listing. A listing
  *   detaches nothing: where the server lets go of a handle Emacs attached,
  *   the `session/detached` for it goes out ahead of the `sessions/changed`
  *   the same close or fork sends.
  *
  * No notification says the socket closed. When it does, or it fails to
- * open, the helper exits (D25 point 4, OW-mepufi, D31 point 6), and Emacs
+ * open, the helper exits (D31 point 6), and Emacs
  * sees its process end. A failed first open first answers each request read
  * before it as `unreachable` (OW-pezelo).
  */

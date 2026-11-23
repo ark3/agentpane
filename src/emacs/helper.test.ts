@@ -1027,9 +1027,7 @@ describe("a handle's end (D26, OW-likopo)", () => {
 // Each buffer is a view, and the helper holds each view's binding, one view
 // to a handle (D32 points 1 and 2): a snapshot goes to the view that sent
 // the attach, a detach gives up that view's attaches alone, and an attach
-// landing on a handle another view holds binds nothing. Until D32 a token
-// per attach did this, and a claim per token on each handle (OW-wukako,
-// OW-nowihu).
+// landing on a handle another view holds binds nothing.
 describe("views (D32)", () => {
 	/** Each notification's method, handle and view, in order. */
 	const told = (io: ReturnType<typeof stdio>) =>
@@ -1149,8 +1147,8 @@ describe("views (D32)", () => {
 
 	// X attached h1 and was let go of it; Y attaches the same ref, under h1
 	// again after a gap, which leaves the handle live on the server, or under
-	// h2 after an `ended`; then X is killed. Until OW-linowe a detach whose
-	// token gave up nothing dropped by the ref, and Y heard nothing more.
+	// h2 after an `ended`; then X is killed. X's detach unbinds nothing of
+	// Y's, so Y goes on hearing its session.
 	it.each([
 		["gapped", "h1"],
 		["ended", "h2"],
@@ -1177,9 +1175,8 @@ describe("views (D32)", () => {
 	});
 
 	// X's attach timed out in Emacs, X sent another, which joins the first
-	// still out (D32 point 4), and X is killed before either answers. Until
-	// OW-nowihu nothing X could send named the first, and h1 stayed attached
-	// with no buffer.
+	// still out (D32 point 4), and X is killed before either answers. X's
+	// detach gives up both, so h1 is left bound to no view.
 	it("unbinds a view and gives up its attach still out at its detach, the one joining it with it (OW-nowihu)", async () => {
 		const first = held();
 		const { io, server } = start({ "sessions/attach": attaching({ summary: summary(pi, "h1"), hold: first.hold }) });

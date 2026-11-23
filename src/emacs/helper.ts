@@ -21,13 +21,13 @@
  * view was bound to it, and nothing is attached on its behalf (`detachGapped` below).
  *
  * One socket, filtered. It opens as the first request for a known method is
- * read, and stays open until the helper exits; a request read before it has opened goes out
- * behind its `hello`. Not at the helper's start: with no server listening,
- * the failed open would end the helper before it read the request Emacs had
- * already written, which would then get no reply, where it is owed one
- * saying the server could not be reached (OW-pezelo). Replies and events arrive on it in the order the server wrote
- * them, and a command's reply follows everything it caused (D31 point 3):
- * an attach's reply follows the snapshot it broadcast, and a listing's reply
+ * read, and stays open until the helper exits; a request read before it
+ * has opened goes out behind its `hello`. Not at the helper's start, so
+ * that with no server listening the request Emacs had already written is
+ * read and answered `unreachable` before the failed open ends the helper
+ * (OW-pezelo). Replies and events arrive on it in the order the server
+ * wrote them, and a command's reply follows everything it caused (D31
+ * point 3): an attach's reply follows the snapshot it broadcast, and a listing's reply
  * is ordered against the `sessions-changed` around it (OW-nufafi). The
  * server sends an opening snapshot for every live session and broadcasts
  * every event to every client, so views Emacs never attached form in the
@@ -56,8 +56,6 @@
  * the session another client closed (D30). An attach from one view that
  * lands on a handle another view holds binds nothing, and its reply names
  * the holder, for agentpane-mode to show (D32 point 2); no buffers merge.
- * Until D32 agentpane-mode minted a token per attach, and the helper held
- * a claim per token on each handle (OW-wukako, OW-nowihu).
  *
  * Requests still out (D32 point 4). The helper holds each view's requests
  * still out, as the browser's controller holds its own (`Outstanding` in
@@ -76,9 +74,7 @@
  * `forking`, from any view (`forksOut`), since on Pi it would resume the
  * parent's old branch (D30). agentpane-mode keeps its own record of its
  * send, refusing a second before it reaches this one, as the browser keeps
- * `submit`'s guard beside its own; until ark3/agentpane#71 it held its
- * attach's waiters, its close in flight and its fork and prompt in flight
- * itself.
+ * `submit`'s guard beside its own.
  *
  * Turn ends (D32 point 6). The helper hosts the browser's turn-done watch,
  * `watchSubmit`, `watchAbandon`, `watchSessions` and `watchClose` from
@@ -101,17 +97,12 @@
  * helper refuses itself arms nothing. A fork and prompt arms the fork's
  * handle at its reply, unless handled, and with `stops` abandons the
  * parent's as it goes out, as the browser reads `stopsBeforeFork`.
- * Until ark3/agentpane#75 an `unwatch` bit on `sessions/abort` and on the
- * plain fork command abandoned it for agentpane-mode's plain Pi fork, and
- * went with that fork (D33).
  * A view's detach, a gap and a close's reply abandon the watch on the
  * handle, raising nothing (D25 point 5); the server's `ended` raises a
  * watch that has seen streaming, which the browser leaves waiting, a
  * difference D32 point 6 records. At a socket close each watch that has
  * seen streaming is raised before the helper exits (D31 point 6); at the
  * input's end, as at `agentpane-shutdown`, nothing is (D25 point 4).
- * Until D32 agentpane-mode kept the watch per handle with a claim per
- * prompt (OW-kakasu), and read the levels from its picker's listings.
  *
  * Fork points (D33 point 4). The helper holds what the browser's
  * `refreshForkPoints` (`src/client/controller.ts`) holds for the session
@@ -123,8 +114,7 @@
  * browser's `forkPointsInFlight`. A failure is quiet and leaves the last
  * set standing, since nobody asked for it. An unbound view, a preview
  * among them, gets none: `sessions/forkPoints` serves only an attached
- * session (OW-sirofi). Until ark3/agentpane#76 agentpane-mode fetched them
- * itself, at the press of `e`.
+ * session (OW-sirofi).
  *
  * The helper does not reconnect: when the socket closes, or fails to open,
  * the helper exits (D25 point 4, D31 point 6). Agentpane is local-only, so a close means the
@@ -189,7 +179,7 @@ interface JsonRpcRequest {
 	params?: unknown;
 }
 
-/** The owner's first cut, 2026-09-25, to be judged by use (OW-jeruye). */
+/** Not measured: the owner's first cut, to be judged by use (OW-jeruye). */
 const NODE_INTERVAL_MS = 250;
 
 /**
@@ -272,9 +262,7 @@ interface HeldNode {
  * `onDisconnect` writes first. Nor does it abandon a turn-done watch its
  * prompt armed: only a refusal carrying the server's `error` code says a
  * request reached no backend (OW-zedawo), and the helper's own -32603 is
- * an outcome unknown too. Until D32 the helper wrote no reply for it, and
- * agentpane-mode's teardown answered it as the helper's death (OW-hiliti,
- * OW-mopuyi).
+ * an outcome unknown too.
  *
  * A request that was never written is refused with a code of the api
  * client's own: `unreachable` for one read before a first open that failed,
@@ -283,9 +271,7 @@ interface HeldNode {
  * each, with the token file named (`token.ts`), since the server ran
  * nothing. Those replies are chains of microtasks from the rejections, which
  * the api client settles before it reports the close, and are written
- * whenever they land, as the connection lost's are since D32 point 7.
- * Until D31 a failed first open answered -32603, an outcome unknown, where
- * it is now the refusal it is (OW-pezelo).
+ * whenever they land, as the connection lost's are.
  */
 export async function runHelper(options: HelperOptions): Promise<void> {
 	const { render } = options;
@@ -613,12 +599,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * its handle, to the view bound to the handle, if any. Nothing but a
 	 * snapshot binds a view (OW-rebawa), since only a snapshot tells Emacs
 	 * the buffer is attached, and an attach is answered by its reply
-	 * (`bind`), never here, whatever ref the snapshot names. Until OW-wukako
-	 * one was answered by the ref it asked for, and a snapshot under an
-	 * older handle for that ref -- another client's attach, or an opening
-	 * snapshot -- answered it ahead of the reply naming the handle the server
-	 * had since minted, whose own snapshot and events then went nowhere
-	 * (OW-savafi).
+	 * (`bind`), never here, whatever ref the snapshot names.
 	 */
 	const introduce = (event: Extract<ServerEvent, { type: "snapshot" }>): void => {
 		const { handle } = event;
@@ -659,8 +640,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * closed. An attach still out whose reply names the handle finds no view
 	 * under it, and binds nothing (`bind`).
 	 * The turn under it is over: a watch on it that has seen streaming
-	 * raises, as agentpane-mode raised at an `ended` before D32, and any
-	 * watch on it goes (D32 point 6). The browser leaves such a watch
+	 * raises, and any watch on it goes (D32 point 6). The browser leaves such a watch
 	 * waiting and raises nothing.
 	 */
 	const end = (handle: string, session: SessionRef, exit?: string): void => {
@@ -783,9 +763,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		// replies, the connection lost's among them (D32 point 7), are chains
 		// of microtasks that land after these raises; the read loop's end
 		// waits for every one before the helper resolves, which at an input's
-		// end it otherwise did ahead of them (bun 1.4.0 and node, 2026-11-21).
-		// Under Bun the input's end once outran such replies to a teardown
-		// that silenced them (bun 1.4.0, measured 2026-09-30; OW-nuzoto);
+		// end would otherwise come ahead of them (bun 1.4.0 and node);
 		// `resources/probes/emacs_helper_no_server_probe.py` checks the
 		// refusals among them under Bun.
 		// Each turn-done watch that has seen streaming is raised before the
