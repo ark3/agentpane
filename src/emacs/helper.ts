@@ -632,18 +632,23 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		for (const [key, node] of waiting) if (node.handle === handle) waiting.delete(key);
 	};
 
-	/** Unbind the view bound to `held`, if any, and tell it `session/detached`, naming `session`, the ref it last had. */
-	const release = (held: string, session: SessionRef): void => {
+	/**
+	 * Unbind the view bound to `held`, if any, and tell it `session/detached`,
+	 * naming `session`, the ref it last had, and `exit`, the death report an
+	 * `ended` carried.
+	 */
+	const release = (held: string, session: SessionRef, exit?: string): void => {
 		const bound = holderOf(held);
 		if (bound === undefined) return;
 		views.delete(bound);
 		dropHeld(held);
-		notify({ method: "session/detached", params: { session, view: bound, handle: held } });
+		notify({ method: "session/detached", params: { session, view: bound, handle: held, ...(exit === undefined ? {} : { exit }) } });
 	};
 
 	/**
-	 * The server let go of `handle` (D26): a close, by any client, or on Pi a
-	 * fork moving the process onto a conversation of its own, and nothing
+	 * The server let go of `handle` (D26): a close, by any client, the
+	 * backend's process exiting on its own, its death report `exit`, or on Pi
+	 * a fork moving the process onto a conversation of its own, and nothing
 	 * comes under it again. The view bound to it is unbound and Emacs is
 	 * told, `session` being the ref the view last had: a buffer left counting
 	 * itself attached would send a prompt the helper would send by the ended
@@ -658,10 +663,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * watch on it goes (D32 point 6). The browser leaves such a watch
 	 * waiting and raises nothing.
 	 */
-	const end = (handle: string, session: SessionRef): void => {
+	const end = (handle: string, session: SessionRef, exit?: string): void => {
 		if (turnWatch.waiting.get(handle) === true) turnEnded(handle, session, true);
 		unwatch(handle);
-		release(handle, session);
+		release(handle, session, exit);
 	};
 
 	/**
@@ -706,7 +711,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		}
 		if (event.type === "sessions-changed") return;
 		if (event.type === "ended") {
-			end(event.handle, before.sessions[event.handle]?.ref ?? event.session);
+			end(event.handle, before.sessions[event.handle]?.ref ?? event.session, event.exit);
 			return;
 		}
 

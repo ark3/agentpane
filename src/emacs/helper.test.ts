@@ -983,6 +983,28 @@ describe("a handle's end (D26, OW-likopo)", () => {
 		expect(sent(server).map(([cmd]) => cmd)).toEqual(["sessions/attach"]);
 	});
 
+	it("carries the death report on session/detached where the ended does, and none where it does not (#97)", async () => {
+		const report = "Pi process exited (code=1, signal=null)";
+		const { io, server } = start({
+			"sessions/attach": attaching({ summary: summary(pi, h(pi)) }, { summary: summary(codex, h(codex)) }),
+		});
+		await bindView(io, pi, 1);
+		await bindView(io, codex, 2);
+		const before = io.notifications().length;
+		const frames = io.out.length;
+
+		server.emit({ type: "ended", session: pi, handle: h(pi), exit: report });
+		server.emit({ type: "ended", session: codex, handle: h(codex) });
+		await io.until(frames + 2);
+
+		const detached = io.notifications().slice(before).map((message) => message["params"]);
+		expect(detached).toEqual([
+			{ session: pi, view: 1, handle: h(pi), exit: report },
+			{ session: codex, view: 2, handle: h(codex) },
+		]);
+		expect(detached[1]).not.toHaveProperty("exit");
+	});
+
 	it("sends no session/detached for an attachment whose handle a listing lacks, with no ended, and goes on forwarding it", async () => {
 		const renamed: SessionRef = { backend: "pi", id: "/tmp/renamed.jsonl" };
 		const { io, server } = start({ ...attachScript(pi, "h1"), "sessions/list": () => ({ sessions: [summary(renamed, "h2")] }) });

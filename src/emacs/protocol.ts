@@ -124,6 +124,8 @@
  * `session/forkPoints`, and the `sessions/forkPoints` request goes,
  * agentpane-mode reading the set it was sent rather than asking at the
  * press.
+ * ark3/agentpane#97 raised it a thirtieth: `session/detached` carries
+ * `exit`, the death report of a backend whose process exited on its own.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -563,19 +565,22 @@
  *   where the backend named a place in it). The Codex and Pi adapters
  *   produce them; Claude Code's does not. Every later `session/snapshot`
  *   carries it again, in `notices`.
- * - `session/detached` -- `{ session, view, handle }`. Nothing more comes
- *   under `handle`, and the helper has unbound `view`: either the
+ * - `session/detached` -- `{ session, view, handle, exit? }`. Nothing more
+ *   comes under `handle`, and the helper has unbound `view`: either the
  *   server let go of the handle and said so with an `ended` under it -- a
- *   close, by another client or this one, or on Pi a fork moving the
- *   process onto a conversation of its own (D26) -- or the session's `seq`
- *   gapped, and the helper detaches that one session rather than attach it
+ *   close, by another client or this one, the backend's process exiting on
+ *   its own, or on Pi a fork moving the process onto a conversation of its
+ *   own (D26) -- or the session's `seq` gapped, and the helper detaches
+ *   that one session rather than attach it
  *   again (D25 point 5, OW-filuge): the handle stays live on the server,
  *   and a turn running under it may go on unheard. `session` is the ref it
  *   last named the session by. The view's buffer lets go of the handle and
  *   counts itself detached and not streaming, keeping its ref and what it
  *   drew; its next `sessions/attach`, by that ref, is answered under
  *   whatever handle and ref the session has now, if any, as a first attach
- *   is. Until D32 point 6 it carried `cause`, `"ended"` or `"gapped"`,
+ *   is. `exit` (string, only when the backend's process exited without
+ *   being asked) is the death report: its reason and the tail of its
+ *   stderr. Until D32 point 6 it carried `cause`, `"ended"` or `"gapped"`,
  *   which agentpane-mode's turn-done watch read (OW-kutome).
  * - `session/turnEnded` -- `{ session, handle, watched, view? }`. A turn
  *   ended in the live session under `handle`, whether or not a view of
@@ -697,7 +702,7 @@ export type HelperNotification =
 	| { method: "session/error"; params: { session: SessionRef; view: number; handle: string; message: string; errorId: string } }
 	| { method: "session/errorCleared"; params: { session: SessionRef; view: number; handle: string } }
 	| { method: "session/notice"; params: { session: SessionRef; view: number; handle: string; notice: AgentNotice } }
-	| { method: "session/detached"; params: { session: SessionRef; view: number; handle: string } }
+	| { method: "session/detached"; params: { session: SessionRef; view: number; handle: string; exit?: string } }
 	| { method: "session/turnEnded"; params: { session: SessionRef; handle: string; watched: boolean; view?: number } }
 	| {
 			method: "session/forkPoints";
