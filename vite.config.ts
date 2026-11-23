@@ -54,6 +54,7 @@ export default defineConfig({
 						"src/shared/**/*.{test,spec}.ts",
 						"src/emacs/**/*.{test,spec}.ts",
 						"src/*.{test,spec}.ts",
+						"scripts/**/*.{test,spec}.ts",
 					],
 				},
 			},

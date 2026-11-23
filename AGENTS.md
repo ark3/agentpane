@@ -42,6 +42,9 @@ In a claude.ai cloud container it needs an uncommitted config to find the browse
 It must pass before any commit touching `emacs/` or `src/emacs/`.
 It is not part of `bun run check`, which must pass in a claude.ai cloud container, where there is no Emacs; there, CI runs it once the work reaches `main`.
 
+`bun run comment-guard <base> [file...]` checks that a change to comments and docstrings left the code unchanged since `<base>`, by comparing both with comments stripped; with no files it checks every tracked file changed since `<base>`.
+Run it before committing such a change, and say so in the commit message; the Elisp half needs Emacs.
+
 Never run `/code-review ultra` in a session doing the work: it has cost a full budget window.
 
 ## Code
