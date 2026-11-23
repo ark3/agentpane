@@ -39,21 +39,15 @@ export interface CodexSpawnOptions {
  * this itself: no `sandboxed-codex` wrapper exists on PATH, and one seam is
  * easier to test than a PATH dependency.
  *
- * sbox recognises the `codex` profile by command name -- it mounts `~/.codex`
- * read-write (Codex needs a writable sqlite state runtime) and injects
- * `--sandbox danger-full-access`. That injected flag is a no-op for
- * `app-server`, which ignores it: as of `codex-cli 0.154.0` (measured
- * 2026-09-12, OW-pibivi) a `thread/start` with no `sandbox` key reported
- * `readOnly` under `codex app-server` and under `codex --sandbox
- * danger-full-access app-server` alike. The sandbox policy that actually takes
- * effect is set by the adapter on every thread-creation call -- `thread/start`,
- * `thread/resume` and `thread/fork` -- from `CodexAdapterOptions.sandbox`,
- * alongside `CodexAdapterOptions.approvalPolicy` (D7a). Doing so on each is not
- * symmetry: omitting `sandbox` gives `readOnly` on a start and `workspaceWrite`
- * on a fork (OW-18, same version), so there is no single default to lean on. An
- * approval flag here would be the same no-op for the same reason. The mount, on
- * the other hand, is real and needed. Neither policy belongs here; adding one by
- * hand would fight sbox.
+ * sbox recognises the `codex` profile by command name: it mounts `~/.codex`
+ * read-write, which Codex's sqlite state runtime needs, and injects
+ * `--sandbox danger-full-access`, which `app-server` ignores. As of
+ * `codex-cli 0.154.0` (2026-09-12, `docs/MANUAL_TESTING.md`, OW-pibivi) a
+ * `thread/start` with no `sandbox` key reported `readOnly` with the flag and
+ * without it. So neither policy belongs on this command line: the adapter
+ * sends `sandbox` and `approvalPolicy` on every `thread/start`,
+ * `thread/resume` and `thread/fork` (D7a; `CodexAdapter.fork` for why a fork
+ * needs them too).
  */
 export function codexCommand(cwd: string): { command: string; args: string[] } {
 	return { command: "direnv", args: ["exec", cwd, "sbox", "--", "codex", "app-server"] };

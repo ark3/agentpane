@@ -1,22 +1,15 @@
 /**
  * The Codex event stream -> transcript state machine.
  *
- * Pure: it takes parsed protocol messages in and returns effects out. No
- * subprocess, no sockets, no timers -- which is what lets the whole mapping be
- * driven from `resources/fixtures/codex/*.jsonl` in a unit test (DESIGN
- * "Testing strategy", and the reason D3 keeps this server-side at all).
+ * Pure: parsed protocol messages in, effects out, with no subprocess, socket
+ * or timer, so the whole mapping can be driven from
+ * `resources/fixtures/codex/*.jsonl` in a unit test (DESIGN "Testing
+ * strategy", D3).
  *
- * Assembly rules, per DESIGN:
- *
- * - `item/started` creates the placeholder message(s) for an item
- * - deltas append to the right content block, correlated by **`itemId`**
- * - `item/completed` replaces with the authoritative content
- * - `turn/completed` ends the turn
- *
- * Implementation detail that keeps those three from drifting apart: the
- * reducer stores the latest `ThreadItem` per id and applies deltas *to that
- * item*, then re-runs `mapItem`. `started`, `delta`, and `completed` are the
- * same code path with a different input item.
+ * DESIGN's assembly rules ("Codex `ThreadItem` -> `AgentMessage` mapping")
+ * hold by keeping the latest `ThreadItem` per `itemId`, applying each delta
+ * to that item and re-running `mapItem`, so `item/started`, a delta and
+ * `item/completed` are one code path with a different input item.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
