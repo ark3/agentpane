@@ -5256,8 +5256,9 @@ Batch Emacs has no text terminal and makes no child frame, so
 (defmacro agentpane-test--submitting (&rest body)
   "Run BODY in a transcript buffer attached under the handle \"h1\", not
 shown in any window, with every request answered as
-`agentpane-test--forking' answers it, an attach naming that handle, and no
-turn marked done.  `status' is bound to a function that
+`agentpane-test--forking' answers it, an attach naming that handle, no
+turn marked done, and the indicator's `global-mode-string' put back as it
+was afterwards.  `status' is bound to a function that
 delivers a `session/status' under the handle the buffer holds, reading
 streaming when its argument is non-nil, and `submit' to one that types a
 prompt and sends it, and `ended' to one that delivers the helper's
@@ -5266,6 +5267,7 @@ when its argument is non-nil."
   (declare (indent 0))
   `(let ((ref '(:backend "codex" :id "t1"))
          (agentpane--turns-done nil)
+         (global-mode-string global-mode-string)
          (agentpane--finished-turns (make-hash-table :test #'equal)))
      (agentpane-test--with-helper
        (agentpane-test--forking nil
