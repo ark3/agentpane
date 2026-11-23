@@ -1850,7 +1850,7 @@
 						popovertarget="tools-menu"
 						popovertargetaction="hide"
 						onclick={compactSession}
-						disabled={view.state.selected === null || view.compacting || compaction !== null}
+						disabled={view.state.selected === null || view.compacting || compaction !== null || streamingNow}
 					>Compact</button>
 					<button
 						type="button"

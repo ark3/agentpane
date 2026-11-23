@@ -3089,6 +3089,19 @@ describe("App", () => {
 		expect(controller.submitted).toBe(0);
 	});
 
+	// Every backend refuses a compaction mid-turn, and on Pi one sent there was a Stop (D16).
+	it("disables Compact while the selected session streams, and enables it once the turn settles", async () => {
+		const controller = new FakeController(view({ busy: "idle", state: compactingState(null, true) }));
+		render(App, { props: { controller } });
+		const compact = () => screen.getByRole("menuitem", { name: "Compact", hidden: true });
+
+		expect(compact()).toBeDisabled();
+
+		controller.publish(view({ busy: "idle", state: compactingState(null) }));
+		await tick();
+		expect(compact()).toBeEnabled();
+	});
+
 	it("gives compaction precedence over isStreaming: no Stop control while it runs (OW-natiha)", async () => {
 		// Codex and Claude keep `isStreaming` true on the wire through a
 		// compaction, but that turn is not user-stoppable.
