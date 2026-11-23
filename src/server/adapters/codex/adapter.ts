@@ -182,27 +182,24 @@ export class CodexAdapter implements BackendAdapter {
 	private starting: { method: string; resolve: () => void; reject: (error: Error) => void } | null = null;
 	private model: string | null = null;
 	/**
-	 * The effort sent on every `turn/start` like `model` --
-	 * `TurnStartParams.effort` is the only way to set one, overriding it "for
-	 * this turn and subsequent turns". `setEffort` sets it, and so do a resume
-	 * and a fork, from the effort the store's last turn ran at (D23): the
-	 * rollout's last `turn_context`, for a fork the last one it kept of its
-	 * parent's. The model that turn ran goes into `model` the same way. A fork
-	 * that keeps no turn has none to read and is started with the parent's pair
-	 * instead (`fork`, OW-hojefo). Null when neither has named one, and then
-	 * nothing is sent and the thread runs at what `thread/start` or
-	 * `thread/resume` reported, which is what `getState` names instead.
+	 * The effort sent on every `turn/start`, like `model`:
+	 * `TurnStartParams.effort` is the only way to set one. `setEffort` sets it,
+	 * and a resume or a fork sets it from the store's last `turn_context`
+	 * (D23), the model that turn ran going into `model` unless one was chosen
+	 * at start; a fork that keeps no turn takes the parent's pair instead
+	 * (`fork`, OW-hojefo). While null nothing is sent, and `getState` names
+	 * what `thread/start` or `thread/resume` reported.
 	 *
-	 * Re-asserted from the store rather than left to Codex, because what Codex
-	 * keeps depends on the path. As of `codex-cli 0.156.0`
-	 * (`docs/MANUAL_TESTING.md`, OW-sayaju): a `thread/resume` naming no model
-	 * answered the model and effort of the last turn; one that named the model
-	 * answered the config's effort and wrote it to the rollout as
-	 * `thread_settings_applied`, where a later resume naming none restored it
-	 * though no turn had run at it; and `thread/fork` carried neither, so the
-	 * fork, its borrower's resume, and a turn naming only the model ran at the
-	 * config's pair. So the store's model is applied after the resume and rides
-	 * `turn/start`, never `thread/resume`.
+	 * Re-asserted from the store because what Codex keeps depends on the path.
+	 * As of `codex-cli 0.156.0` (`docs/MANUAL_TESTING.md`, OW-sayaju): a
+	 * `thread/resume` naming no model answered the model and effort of the last
+	 * turn; one that named the model answered the config's effort and wrote it
+	 * to the rollout as `thread_settings_applied`, where a later resume naming
+	 * none restored it though no turn had run at it; and `thread/fork` carried
+	 * neither, so the fork, its borrower's resume, and a turn naming only the
+	 * model ran at the config's pair. So the store's model is applied after the
+	 * resume and rides `turn/start`, never `thread/resume` (docs/BACKENDS.md,
+	 * "Model, provider and effort the reducer names").
 	 */
 	private effort: string | null = null;
 	/**
@@ -379,31 +376,23 @@ export class CodexAdapter implements BackendAdapter {
 	}
 
 	/**
-	 * Start as a fork driven over the parent's app-server.
+	 * Start over a connection another adapter opened: as a fork's borrower, or
+	 * as a `reattach` of a thread that app-server already holds (`start`).
+	 * No `initialize`: that handshake is per connection and was made, and a
+	 * second one on the same connection has never been measured.
 	 *
-	 * No `initialize`: that handshake is per connection and the parent already
-	 * made it, and a second one on the same connection has never been measured.
-	 * What remains is real work -- resume the thread, hydrate the transcript the
-	 * fork inherited, and read from the store the model and effort its kept
-	 * prefix last ran, which `thread/fork` does not carry (see `effort`).
+	 * A `reattach` is refused `TurnRunningError` when the resume reads the
+	 * thread `active`, before anything is read or hydrated: its turn may be
+	 * running, and this adapter heard none of it (D34 point 1). As of
+	 * `codex-cli 0.170.0`, as on `0.156.0`, that resume read `{"type":
+	 * "active"}` mid-turn, named no turn and replayed no `turn/started`
+	 * (docs/BACKENDS.md, "The running turn at a re-attach"). A fork's first
+	 * attach is not refused: its thread can be running no turn, and what its
+	 * resume reads was never measured.
 	 *
-	 * A `reattach`, of a thread the app-server held before this adapter, is
-	 * refused `TurnRunningError` when the resume reads the thread `active`,
-	 * before anything is read or hydrated: its turn may be running, and this
-	 * adapter heard none of it (D34 point 1). As of `codex-cli 0.170.0`, as on
-	 * `0.156.0`, that resume read `{"type": "active"}` mid-turn, named no turn
-	 * and replayed no `turn/started` (docs/MANUAL_TESTING.md, ark3/agentpane#78).
-	 * A fork's first attach is not refused: its thread can be running no turn,
-	 * and what its resume reads was never measured.
-	 *
-	 * Identity is NOT seeded here. `adoptConnection` did that synchronously at
-	 * fork time, because the shared line stream reaches this adapter from that
-	 * moment and the reducer's cross-thread guard is only armed once `threadId`
-	 * is set; see `adoptConnection`.
-	 *
-	 * A rejection leaves the share held. The caller disposes -- `SessionManager`
-	 * `#start` reaps a failed start through `#terminate` -- and that is what
-	 * releases it.
+	 * Identity is seeded before this, by `adoptConnection`; see there. A
+	 * rejection leaves the share held, for the caller's disposal to release
+	 * (`SessionManager.#start` reaps a failed start through `#terminate`).
 	 */
 	private async startBorrowed(chosenModel: string | undefined, reattach = false): Promise<void> {
 		const holder = this.holder;
@@ -561,36 +550,19 @@ export class CodexAdapter implements BackendAdapter {
 			input.push({ type: "image", url: `data:${image.mimeType};base64,${image.base64}` });
 		}
 		// D16: a prompt submitted mid-turn steers that turn. As of codex-cli
-		// 0.154.0 (OW-tifuha, `docs/MANUAL_TESTING.md`), `turn/steer` into a
-		// streaming turn returned that same turn id, and the steered
-		// `userMessage` and the answering `agentMessage` both arrived under it
-		// -- one `turn/completed`, no second turn.
+		// 0.154.0, `turn/steer` into a streaming turn returned that same turn
+		// id, and the steered `userMessage` and its answer both arrived under
+		// it, with one `turn/completed` (docs/BACKENDS.md;
+		// `docs/MANUAL_TESTING.md`, OW-tifuha).
 		//
-		// `expectedTurnId` is a precondition app-server enforces, so this needs
-		// a turn id it knows is live: `turnId` is exactly that, set only from
-		// `turn/started` (see `turnId`). Between a `turn/start` and its
-		// `turn/started` there is no id to steer with, and the gate above
-		// refuses; `SessionManager.#serially` holds the next prompt until
-		// `submit` answers, which is not before then.
-		//
-		// A compaction is the one live turn that must not be steered: `compact` is
-		// one of the two `NonSteerableTurnKind`s, and a compaction runs as its own
-		// turn (`resources/fixtures/codex/compact.jsonl` -- a `turn/started`
-		// brackets the `contextCompaction` item), so `turnId` names a turn
-		// app-server will refuse. The client disables Send while compaction is
-		// showing, but a threshold compaction nobody asked for, a second client,
-		// and a prompt written straight to the socket all reach here; without
-		// this the well-defined "busy" becomes an opaque wire error, as
-		// `compact`'s own guard below also prevents.
-		// A turn this adapter has already interrupted is the other live turn that
-		// must not be steered (OW-pefawi). `abort()` sends `turn/interrupt` and
-		// only `turn/completed` clears `turnId`, so between the two this still
-		// holds an id -- and `expectedTurnId` is a precondition app-server checks
-		// against the *currently active* turn (`resources/codex-protocol/v2/
-		// TurnSteerParams.ts`), which a turn being torn down is not. Stop-then-send
-		// is an ordinary gesture, so the window is reachable by hand; refusing here
-		// gives the well-defined "busy" instead of spending a round trip to
-		// translate app-server's error text back into one.
+		// `expectedTurnId` must name the turn app-server holds active
+		// (`resources/codex-protocol/v2/TurnSteerParams.ts`), so two turns
+		// `turnId` still names are refused here, with this adapter's error
+		// rather than app-server's opaque one: one it interrupted, until its
+		// `turn/completed` (OW-pefawi), and a compaction, a `NonSteerableTurnKind`
+		// run as a turn of its own (`resources/fixtures/codex/compact.jsonl`),
+		// which a threshold, a second client or the socket can start though the
+		// client holds Send.
 		if (this.turnId && this.interruptedTurnId === this.turnId) {
 			throw new Error(TURN_INTERRUPTED_ERROR);
 		}
@@ -721,22 +693,17 @@ export class CodexAdapter implements BackendAdapter {
 	 * `{ threadId }`, response an empty object -- OW-72, verified against
 	 * codex-cli 0.147.0's generated schema).
 	 *
-	 * Refused while a turn is active, though `submit()` steers one (OW-tifuha):
-	 * `compact` is one of the two
-	 * `NonSteerableTurnKind`s, so there is no steering a compaction into a
-	 * running turn, and app-server will not start a second turn while one runs.
-	 * Admitting the request here only to have app-server reject it would turn a
-	 * well-defined "busy" into an opaque wire error. So it is refused while the
-	 * gate holds or `turnId` names a turn, as a `turn/start` would be.
-	 *
+	 * Refused while the gate holds or a turn runs, as a `turn/start` would
+	 * be, rather than with app-server's opaque error: a compaction cannot be
+	 * steered into a running turn (see `submit`), and app-server will not
+	 * start a second turn while one runs.
 	 * The compaction runs as a turn of its own, and this answers once its
-	 * `turn/started` has come, behind the same gate as `submit`'s, so a prompt
-	 * in the window between the reply and that event is refused rather than
-	 * taking the compaction's `turn/started` for its own.
+	 * `turn/started` has come, behind `submit`'s gate, so no prompt takes that
+	 * `turn/started` for its own.
 	 *
 	 * A compaction refused, or whose `turn/started` missed the deadline, takes
-	 * its `"requesting"` with it, since that is the request's and no event's,
-	 * and would otherwise keep the session compacting with nothing running.
+	 * its `"requesting"` with it: that is the request's, and no event would
+	 * clear it.
 	 */
 	async compact(): Promise<void> {
 		const client = this.requireClient();
@@ -760,28 +727,17 @@ export class CodexAdapter implements BackendAdapter {
 	readonly forkStopsTurn = false;
 
 	/**
-	 * One fork point per turn, labelled with that turn's *first* user message
-	 * and carrying that message's index in the flat transcript.
+	 * One fork point per turn, its id the turn's, labelled with that turn's
+	 * *first* user message and carrying that message's index in the flat
+	 * transcript: Codex forks at turn granularity (`ThreadForkParams.lastTurnId`),
+	 * and `thread/rollback` is gone from the `codex-cli 0.156.0` bindings. A
+	 * message steered into a turn (D16) cannot be cut before, so it gets no
+	 * point and no Edit (OW-roveze).
 	 *
-	 * Codex forks at *turn* granularity (`ThreadForkParams.lastTurnId`), not at
-	 * item granularity, so a fork point is a turn id even though the UI shows
-	 * the user message inside it. `thread/rollback` -- DESIGN's other
-	 * suggestion -- is gone from the `codex-cli 0.156.0` bindings and is not
-	 * used here.
-	 *
-	 * A turn can hold more than one user message: steering a running turn
-	 * (D16) appends a second `userMessage` item to it, and `mapping.ts` gives
-	 * that its own `role: "user"` transcript message. One point per turn is
-	 * still right -- the backend cannot cut between them -- so the steered
-	 * message simply gets no point, and the UI offers no Edit on it
-	 * (OW-roveze). Folding it into the turn's first message instead would hide
-	 * a steer that really shipped.
-	 *
-	 * The index comes from the reducer's own slot map, never from a position
-	 * within `turn.items`; see `CodexReducer.indexOfItem`. The turns read
-	 * here are a fresh fetch while the reducer holds the live stream, so the two
-	 * can disagree about a just-started turn: a slot miss drops the point, which
-	 * costs an Edit affordance and never mis-places one.
+	 * The index comes from the reducer's slot map (`CodexReducer.indexOfItem`),
+	 * never a position within `turn.items`. These turns are a fresh fetch while
+	 * the reducer holds the live stream, so a just-started turn can miss its
+	 * slot, which drops its point and never mis-places one.
 	 */
 	async listForkPoints(): Promise<ForkPoint[]> {
 		const client = this.requireClient();
@@ -950,14 +906,10 @@ export class CodexAdapter implements BackendAdapter {
 	 *
 	 * The name is taken from the `thread/name/updated` it also sends, not from
 	 * its `{}` reply (D34 point 5), and this resolves once both have arrived,
-	 * so the session's update goes out before the command's reply as D31
-	 * orders them. On `codex-cli 0.154.0`, and mid-turn on `0.160.0`, the
-	 * event came after the reply (docs/MANUAL_TESTING.md, "All three backends
-	 * rename an attached session over the wire" and OW-kametu); the wait is
-	 * armed before the request, so either order resolves it. App-server
-	 * exiting, or the adapter being disposed, rejects the wait, and so does
-	 * `eventTimeoutMs` passing with the reply or the event still to come
-	 * (`withinDeadline`).
+	 * so the session's update goes out before the command's reply (D31 point
+	 * 3); the order they came in is docs/BACKENDS.md's, "Name after a rename".
+	 * App-server exiting, the adapter's disposal, or `eventTimeoutMs` passing
+	 * first rejects it (`withinDeadline`).
 	 *
 	 * Refused while the transcript is empty, which stands in for a thread not
 	 * yet prompted: as of `codex-cli 0.160.0` a rename on one wrote a
@@ -965,8 +917,7 @@ export class CodexAdapter implements BackendAdapter {
 	 * no rollout, both outliving the process, which is the empty session D9
 	 * promises opening one never leaves behind (docs/MANUAL_TESTING.md,
 	 * OW-kametu). A first turn whose user message has not reached the reducer
-	 * is empty too, and is refused with it; both clients withhold Rename then
-	 * anyway, as mid-turn, and on an empty transcript as here.
+	 * is refused too; both clients withhold Rename then anyway.
 	 */
 	async setName(name: string): Promise<void> {
 		if (this.reducer.getState().messages.length === 0) {
