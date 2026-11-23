@@ -81,6 +81,8 @@
 ;; arrives without it.  The
 ;; buffer drops it without waiting only when `C-c C-d' in the transcript
 ;; buffer dismisses it.
+;; A session whose backend's process died is left detached, its death
+;; report drawn on that line until `C-c C-d' clears it.
 ;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' and
 ;; `M-x agentpane-set-effort' set the model and its reasoning effort, but
 ;; only before the first prompt.
@@ -658,7 +660,9 @@ recorded, draws what is recorded first, so it finds the buffer as it
 would have had each node been drawn on arrival.
 A `session/detached' says the helper sends nothing more under the handle
 the buffer holds, the server having let go of it or its `seq' having
-gapped, and the buffer lets go of it too; see `agentpane--let-go'.
+gapped, and the buffer lets go of it too; see `agentpane--let-go'.  Its
+`exit', the death report of a backend whose process exited on its own,
+is drawn as the buffer's error line; see `agentpane--error'.
 A `session/forkPoints' is the set the buffer marks and edits from; see
 `agentpane--forkable'.
 A `session/turnEnded' is read before any buffer is looked for, since it
@@ -694,7 +698,10 @@ comes for sessions no buffer shows as well; see `agentpane--turn-ended'."
             ('session/errorCleared (agentpane--hold-error nil))
             ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))
             ('session/forkPoints (agentpane--hold-forkable params))
-            ('session/detached (agentpane--let-go)))))))))
+            ('session/detached
+             (agentpane--let-go)
+             (when (plist-get params :exit)
+               (agentpane--hold-error (plist-get params :exit)))))))))))
 
 (defun agentpane--let-go ()
   "Let go of the handle this buffer holds, which will say nothing more to
@@ -1011,14 +1018,17 @@ The server announces every clear with a `session/errorCleared'
 \(OW-jopifu), and the socket is one ordered stream, so that clear
 always follows the stale snapshot and the line the stale one draws is
 transient; the buffer keeps no send-time state to second-guess a snapshot
-\(OW-sedosu).")
+\(OW-sedosu).
+A `session/detached' carrying `exit' sets it to that death report, with
+no `agentpane--error-id': the server let go of the session and holds no
+error for it, so the buffer alone holds this one.")
 
 (defvar-local agentpane--error-id nil
   "The `errorId' the server named `agentpane--error' by, set with it.
 Two errors with the same text are two errors, and this is how the buffer
 names the one it shows to `sessions/dismissError', and to
 `sessions/prompt' as the one held when the prompt was sent (OW-jokoto).
-It names nothing while `agentpane--error' is nil.")
+It names nothing while `agentpane--error' is nil or a death report.")
 
 (defvar-local agentpane--streaming nil
   "Non-nil while the last status this buffer heard said a turn is streaming.")
@@ -3129,18 +3139,24 @@ The server holds the error for every later snapshot (OW-bipume), so it is
 told, naming the one the buffer holds by `agentpane--error-id', so that a
 newer one survives, even one with the same text (OW-jokoto); the buffer
 clears it at once, as the browser's banner goes before its dismissal has
-answered (OW-desufa)."
+answered (OW-desufa).
+A death report, which names no `errorId', is cleared without telling the
+server, which let go of the session.  Any other error in a buffer holding
+no handle is refused: the server may still hold it, and only an attached
+buffer can name it there."
   (interactive)
   (with-current-buffer (agentpane--transcript)
     (unless agentpane--error
       (user-error "No turn error to dismiss"))
-    (unless agentpane--handle
-      (user-error "This session is not attached; attach it to dismiss its error"))
-    (agentpane--request 'sessions/dismissError
-                        (list :session (agentpane--ref agentpane--session)
-                              :view agentpane--view
-                              :errorId agentpane--error-id)
-                        #'ignore t)
+    (cond
+     (agentpane--handle
+      (agentpane--request 'sessions/dismissError
+                          (list :session (agentpane--ref agentpane--session)
+                                :view agentpane--view
+                                :errorId agentpane--error-id)
+                          #'ignore t))
+     (agentpane--error-id
+      (user-error "This session is not attached; attach it to dismiss its error")))
     (agentpane--hold-error nil)))
 
 (defun agentpane--read-model (backend)

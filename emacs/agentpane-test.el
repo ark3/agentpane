@@ -1288,6 +1288,39 @@ again."
       (agentpane-refetch)
       (should (equal sent `((sessions/preview :session ,ref)))))))
 
+(ert-deftest agentpane-test-detached-draws-the-death-report-it-carries ()
+  "A `session/detached' carrying `exit', the death report of a backend
+whose process exited on its own, draws it once as the buffer's error
+line, which outlasts a later let-go; `C-c C-d' then clears it, sending
+nothing, as the server holds no error for a session it let go of.  One
+carrying no `exit', as the helper sends for a close or a gap, draws
+nothing (ark3/agentpane#110)."
+  (let ((ref '(:backend "pi" :id "real-1"))
+        (report "Pi process exited (code=1, signal=null)"))
+    (dolist (exit (list report nil))
+      (agentpane-test--with-helper
+        (agentpane-test--forking nil
+          (setq attached (list :ref ref :handle "h1"))
+          (with-current-buffer (agentpane--transcript-buffer (list :ref ref))
+            (agentpane--attach)
+            (agentpane--on-notification
+             agentpane--connection 'session/detached
+             (append (list :view agentpane--view :session ref :handle "h1")
+                     (and exit (list :exit exit))))
+            (should-not agentpane--handle)
+            (should-not (agentpane--attached-p))
+            (should (equal (agentpane-test--warnings) (and exit (list exit))))
+            (agentpane--let-go)
+            (should (equal (agentpane-test--warnings) (and exit (list exit))))
+            (when exit
+              (setq sent nil
+                    said nil)
+              (call-interactively (key-binding (kbd "C-c C-d")))
+              (should-not (agentpane-test--warnings))
+              (should-not agentpane--error)
+              (should-not sent)
+              (should-not said))))))))
+
 (ert-deftest agentpane-test-detached-buffer-takes-the-handle-its-reattach-answers-under-a-new-ref ()
   "The attach `a' sends from a buffer told its handle is gone, answered
 under a new handle and a ref the buffer never heard -- a rename it missed
@@ -3167,8 +3200,9 @@ required and must be a string\" (D31 point 9, ark3/agentpane#63)."
     (should (equal (agentpane-test--draft) "Fix the bug properly"))))
 
 (ert-deftest agentpane-test-live-requests-from-a-detached-buffer-refuse ()
-  "A stop or an error's dismissal from a buffer holding no handle, as a
-helper's death, a gap or an `ended' leaves one, is refused here in
+  "A stop, or the dismissal of an error the server named, from a buffer
+holding no handle, as a helper's death, a gap or an `ended' leaves one,
+is refused here in
 agentpane-mode's own words and sends nothing; the helper would refuse
 each `not_attached', and until ark3/agentpane#70, with a null handle,
 the server refused each as \"handle is required and must be a string\"
