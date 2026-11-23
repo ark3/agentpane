@@ -306,20 +306,11 @@ interface PendingStart {
 }
 
 /**
- * What a fork's own start is handed, from what `adapter.fork` returned, for a
- * fork the session index cannot answer for or cannot be opened from (D35
- * point 6): `start`, the `StartOptions` that open it, and `adapter`, the
- * fork's own adapter where only its parent could build one. Two backends
- * need it, for different reasons:
- *
- *  - Claude Code's fork spawns nothing, so no store file can exist when it
- *    returns (OW-razoki), and `#start`'s index lookup would throw
- *    `UnknownSessionError`. It hands over `start` alone.
- *  - Codex's fork IS on disk, but only the app-server that minted it may
- *    open it (`codex-cli` 0.154.0, OW-lajehi), so it hands over `adapter`
- *    too, already holding a share of the parent's child. A Codex fork that
- *    keeps no turn is minted by nothing until its start, and hands over
- *    `start` alone, as Claude Code's does (OW-hojefo).
+ * What a fork's own start is handed, from a `ForkResult` carrying `start`,
+ * for a fork the session index cannot answer for or cannot be opened from
+ * (D35 point 6); `ForkResult` says which forks carry which, and why. A Claude
+ * Code fork has no store file yet when it returns (OW-razoki), so `#start`'s
+ * index lookup would throw `UnknownSessionError`.
  *
  * Nothing holds it beyond the one start it is handed to: a fork whose start
  * fails leaves nothing, as a create does (D30), and nothing reaches it
@@ -659,67 +650,47 @@ export class SessionManager {
 
 	/**
 	 * Run one of a session's mutating verbs once every verb queued on it before
-	 * has settled (D24). Five verbs join: `submit`, `setModel`,
-	 * `setEffort`, `setName` and `compact`, and `forkAndPrompt` joins as a
-	 * `fork`, its first half, and then as a `submit` on the fork. Every command runs
-	 * as its frame arrives, beside any still running, and any number of
-	 * clients can drive one session, so without this two of them overlap on
-	 * one adapter -- two
-	 * `setModel`s sharing Pi's one `settingModel` flag (OW-woyifu), or an
-	 * effort checked against the model a set-model in flight is replacing
-	 * (OW-zayefe).
+	 * has settled (D24). Every command runs as its frame arrives, and any
+	 * number of clients can drive one session, so without this two verbs
+	 * overlap on one adapter -- two `setModel`s sharing Pi's one
+	 * `settingModel` flag (OW-woyifu), or an effort checked against the model
+	 * a set-model in flight is replacing (OW-zayefe).
 	 *
-	 * It orders admission and nothing more. `submit` settles when the backend
-	 * admits the turn, not when the turn ends, so nothing here waits behind a
-	 * running turn and D16 stands as the adapters implement it. It dedupes
-	 * nothing: the same prompt sent twice is admitted twice. The adapters' own
-	 * guards stay theirs, each closing a window that ends on a backend event
-	 * this cannot see. Admission is not quick everywhere, though: Pi answers
-	 * `compact` only once the compaction is done -- `pi 0.84.2`'s response comes
-	 * after `compaction_end` in `resources/fixtures/pi/compact.jsonl` -- so on
-	 * Pi whatever is queued behind a compaction waits for it (OW-jileku).
+	 * It orders admission and nothing more: `submit` settles when the backend
+	 * admits the turn, so nothing here waits behind a running turn (D16), and
+	 * the same prompt sent twice is admitted twice. The adapters' own guards
+	 * stay theirs, each closing a window that ends on a backend event this
+	 * cannot see. On Pi admission waits out a compaction: as of `pi 0.84.2`
+	 * the `compact` response comes after `compaction_end`
+	 * (`resources/fixtures/pi/compact.jsonl`), so whatever is queued behind
+	 * one waits for it (OW-jileku).
 	 *
 	 * Left out, each for its own reason:
 	 *
-	 *  - `abort`. It exists to reach a running turn, which is never an item here,
-	 *    so all it could wait behind is a settings call, a compaction or a fork,
-	 *    and a stop must not wait out a Pi compaction. The stop a "Stop and
-	 *    edit" sends at the press is not held behind the fork its send makes:
-	 *    harmless, since the fork abandons the turn (D15).
-	 *  - `listForkPoints`. A read: it changes nothing a verb here depends on,
-	 *    and its answer can be stale by the time a client acts on it whether or
-	 *    not it waits.
-	 *  - `attach`. It creates the adapter this queues on, and concurrent
+	 *  - `abort`, which exists to reach a running turn, never an item here, and
+	 *    must not wait out a Pi compaction. The stop a "Stop and edit" sends is
+	 *    not held behind the fork its send makes: harmless, since the fork
+	 *    abandons the turn (D15).
+	 *  - `listForkPoints`, a read whose answer can be stale by the time a
+	 *    client acts on it whether or not it waits.
+	 *  - `attach`, which creates the adapter this queues on; concurrent
 	 *    attaches already collapse onto one startup (`#attach`, `#start`).
-	 *    Only `sessions/attach`, `create`, a prompt that names a ref, and
-	 *    `forkAndPrompt` for the fork it made call it (D25, D30); every other
-	 *    command queues on an adapter already there, or is refused.
-	 *  - `close` and `disposeAll`. Teardown is ordered by `#disposing`,
-	 *    `#shuttingDown` and `#terminate`, and waits behind nothing. A
-	 *    verb still queued when it runs reaches the disposed adapter, as an
-	 *    overlapping one does; most verbs fail there, but a Codex
-	 *    set-model with no effort chosen only records the model and answers
-	 *    success.
+	 *  - `close` and `disposeAll`: teardown waits behind nothing (`#disposing`,
+	 *    `#shuttingDown`, `#terminate`). A verb still queued with no handle
+	 *    then reaches the disposed adapter; most fail there, but a Codex
+	 *    set-model with no effort chosen only records the model and succeeds.
 	 *
-	 * The container is taken at the call, and its adapter when the verb runs.
-	 * That split is what keeps a verb sent on a Pi parent's ref and queued
-	 * behind a fork of it off the fork, which the fork's split from a rename
-	 * (`#forkOnto`, OW-kekoji) says the parent's ref must never reach: the fork
-	 * takes the adapter onto a container of its own, the parent's container
-	 * keeps none, and the verb fails as a call on any detached session does
-	 * (OW-suyinu). The queue itself follows the adapter onto the fork's
-	 * container, so a verb sent on the fork's ref while the fork verb is still
-	 * running waits for it, and the parent's queued verbs, ahead of it on the
-	 * same chain, fail first. A verb sent on the parent's ref after the fork
-	 * misses `#lookup`.
+	 * The container is taken at the call and its adapter when the verb runs,
+	 * so a verb queued on a Pi parent behind a fork of it fails for want of an
+	 * adapter rather than reaching the fork, which the parent's ref must never
+	 * reach (`#forkOnto`, OW-kekoji); `ManagedSession.queue` says where the
+	 * queue goes.
 	 *
-	 * A verb sent for a `handle` runs only on the container under it, and only
-	 * while that container is still in the table, at the call and again when
-	 * the verb runs; otherwise it is refused with `HandleEndedError` (D30). Every
-	 * command on a live session names one (D31 point 9), and a prompt naming a
-	 * ref is sent for the handle its attach landed on (`attachAndSubmit`). So a
-	 * close that lands while it waits in the queue refuses it, where without a
-	 * handle it reaches the disposed adapter, as above.
+	 * A verb sent for a `handle` runs only while the container under it is in
+	 * the table, checked at the call and again when the verb runs, and is
+	 * otherwise refused with `HandleEndedError` (D30). Every command on a live
+	 * session names one (D31 point 9), so a close landing while one waits
+	 * refuses it.
 	 */
 	async #serially<T>(
 		ref: SessionRef,
@@ -765,26 +736,14 @@ export class SessionManager {
 		return this.#serially(ref, async (session, adapter) => {
 			this.#active(session);
 			this.markPrompted(session.ref);
-			// The session's error goes once the next prompt is admitted and has
-			// started or joined a turn, unless a newer one landed meanwhile
-			// (OW-31). A prompt the backend handled without a turn keeps it, since
-			// nothing replaced what it explained (D3, OW-fakazi). No client clears
-			// the error at its prompt's reply, each drops it at the `error-cleared`
-			// below (OW-lohubo).
-			// `priorError` is the id of the error the sender held when the user
-			// sent, null for none (`PromptRequest.priorErrorId`, OW-jokoto): an
-			// error raised after that, by the start of an attach the send made or
-			// while the request was on its way, is newer than the prompt, and
-			// nobody had seen it to clear. A caller that names none gets what the
-			// server holds now. It is compared by id, not text, because a newer
-			// error can repeat the held one word for word, and one can land before
-			// `adapter.submit` resolves (OW-lameke): Pi's and Codex's adapters both
-			// handle backend events while awaiting a reply -- the `prompt`
-			// command's, and for a Pi id not yet resolved a `get_state` after it
-			// (`PiAdapter.submit`); `turn/start`'s or, steering a live turn (D16),
-			// `turn/steer`'s (`CodexAdapter.submit`) -- so a steered turn that
-			// fails the way the last one did is raised inside it. Claude Code's
-			// admission is a synchronous stdin write, so its adapter cannot.
+			// The session's error goes as `PromptRequest.priorErrorId` says: once
+			// the prompt has started or joined a turn, and only if it is still the
+			// one the sender held. A handled prompt keeps it, since nothing replaced
+			// what it explained (D3, OW-fakazi). Compared by id, not text: a newer
+			// error can repeat the held one word for word, and can land before
+			// `adapter.submit` resolves, as Pi's and Codex's adapters handle backend
+			// events while awaiting the reply (OW-lameke). Clients drop their copy
+			// at the `error-cleared` below, not at the reply (OW-lohubo).
 			const disposition = await adapter.submit(text, images);
 			// A container `close` took out of the table while the prompt was being
 			// admitted is past announcing: its handle is forgotten, and an event
@@ -836,43 +795,14 @@ export class SessionManager {
 	 * Fork a session from a past entry, as `forkAndPrompt` does, without the
 	 * fork point's lookup or the prompt. No command reaches this one, since the
 	 * plain fork is off the wire (D33); it is the seam the tests of forking
-	 * drive. Like `submit`, this goes through the
-	 * manager rather than straight at the adapter because it queues
-	 * (`#serially`), and because two of the backends hand back something the
-	 * fork's own start needs (`ForkStart`), which this starts at once, as
-	 * `forkAndPrompt` does (`#attachFork`). The backends are asymmetric:
+	 * drive. Like `submit`, it goes through the manager because it queues
+	 * (`#serially`), and a fork that hands back a `start` (`ForkResult`) is
+	 * started at once, as `forkAndPrompt`'s is (`#attachFork`).
 	 *
-	 *  - Pi's `fork` is copy-on-write: the process's active `sessionFile` MOVES to
-	 *    a new file, so the adapter announces a `"fork"` through `onRefChanged`
-	 *    and `#forkOnto` moves the adapter onto a container of its own, before
-	 *    the adapter re-sends the model and level and hydrates the fork's
-	 *    transcript -- so what it emits from there goes out under the fork's
-	 *    ref and handle, never the parent's (OW-zovaye). Nothing
-	 *    under the parent's handle names the fork -- see `#forkOnto`. The value
-	 *    the adapter returns IS its new ref.
-	 *  - Codex's `thread/fork` mints a new thread the current adapter is NOT
-	 *    driving; its own `ref` is unchanged and it announces nothing. The returned
-	 *    ref points at the freshly-flushed forked thread, which differs from
-	 *    `adapter.ref` -- so we hand back what `adapter.fork` gave us, not
-	 *    `session.ref`. Only the app-server that minted that thread may open it
-	 *    (OW-lajehi), so `fork()` also hands over the fork's own adapter, already
-	 *    sharing the parent's connection, with the resume that starts it. A
-	 *    fork at the first user message is the exception: no `thread/fork`
-	 *    keeps nothing, so it takes Claude Code's path below, and its start
-	 *    renames its placeholder ref to the thread its `thread/start` names, as
-	 *    a virtual session's is (OW-hojefo).
-	 *  - Claude Code's `fork` takes Codex's path -- its own ref is unchanged and
-	 *    the parent keeps its child and its turn (OW-razoki) -- but nothing has
-	 *    recorded the fork yet, so it also hands back the `StartOptions` its own
-	 *    adapter must be started with.
-	 *
-	 * Where the ref DOES change, which is Pi alone, the live adapter is driving
-	 * the FORK from there on and the parent is left detached -- still on disk,
-	 * still listed, still attachable, but its live container is gone. That is
-	 * why the adapter says `"fork"`: unlike a rename, the parent's id must not
-	 * become the fork's name (`#forkOnto`, OW-kekoji). The ref this answers is
-	 * read from the fork's container where its own start ran, so a rename
-	 * inside that start is the ref answered (`#attachFork`).
+	 * Answers the fork's ref: for a Pi fork, which moves the live adapter onto
+	 * it (`BackendAdapter.fork`, `#forkOnto`), the one `adapter.fork` returned;
+	 * for a fork with a `start`, its container's, so a rename inside that
+	 * start is the ref answered (OW-hojefo).
 	 */
 	async fork(ref: SessionRef, entryId: string, handle?: string): Promise<SessionRef> {
 		const forked = await this.#serially(ref, (_session, adapter) => adapter.fork(entryId), handle);
@@ -905,28 +835,26 @@ export class SessionManager {
 	 * An edit of an earlier message, as one operation (D30): fork at the user
 	 * message whose transcript index is `index`, attach the fork, and prompt it.
 	 *
-	 * The index is resolved against the adapter's fork points and the fork is
-	 * made in one item on the parent's queue (`#serially`), so nothing queued
-	 * on the session lands between the two, nor between the stop a Pi fork
-	 * makes and the fork itself (`BackendAdapter.forkStopsTurn`). An index no
-	 * point names is refused with nothing forked (D20).
+	 * The index is resolved and the fork made in one item on the parent's
+	 * queue, so nothing queued on the session lands between the two, nor
+	 * between the stop a Pi fork makes and the fork itself
+	 * (`BackendAdapter.forkStopsTurn`). An index no point names is refused
+	 * with nothing forked (D20).
 	 *
-	 * The attach and the prompt come after that item has settled, not inside
-	 * it: a Pi fork's container shares the parent's queue (`#forkOnto`), so a
-	 * prompt queued inside the item would wait on the item itself. The prompt
-	 * goes to the container the attach answered, for its handle, never by the
-	 * ref `adapter.fork` returned: a Codex fork that keeps no turn is renamed
-	 * off that placeholder inside its start, after which it reaches nothing
-	 * (OW-hojefo, D35 point 1).
+	 * The attach and the prompt come after that item has settled: a Pi fork's
+	 * container shares the parent's queue (`#forkOnto`), so a prompt queued
+	 * inside the item would wait on the item itself. The prompt goes to the
+	 * container the attach answered, for its handle, never by the ref
+	 * `adapter.fork` returned, which a Codex fork that keeps no turn is renamed
+	 * off inside its start (OW-hojefo, D35 point 1).
 	 *
-	 * Admitting the prompt clears no turn error, since nobody has seen one on
-	 * the fork: one its start raised stays up (OW-jokoto). A failure once the
-	 * fork's attach has published is `ForkNotPromptedError`, naming it, and so
-	 * is a Pi fork's after it moved; nothing is removed (D17). A fork whose
-	 * own start fails leaves nothing, as a create does, and is refused with
-	 * that failure alone, naming no fork, so each client stays on the parent
-	 * with the edit open (D30, D35 point 6). A Codex fork's file, written
-	 * before that start, stays on disk, an orphan D17 accepts.
+	 * The prompt clears no turn error, since nobody has seen one on the fork
+	 * (OW-jokoto). A failure once the fork's attach has published, or a Pi
+	 * fork's after it moved, is `ForkNotPromptedError`, naming the fork, which
+	 * stays (D17). A fork whose own start fails leaves nothing, as a create
+	 * does, and is refused with that failure alone, so each client stays on the
+	 * parent with the edit open (D30, D35 point 6); a Codex fork's file,
+	 * written before that start, stays on disk, an orphan D17 accepts.
 	 */
 	async forkAndPrompt(
 		ref: SessionRef,
@@ -999,30 +927,21 @@ export class SessionManager {
 	}
 
 	/**
-	 * A rename: one conversation took a new id, announced by its adapter through
-	 * `onRefChanged` as it moves and before it emits anything under the new id
-	 * (D24). Every backend replaces a `virtual` session's minted id at attach,
-	 * a Pi that named no file at start names one at the first prompt, because
-	 * Pi's session id IS its JSONL path (D9), and Claude Code would whenever a
-	 * turn's `init` named another. The new id replaces the old as the
-	 * container's one name, and the old reaches nothing from here (D35 point
-	 * 1); nothing is re-keyed, since the handle the table is keyed by does not
-	 * move (OW-suyinu). Only a container in the table is in `#names`, and the
-	 * old entry goes only while it still names this one; a new one that
-	 * another container holds is taken over.
+	 * A rename: one conversation took a new id, as `onRefChanged` announces it
+	 * (`BackendAdapter.onRefChanged` says when each backend does). The new id
+	 * replaces the old as the container's one name, and the old reaches
+	 * nothing from here (D35 point 1); the handle the table is keyed by does
+	 * not move, so nothing is re-keyed (OW-suyinu). Only a container in the
+	 * table is in `#names`; its old entry goes only while it still names this
+	 * one, and a new one another container holds is taken over. On the wire it
+	 * is the list invalidation and a snapshot under the handle (`ServerEvent`).
 	 *
-	 * On the wire a rename is the list invalidation and a snapshot under the
-	 * handle, carrying the new ref; every client keys a live session by the
-	 * handle and takes the ref from any event under it, so nothing else is
-	 * said (OW-mofuho).
-	 *
-	 * `announce` is false for a rename inside `start()`: the name is moved at
-	 * once, so an attach under it finds the one startup, but
-	 * nothing goes on the wire until the start can no longer fail, and then
-	 * `attach` says it, in the `sessionsChanged` and snapshot it sends for every
-	 * start. The snapshot alone would not need it -- the snapshot source
-	 * answers nothing for a container with no adapter published, so it would
-	 * not go out -- but the `sessionsChanged` would send every client to a
+	 * `announce` is false for a rename inside `start()`: the name moves at
+	 * once, so an attach under it finds the one startup, but nothing goes on
+	 * the wire until the start can no longer fail, and then `attach` says it,
+	 * in the `sessionsChanged` and snapshot it sends for every start. The
+	 * snapshot alone would not go out for a container with no adapter
+	 * published, but the `sessionsChanged` would send every client to a
 	 * listing naming the new ref, which a start that then fails takes back
 	 * with nothing on the wire to say so.
 	 */
@@ -1046,34 +965,26 @@ export class SessionManager {
 	 * listable and still resumable. So the fork gets a container of its own, with
 	 * a new handle and the fork's id as its name, and answers as the
 	 * container the adapter's handlers reach from here on (`#start`'s `owner`).
+	 * It takes what belongs to the process, the queue included, on which the
+	 * fork verb that fired this is still running, and nothing that was about
+	 * the parent's conversation.
 	 *
-	 * It takes what belongs to the process: the adapter, the subscriptions that
-	 * reach it, the notices it raised, and the `last*` mirrors the next update is
-	 * measured against, and the queue, which orders the adapter and on which the
-	 * fork verb that fired this is still running. It takes nothing that was
-	 * about the parent's conversation, and starts with no `error` and the
-	 * `stored`, `onDisk` and `createdAt` below.
-	 *
-	 * The parent's container leaves the table with its name, as any detached
-	 * session's does, and keeps no adapter: a command on its ref misses from
-	 * here on, a verb queued on it behind this fork fails rather than running
-	 * on the fork (`#serially`), and the next attach resumes the parent from
-	 * the index into a container of its own (D9, D12). The parent's ref does
-	 * not become the fork's, or every client holding it would hold one that
-	 * prompts the agent the user is talking to on the fork (OW-kekoji).
+	 * The parent's container leaves the table with its name and keeps no
+	 * adapter: a command on its ref misses, a verb queued on it behind this
+	 * fork fails rather than running on the fork (`#serially`), and the next
+	 * attach resumes the parent from the index (D9, D12). The parent's ref does
+	 * not become the fork's, or every client holding it would prompt the agent
+	 * the user is talking to on the fork (OW-kekoji).
 	 *
 	 * Nothing under the parent's handle names the fork: an event there
-	 * carrying a new ref means "this conversation took a new id", and every
-	 * client that holds the handle follows its view and selection across. On a
-	 * fork that is false for every client, and actively wrong for the ones
-	 * that did not fork -- it would throw away a parent transcript the server
-	 * still lists and drag a reader onto a conversation nobody there opened
+	 * carrying a new ref means the conversation took a new id, and every
+	 * client holding the handle would follow it across, throwing away a parent
+	 * transcript the server still lists for a conversation nobody there opened
 	 * (OW-suhoto). What goes there is `ended`, under the parent's own ref, and
-	 * then `sessionsChanged` (D26): a client that did not fork and held the
-	 * parent live loses that view and falls to the parent's preview, its
-	 * selection standing. The server then attaches the fork for the client
-	 * that forked (`#attachFork`), which snapshots it under the fork's own
-	 * handle, and the reply names it.
+	 * then `sessionsChanged` (D26): a client that held the parent live falls
+	 * to the parent's preview, its selection standing. The client that forked
+	 * is answered with the fork, which `#attachFork` snapshots under its own
+	 * handle.
 	 */
 	#forkOnto(parent: ManagedSession, next: SessionRef): ManagedSession {
 		const fork = this.#container(next, {
