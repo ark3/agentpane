@@ -1,27 +1,19 @@
 /**
  * Pure Pi event reducer: RPC notification lines in, `AgentMessage[]` +
  * `isStreaming` out (plus the dialogs D2a refuses at arrival, and the notices
- * D11 forwards).
+ * D11 forwards), free of stdio (`process.ts`) so a test drives it over
+ * `resources/fixtures/pi/`.
  *
- * This is deliberately free of any subprocess/stdio concern -- see
- * `process.ts` for that -- so it can be driven directly by a test over the
- * recorded fixtures in `resources/fixtures/pi/`.
+ * DESIGN's Pi assembly ("The backend adapter contract") holds, with two
+ * points it leaves out: `message_end` replaces what the deltas built rather
+ * than merging with it, since only it carries usage, stopReason, timestamps
+ * and thinking signatures; and `agent_settled`, not `agent_end`, is the
+ * terminal signal, since a retry, a compaction or a queued continuation can
+ * follow an `agent_end`.
  *
- * Design (DESIGN.md, "The backend adapter contract"):
- *   - `message_start`/`message_end` payloads already ARE `AgentMessage`s.
- *   - `message_update` deltas assemble the live text of the last message by
- *     `contentIndex`.
- *   - `message_end` is authoritative: it replaces whatever the deltas built,
- *     rather than being merged with it. This matters because `message_end`
- *     carries fields (usage, stopReason, timestamps, thinking signatures)
- *     that streaming deltas never do.
- *   - `agent_settled`, not `agent_end`, is the real terminal signal (an
- *     `agent_end` can be followed by retry/compaction/queued continuations).
- *
- * `reducePiNotification` returns the *same* state object reference when a
- * notification has no observable effect (e.g. `turn_start`,
- * `tool_execution_update`) so a caller can cheaply detect "did anything
- * change" with `result.state !== previousState` rather than deep-comparing.
+ * `reducePiNotification` returns the *same* state object when a notification
+ * has no observable effect, so a caller detects a change with
+ * `result.state !== previousState`.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -196,27 +188,23 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 }
 
 /**
- * A Pi Stop during a tool call, sent as the stop a Stop mid-reply sends
+ * A Pi Stop during a tool call, made the message a Stop mid-reply leaves
  * (OW-kibabi): `stopReason: "aborted"`, without Pi's message.
  *
  * As of `pi 1.2.0` an `abort` while a tool runs ends the call with an error
- * result, and Pi's loop then opens one more round on the already aborted
- * signal, whose reply fails at once with no content, `stopReason: "error"`
- * and `errorMessage: "This operation was aborted"` -- where an abort mid-reply
- * ends with `stopReason: "aborted"` (docs/MANUAL_TESTING.md, OW-yewiku).
- * Left as it came, both clients drew a Stop the user pressed as an error.
+ * result, and Pi's loop then opens one more round on the aborted signal,
+ * whose reply fails at once with no content, `stopReason: "error"` and
+ * `errorMessage: "This operation was aborted"`, where an abort mid-reply ends
+ * `stopReason: "aborted"` (docs/MANUAL_TESTING.md, OW-yewiku).
  *
- * Recognised from the message alone, because a reopened session's file does
- * not record that anyone pressed Stop, and the live adapter, the resume's
- * `get_messages` and the stored preview all read it through this one rule.
- * A provider failure carries its own message, so an error turn after a failed
- * call that nobody stopped still reads as an error. The failed call keeps its
- * error result: it really did end early.
- *
- * The shape is any round set up on an aborted signal, not only a Stop's: read
- * in `pi-ai 1.2.0`, `lazyStream` turns a setup failure into exactly this
- * message, and Pi's `compact` and fork abort the turn before they run, so one
- * of those landing during a tool call reads as a stop too -- which it was.
+ * Recognised from the message alone, since a reopened session's file does not
+ * record a Stop, and the live adapter, a resume's `get_messages` and the
+ * stored preview all read it through this one rule. A provider failure
+ * carries its own message, so it still reads as an error; the failed call
+ * keeps its error result, since it really did end early. Any round set up on
+ * an aborted signal has this shape (`lazyStream`, read in `pi-ai 1.2.0`), so
+ * Pi's `compact` or fork, each aborting the turn first, landing during a tool
+ * call reads as a stop too, which it was.
  */
 export function asPiStop<M extends AgentMessage | SessionPreviewTurn>(message: M): M {
 	if (
@@ -245,69 +233,51 @@ function withEffort(message: AgentMessage, effort: string | null): AgentMessage 
  * Name on each loaded assistant message the level it ran at, not the level in
  * force now (D23, read per turn).
  *
- * A message that records its level is named by it (OW-zarine). As of
- * `pi 1.2.0` the agent loop stamps each reply with `thinkingLevel`, the Pi
- * level it requested, `config.reasoning ?? "off"` in `pi-agent-core`'s
- * `streamAssistantResponse`, which the session has already clamped to the
- * model (`setThinkingLevel` in `pi-coding-agent`'s `agent-session.js`, read at
- * the source). And `get_messages` carries it: measured on the home server,
- * 2026-10-14, three turns at `high`, `low` and `off` read back as those three
- * from the live process and again after a `--session` resume
- * (docs/MANUAL_TESTING.md, OW-zarine). It is not clamped again, since it is
- * what was requested and the clamp below only reconstructs that.
- * `providerThinkingLevel` names nothing here: it is the provider's own effort
- * string, mapped through the model's `thinkingLevelMap`, set in `pi-ai 1.2.0`
- * only by the `anthropic-messages` and `pi-messages` APIs, and absent from
- * the pinned model's turns in that run.
+ * A message that records its level is named by it, unclamped, since it is
+ * what was requested (OW-zarine). As of `pi 1.2.0` the agent loop stamps each
+ * reply with `thinkingLevel`, the level it requested, which the session has
+ * already clamped to the model (`streamAssistantResponse` in
+ * `pi-agent-core`, `setThinkingLevel` in `pi-coding-agent`'s
+ * `agent-session.js`, read at the source); and `get_messages` carried it: on
+ * the home server, 2026-10-14, turns at `high`, `low` and `off` read back as
+ * those from the live process and after a `--session` resume
+ * (docs/MANUAL_TESTING.md, OW-zarine). `providerThinkingLevel` is not it:
+ * that is the provider's own string, set in `pi-ai 1.2.0` only by the
+ * `anthropic-messages` and `pi-messages` APIs.
  *
- * A message without the stamp -- written before it, as the home server's own
- * files from 2026-09-14 to 2026-09-16 are, or built outside the agent loop, as
- * a run failure's is (`handleRunFailure` in `pi-agent-core`'s `agent.js`,
- * 1.2.0) -- is read from the session file's entries (OW-helumu), so a
- * session spanning the stamp's arrival names both halves. What follows is
- * that reading.
+ * A message without the stamp -- written before it, as the home server's
+ * files from 2026-09-14 to 2026-09-16 are, or a run failure's, built outside
+ * the agent loop (`handleRunFailure` in `pi-agent-core`'s `agent.js`, 1.2.0)
+ * -- is named from the session file's entries (OW-helumu):
  *
- * The levels come from the active branch, walked from `leafId` by `parentId`,
- * since `get_entries` also returns abandoned branches. Each assistant message
- * gets the last `thinking_level_change` on that branch appended before the
- * message's own `timestamp`, which Pi's provider stamps as the reply begins. So
- * a change made while a turn streamed, which Pi appends ahead of that turn's
- * entry, is not read as the turn's: the same level `message_start` would have
- * named live. A tie to the millisecond names nothing.
+ * - On the active branch (`activeBranch`), the last `thinking_level_change`
+ *   appended strictly before the message's `timestamp`, which Pi's provider
+ *   stamps as the reply begins; so a change made while the turn streamed,
+ *   which Pi appends ahead of the turn's entry, is not the turn's, the level
+ *   `message_start` would have named live.
+ * - Matched to its entry by that `timestamp`, not by position: `get_messages`
+ *   is Pi's context, which a compaction or a context edit reshapes. A
+ *   timestamp the branch holds twice, or not at all, names nothing.
+ * - Clamped to the turn's model in `catalogue`, because a resume puts a level
+ *   in force without recording it: Pi clamps the last recorded level to the
+ *   model it resolved and appends nothing. As of `pi 0.87.1`, and again
+ *   `1.2.0`, a resume whose clamp changed the level, and one given `--model
+ *   <ref>:<level>` or `--thinking`, each appended nothing
+ *   (docs/MANUAL_TESTING.md, OW-lehita and OW-vijine). The clamp recovers the
+ *   first, while the model's catalogue entry is the one the turn ran under:
+ *   the pinned model's levels changed between `pi 0.85.1` and `0.87.1`
+ *   (OW-ruzuhu), so a level since dropped is named as the model clamps it
+ *   now, and a turn whose model has left the catalogue keeps the level
+ *   recorded. The override is on no entry, so an unstamped turn run under one
+ *   from the `pi` CLI reloads at the level recorded before it (agentpane's
+ *   resume spawn carries no `--model`, OW-pubulu); a stamped one carries it,
+ *   as read at the source rather than run.
  *
- * Messages are matched to entries by that `timestamp`, not by position:
- * `get_messages` is Pi's context, where a compaction replaces the folded
- * history with a summary and a context edit can drop a message, so positions
- * need not line up with the branch. A timestamp the branch holds twice, or not
- * at all, leaves the message unlabelled rather than guessing.
- *
- * The recorded level is clamped to the turn's model, found in `catalogue`,
- * because a resume puts a level in force without recording it: Pi restores the
- * last recorded level and clamps it to the model it resolved, and appends an
- * entry only for a session that has none. As of `pi 0.87.1`, and again
- * `1.2.0`, a resume whose clamp changed the level, and one given
- * `--model <ref>:<level>` or `--thinking`, each appended nothing
- * (docs/MANUAL_TESTING.md, OW-lehita and OW-vijine).
- * The clamp recovers the first, since Pi clamps the same way each time; a
- * level Pi records is already clamped, so for it the clamp changes nothing.
- * Both hold only while the model's catalogue entry is the one the turn ran
- * under: the pinned model's levels changed between `pi 0.85.1` and `0.87.1`
- * (docs/MANUAL_TESTING.md, OW-ruzuhu), so a turn run at a level since dropped
- * is named at the level its model clamps it to now. A turn whose model has
- * left the catalogue keeps the level recorded. The
- * override is recoverable from no entry: the level named on the command line
- * is on none, so an unstamped turn driven under one, from the `pi` CLI
- * (agentpane's resume spawn carries no `--model`, OW-pubulu), reloads with the
- * level recorded before it. A stamped one carries the override itself, as read
- * at the source rather than run.
- *
- * Live stamping names nothing for a model that does not reason, and Pi clamps
- * such a model to `off` (`clampThinkingLevel` in `pi-ai`, read at the source in
- * 0.87.1), so a clamped level other than `off` means the model reasoned. At
- * `off` that is only known for the model `get_state` names now (`current`), so
- * an `off` turn on any other model is left unlabelled. A recorded level is held
- * to the same rules, because the stamp is that same clamped level: `off` on a
- * model that does not reason.
+ * On the model `get_state` names now (`current`), stamped or not, a level is
+ * named only if that model reasons, as live. On any other, whether it reasons
+ * is not known here; Pi clamps a model that does not to `off`
+ * (`clampThinkingLevel` in `pi-ai`, read at the source in 0.87.1), so any
+ * other level says it did, and an `off` turn is left unlabelled.
  */
 export function withLoadedEfforts(
 	messages: AgentMessage[],
