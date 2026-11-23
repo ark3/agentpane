@@ -419,7 +419,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		// All three adapters rename a created session there. The container is
 		// keyed by its handle and carries the startup itself, so its name moves to
 		// the new id at once and reaches that startup; only the wire waits for the
-		// adapter to be published (D24, OW-suyinu, OW-mofuho, D35 point 1).
+		// adapter to be published (D35 point 1).
 		const real: SessionRef = { backend: "pi", id: REAL };
 
 		/** A factory whose adapters rename during `start()`, then do `after` before it settles. */
@@ -566,9 +566,9 @@ describe("create (D30)", () => {
 });
 
 describe("fork, which moves the live adapter's ref on Pi alone", () => {
-	// The backends are asymmetric (settled live, MANUAL_TESTING.md OW-pifowo
-	// / OW-22; Claude Code's fork leaves its own ref alone like Codex's,
-	// OW-razoki): only Pi's adapter announces a `"fork"`, and SessionManager.fork
+	// The backends are asymmetric (settled live, MANUAL_TESTING.md OW-pifowo):
+	// only Pi's adapter announces a `"fork"` -- Claude Code's fork leaves its
+	// own ref alone, as Codex's does (OW-razoki) -- and SessionManager.fork
 	// must handle every shape.
 	it("moves the adapter onto the fork's container, naming the fork under nothing of the parent's, when a Pi-style fork moves the active file", async () => {
 		await sessions.attach(REF);
@@ -674,7 +674,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	// conversation, not an older name for this one, so its name does not go
 	// with it and the parent's ref stops resolving at all.
 	// It is detached, in the sense D9 and D12 already define, and the next
-	// attach rehydrates it. Pi is the only backend that reaches this now
+	// attach rehydrates it. Pi is the only backend that reaches this
 	// (OW-razoki), and the index below still reports the parent's stored session
 	// because Pi's fork leaves the pre-fork file byte-identical (OW-pifowo).
 	it("leaves the parent detached rather than aliased onto the fork", async () => {
@@ -693,11 +693,11 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 
 	describe("what the adapter emits from inside a ref-changing fork (OW-zovaye)", () => {
 		// `PiAdapter.fork` moves its ref onto the fork, then re-reads the fork's
-		// rewound transcript and emits it -- all before `fork()` returns. When the
-		// manager re-keyed only once `fork()` settled, that went out under the
-		// PARENT's ref, and every client showing the parent redrew it shortened.
-		// The adapter now announces the move first (`onRefChanged`), so the
-		// container is under the fork's ref before anything is emitted.
+		// rewound transcript and emits it -- all before `fork()` returns. The
+		// adapter announces the move first (`onRefChanged`), so the container is
+		// under the fork's ref before anything is emitted; otherwise it goes out
+		// under the PARENT's ref, and every client showing the parent redraws it
+		// shortened.
 		const moved: SessionRef = { backend: "pi", id: `${REF.id}#fork-e1` };
 
 		function collectEvents(): ServerEvent[] {
@@ -781,7 +781,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		});
 
 		it("answers a pull of the parent's ref with nothing of the fork, and what the fork raises goes out under its ref (OW-nuzepi)", async () => {
-			// The window OW-zovaye's guard missed: the adapter has moved onto the fork
+			// The window beside the emits above: the adapter has moved onto the fork
 			// and rewound, and `fork()` has not returned. A snapshot is pulled, not
 			// pushed -- a stream's snapshot of the parent's handle, a new stream's
 			// opening snapshots -- and `onError` reaches the container.
@@ -845,8 +845,8 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	it("does not hand the fork the parent's stored preview", async () => {
 		// The fork's container is built from the parent's (`#forkOnto`), and
 		// `session.stored` -- the index's answer about the PARENT -- carried
-		// over would have `summaryOf` dress it in the fork's ref. Since OW-kekoji
-		// the parent is listed too, so the attach response would draw the fork's
+		// over would have `summaryOf` dress it in the fork's ref. The parent is
+		// listed too (OW-kekoji), so the attach response would draw the fork's
 		// row character-for-character identical to the parent's until the next
 		// refetch.
 		const forkedAt = "2026-08-11T09:30:00.000Z";
@@ -1011,7 +1011,7 @@ describe("fork and prompt, one operation (D30)", () => {
 		return { ref };
 	}
 
-	// Codex's fork shape is "shared" since OW-lajehi; Claude Code's is the recipe.
+	// Codex's fork shape is "shared" (OW-lajehi); Claude Code's is the recipe.
 	it.each([
 		["claude", "claude"],
 		["codex", "shared"],
@@ -1301,7 +1301,7 @@ describe("a prompt names a handle or a ref (D30)", () => {
 
 /**
  * The container is keyed by a handle the manager mints, and its current
- * backend id is its one name (D24, OW-suyinu, D35 point 1). A rename moves the
+ * backend id is its one name (D24, D35 point 1). A rename moves the
  * name; a fork is a new container with a new handle.
  */
 describe("a container keyed by a handle", () => {
@@ -1744,8 +1744,8 @@ describe("lifecycle", () => {
 
 	it("says a close ended the handle, and that the list changed, before the adapter's disposal settles (D26, OW-sodohi)", async () => {
 		// Up to the kill's grace passes between the forget and the disposal
-		// settling, and a client that heard nothing meanwhile held a view whose
-		// Send was refused `not_attached`.
+		// settling, and a client that heard nothing meanwhile would hold a view
+		// whose Send is refused `not_attached`.
 		await sessions.attach(REF);
 		const handle = sessions.summaryOf(REF)?.handle;
 		const adapter = pi.created[0];
@@ -2562,9 +2562,9 @@ describe("turn boundaries", () => {
 });
 
 describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () => {
-	// The window OW-lajehi opened: a Codex fork borrows its parent's
-	// `codex app-server`, so closing one side of the pair leaves the other side's
-	// thread locked to a child nobody on agentpane's side is holding any more.
+	// The window a borrowed fork leaves (OW-lajehi): a Codex fork borrows its
+	// parent's `codex app-server`, so closing one side of the pair leaves the
+	// other side's thread locked to a child nobody on agentpane's side is holding any more.
 	// As of `codex-cli` 0.154.0 nothing releases that lock short of the child
 	// dying -- `thread/unsubscribe` answers `unsubscribed` and changes nothing
 	// (`docs/MANUAL_TESTING.md`, "`thread/unsubscribe` does not release a Codex
@@ -3124,8 +3124,7 @@ describe("a session's mutations run one at a time (D24, OW-sewewe)", () => {
 		// `PiAdapter.fork` announces the move, then re-sends the model and level
 		// and hydrates the fork before it returns, all inside the fork verb. The
 		// fork's ref resolves from the announcement on, so a verb on it must
-		// queue behind that tail: the queue follows the adapter (OW-woyifu,
-		// OW-dutute).
+		// queue behind that tail: the queue follows the adapter (OW-woyifu).
 		await sessions.attach(REF);
 		const adapter = pi.forRef(REF)!;
 		const log: string[] = [];

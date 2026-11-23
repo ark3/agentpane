@@ -1,7 +1,7 @@
 /**
  * The process table: a handle the manager mints -> the container holding a
  * running adapter, with the backend's current id for the conversation as its
- * one name, which a rename moves (D24, OW-suyinu, D35 point 1).
+ * one name, which a rename moves (D24, D35 point 1).
  *
  * Two rules from DESIGN carry most of the weight here:
  *
@@ -170,7 +170,7 @@ interface ManagedSession {
 	/**
 	 * What the table is keyed by: minted when the container comes into being
 	 * (`#container`) and never changed, opaque, and unique across server
-	 * processes, not only within one (D24, OW-suyinu, OW-kimaya). It rides `SessionSummary` and every
+	 * processes, not only within one (D24). It rides `SessionSummary` and every
 	 * per-session event beside `ref`, and a rename leaves it where it is, so
 	 * anything keyed by it -- here, in the broadcaster, or in a client -- has
 	 * nothing to re-key. A fork is another conversation and another container,
@@ -223,16 +223,16 @@ interface ManagedSession {
 	/** The adapter's `name` as last seen; a change is announced as `sessions-changed`, never a `status`. */
 	lastName: string | null;
 	/**
-	 * What the adapter's `onError` and `onNotice` have said, held
-	 * for every snapshot to carry (OW-bipume): a client that was not holding a
-	 * view when the event went out -- one that connects or reconnects later, or
-	 * one the startup window or a fork left without one -- has no other
-	 * way to learn of it. Each follows the lifecycle the client applies to its
-	 * own copy, or a snapshot would resurrect what the client had cleared:
-	 * `error` is cleared at `submit` and `clearError`, each retracting it on
-	 * the wire, which is what drops a client's copy (OW-jopifu, OW-lohubo),
-	 * and notices only accumulate -- save that one identical to a notice
-	 * already held is neither held nor fanned out again (OW-piloni). They live
+	 * What the adapter's `onError` and `onNotice` have said, held for every
+	 * snapshot to carry (OW-bipume): a client that was not holding a view when
+	 * the event went out -- one that connects or reconnects later, or one the
+	 * startup window or a fork left without one -- has no other way to learn
+	 * of it. Each follows the lifecycle the client applies to its own copy, or
+	 * a snapshot would resurrect what the client had cleared: `error` is
+	 * cleared at `submit` and `clearError`, each retracting it on the wire,
+	 * which is what drops a client's copy (OW-lohubo), and notices only
+	 * accumulate -- save that one identical to a notice already held is
+	 * neither held nor fanned out again (OW-piloni). They live
 	 * on the container, so a rename leaves them where they are and a close
 	 * drops them; a fork's container takes all but `error` (`#forkOnto`).
 	 */
@@ -255,7 +255,7 @@ interface ManagedSession {
 	 * or forking a container out of it, after it left the table: `close()` and
 	 * `disposeAll()` drop these in the same synchronous run that takes the
 	 * container out, so no `onRefChanged` reaches `#rename` or `#forkOnto` for
-	 * it afterwards (OW-yavewa, OW-jimasu). No flag says so; unsubscription is
+	 * it afterwards (OW-yavewa). No flag says so; unsubscription is
 	 * the invariant. A fork moves them onto the fork's container and leaves
 	 * these empty, so nothing that reaches the parent's can deafen the adapter
 	 * the fork is driving.
@@ -659,7 +659,7 @@ export class SessionManager {
 
 	/**
 	 * Run one of a session's mutating verbs once every verb queued on it before
-	 * has settled (D24, OW-sewewe). Five verbs join: `submit`, `setModel`,
+	 * has settled (D24). Five verbs join: `submit`, `setModel`,
 	 * `setEffort`, `setName` and `compact`, and `forkAndPrompt` joins as a
 	 * `fork`, its first half, and then as a `submit` on the fork. Every command runs
 	 * as its frame arrives, beside any still running, and any number of
@@ -683,12 +683,9 @@ export class SessionManager {
 	 *
 	 *  - `abort`. It exists to reach a running turn, which is never an item here,
 	 *    so all it could wait behind is a settings call, a compaction or a fork,
-	 *    and a stop must not wait out a Pi compaction. Left out, it also stays
-	 *    what it was for the second abort a client sent ahead of a Pi fork
-	 *    until ark3/agentpane#51, which agentpane-mode's `f` sent until
-	 *    ark3/agentpane#75 (OW-relehi), and for the stop a "Stop and edit"
-	 *    sends at the press, ahead of the fork its send makes: harmless, since
-	 *    the fork abandons the turn (D15).
+	 *    and a stop must not wait out a Pi compaction. The stop a "Stop and
+	 *    edit" sends at the press is not held behind the fork its send makes:
+	 *    harmless, since the fork abandons the turn (D15).
 	 *  - `listForkPoints`. A read: it changes nothing a verb here depends on,
 	 *    and its answer can be stale by the time a client acts on it whether or
 	 *    not it waits.
@@ -700,7 +697,7 @@ export class SessionManager {
 	 *  - `close` and `disposeAll`. Teardown is ordered by `#disposing`,
 	 *    `#shuttingDown` and `#terminate`, and waits behind nothing. A
 	 *    verb still queued when it runs reaches the disposed adapter, as an
-	 *    overlapping one always did; most verbs fail there, but a Codex
+	 *    overlapping one does; most verbs fail there, but a Codex
 	 *    set-model with no effort chosen only records the model and answers
 	 *    success.
 	 *
@@ -798,8 +795,7 @@ export class SessionManager {
 			if (disposition === "started" && priorError !== null && session.error !== null && session.errorId === priorError) {
 				session.error = null;
 				// This tells every client, the prompt's own included (OW-lohubo),
-				// which no turn-boundary snapshot does any longer (OW-yirosu), and
-				// without the snapshot this once took (OW-jopifu).
+				// which no turn-boundary snapshot does (OW-yirosu).
 				this.broadcaster.errorCleared(session);
 			}
 			return disposition;
@@ -817,9 +813,9 @@ export class SessionManager {
 	 * between the two refuse it rather than prompting a session the sender
 	 * never asked to start, and a rename inside the start costs it nothing.
 	 * `priorError` is the caller's to read before the attach, which an error
-	 * the attach's start raised is newer than (OW-jokoto). A refusal after the attach is `AttachedNotPromptedError`,
-	 * naming the session; a start that fails is answered as its own failure,
-	 * and leaves nothing (`create`).
+	 * the attach's start raised is newer than (OW-jokoto). A refusal after the
+	 * attach is `AttachedNotPromptedError`, naming the session; a start that
+	 * fails is answered as its own failure, and leaves nothing (`create`).
 	 */
 	async attachAndSubmit(
 		ref: SessionRef,
@@ -838,9 +834,9 @@ export class SessionManager {
 
 	/**
 	 * Fork a session from a past entry, as `forkAndPrompt` does, without the
-	 * fork point's lookup or the prompt. Since ark3/agentpane#75 took the plain
-	 * fork off the wire (D33) no command reaches this one, and it stays as the
-	 * seam the tests of forking drive. Like `submit`, this goes through the
+	 * fork point's lookup or the prompt. No command reaches this one, since the
+	 * plain fork is off the wire (D33); it is the seam the tests of forking
+	 * drive. Like `submit`, this goes through the
 	 * manager rather than straight at the adapter because it queues
 	 * (`#serially`), and because two of the backends hand back something the
 	 * fork's own start needs (`ForkStart`), which this starts at once, as
@@ -851,7 +847,7 @@ export class SessionManager {
 	 *    and `#forkOnto` moves the adapter onto a container of its own, before
 	 *    the adapter re-sends the model and level and hydrates the fork's
 	 *    transcript -- so what it emits from there goes out under the fork's
-	 *    ref and handle, never the parent's (OW-zovaye, OW-nuzepi). Nothing
+	 *    ref and handle, never the parent's (OW-zovaye). Nothing
 	 *    under the parent's handle names the fork -- see `#forkOnto`. The value
 	 *    the adapter returns IS its new ref.
 	 *  - Codex's `thread/fork` mints a new thread the current adapter is NOT
@@ -1024,8 +1020,7 @@ export class SessionManager {
 	 * once, so an attach under it finds the one startup, but
 	 * nothing goes on the wire until the start can no longer fail, and then
 	 * `attach` says it, in the `sessionsChanged` and snapshot it sends for every
-	 * start. The hold outlived the event that once said a rename, for which it
-	 * was written. The snapshot alone would not need it -- the snapshot source
+	 * start. The snapshot alone would not need it -- the snapshot source
 	 * answers nothing for a container with no adapter published, so it would
 	 * not go out -- but the `sessionsChanged` would send every client to a
 	 * listing naming the new ref, which a start that then fails takes back
@@ -1098,7 +1093,7 @@ export class SessionManager {
 			// carried over, `summaryOf` would dress the parent's `preview` and
 			// `updatedAt` in the fork's ref, drawing the fork's row as a copy of the
 			// parent's, character for character, now that both rows are listed
-			// (OW-kekoji, OW-sehaja). Without it `#ownSummary` answers, whose
+			// (OW-kekoji). Without it `#ownSummary` answers, whose
 			// `preview: null` says "not read from the index yet": Pi is the only
 			// backend that gets here and its fork inherits the parent's transcript
 			// prefix, so the next `list()` will show the fork's true preview.
@@ -1202,10 +1197,10 @@ export class SessionManager {
 		try {
 			// A fork whose adapter came from its parent is started as-is: only that
 			// parent's process can drive it, and the factory's adapter would have
-			// to find its way back to that process (OW-lajehi). It can, since
-			// OW-voyezi -- a Codex adapter resuming a thread a live app-server
-			// still holds borrows that connection rather than spawning -- but the
-			// handle is still the direct route and the only one that works for a
+			// to find its way back to that process (OW-lajehi). It could -- a
+			// Codex adapter resuming a thread a live app-server still holds
+			// borrows that connection rather than spawning (OW-voyezi) -- but the
+			// handle is the direct route and the only one that works for a
 			// fork whose rollout the index cannot answer for.
 			// The cap first, inside the `try`, so a refusal takes the container
 			// out as any failed start does. A fork's adapter it refuses is still
@@ -1338,8 +1333,8 @@ export class SessionManager {
 	 * and as nothing when nothing moved; and only a
 	 * replaced transcript as a snapshot. A snapshot sends every message to
 	 * every client, and the Emacs helper re-projects and redraws all of them,
-	 * which on a 348-message session held each prompt 1-2s before its draft
-	 * cleared, when both turn boundaries still snapshotted (OW-yirosu).
+	 * which on a 348-message session holds each prompt 1-2s before its draft
+	 * clears (OW-yirosu).
 	 */
 	#onUpdate(session: ManagedSession, state: AdapterState, change: StateChange): void {
 		const status = liveStatusOf(state);
@@ -1475,7 +1470,8 @@ export class SessionManager {
 		this.broadcaster.forget(session.handle);
 		// Said here, where the handle is let go of, and not after the disposal
 		// below, which can run to the kill's grace: until then another client
-		// held a live-looking view whose Send was refused `not_attached` (D26).
+		// would hold a live-looking view whose Send is refused `not_attached`
+		// (D26).
 		this.broadcaster.ended(session, exit);
 		this.broadcaster.sessionsChanged();
 		// Swallowed deliberately. By this point the session is out of the table
@@ -1575,11 +1571,10 @@ export class SessionManager {
 	}
 
 	/**
-	 * One session's summary, a read for the tests since ark3/agentpane#90:
-	 * `attach` and `create` answer `#summary` of the container they landed on.
-	 * Deliberately not `list().find()`: that walks both backends' whole session
-	 * stores (973 files on this machine, D9) to answer a question about a
-	 * session we are already holding open.
+	 * One session's summary, a read for the tests: `attach` and `create`
+	 * answer `#summary` of the container they landed on. Deliberately not
+	 * `list().find()`: that walks both backends' whole session stores (D9) to
+	 * answer a question about a session we are already holding open.
 	 */
 	summaryOf(ref: SessionRef): LiveSessionSummary | null {
 		const session = this.#lookup(ref);
