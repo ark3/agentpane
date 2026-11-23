@@ -127,24 +127,23 @@ export class PiAdapter implements BackendAdapter {
 	private state: PiReducerState = createInitialPiState();
 	private model: string | null = null;
 	/**
-	 * The model a `setModel` last put in force, re-sent after a fork. As of
-	 * `pi 0.87.1` and `1.2.0` (docs/MANUAL_TESTING.md, OW-sinoha and OW-vijine),
-	 * a process spawned with `--model` naming one model and moved to another by
-	 * `set_model` answered a fork's `get_state` with the spawn's model, with no
-	 * event and no `model_change` in the forked file, which still named the
-	 * chosen model. Pi rebuilds a forked session from the options its command
-	 * line parsed, `--model` included, as it does the suffix's level (OW-dojebo,
-	 * in the docblock on `thinkingLevel`).
+	 * The model a `setModel` last put in force in this process, re-sent after
+	 * a fork: Pi rebuilds a forked session from the options its command line
+	 * parsed, so as of `pi 0.87.1` and `1.2.0` (docs/MANUAL_TESTING.md,
+	 * OW-sinoha and OW-vijine) a process spawned with `--model` naming one
+	 * model and moved to another by `set_model` answered a fork's `get_state`
+	 * with the spawn's, with no event and no `model_change` in the forked
+	 * file, which still named the chosen model. The suffix's level does the
+	 * same (OW-dojebo, in the docblock on `thinkingLevel`). A resume spawn
+	 * carries no `--model`, and chooses none.
 	 *
-	 * So it covers only a model chosen in this process, and a resume spawn, which
-	 * carries no `--model`, chooses none. On the same versions
-	 * (docs/MANUAL_TESTING.md, OW-riyeku and OW-vijine), Pi restores a forked
-	 * branch's model and level only when the branch holds a message, and a fork
-	 * at the first user message of a file with no system message, which every
-	 * file written before `pi 0.86.0` lacks, keeps none: `get_state` answered
-	 * `messageCount` 0 at the settings default model and level, with no event,
-	 * and Pi appended a `model_change` and a `thinking_level_change` naming them.
-	 * So after such a fork `fork` re-sends the model and level in force before
+	 * On the same versions (OW-riyeku and OW-vijine) Pi restores a forked
+	 * branch's model and level only when the branch holds a message: a fork at
+	 * the first user message of a file with no system message, as every file
+	 * written before `pi 0.86.0` is, answered `get_state` with `messageCount`
+	 * 0 at the settings default model and level, with no event, and Pi
+	 * appended a `model_change` and a `thinking_level_change` naming them. So
+	 * after such a fork `fork` re-sends the model and level in force before
 	 * it, whether chosen or not.
 	 */
 	private chosenModel: string | null = null;
@@ -154,86 +153,64 @@ export class PiAdapter implements BackendAdapter {
 	 * resume whose recorded model had left the catalogue ran the settings
 	 * default, one whose provider lost its auth ran another provider's default
 	 * or resolved `unknown`, and Pi said so nowhere over RPC
-	 * (docs/MANUAL_TESTING.md, OW-zujofa). So it is inferred here, by comparing
-	 * what `get_entries` records (`recordedModel` in `reducer.ts`) with what
+	 * (docs/MANUAL_TESTING.md, OW-zujofa). So it is inferred, comparing what
+	 * `get_entries` records (`recordedModel` in `reducer.ts`) with what
 	 * `get_state` names, and only for a branch holding messages, since Pi
 	 * restores a model only for such a session.
 	 *
-	 * Read wherever the transcript is read back -- a resume's start, and a
-	 * fork, which D23 holds to the same promise -- and cleared by a
-	 * `setModel` that succeeds, after which the model in force is one chosen.
-	 * A fork has two more ways to put another model in force (the docblock on
-	 * `chosenModel`): a process spawned with `--model` puts that model back over
-	 * one `set_model` chose (OW-sinoha), and a fork that keeps no message puts
-	 * the settings default in force (OW-riyeku). The fork re-sends the chosen
-	 * model, or for the second the parent's, before it reads the transcript
-	 * back, so the first reaches this field only when Pi refuses the re-send,
-	 * and the second never does, since its branch holds no message.
-	 * A turn does not clear it: the first turn on the fallback records the
-	 * fallback, so every later resume restores that without a mismatch to see,
-	 * and from then on this is the only thing still saying the recorded model
-	 * was lost, for as long as this process lives.
+	 * Set wherever the transcript is read back, a resume's start and a fork
+	 * (`hydrateMessages`), and cleared by a `setModel` that succeeds. Of the
+	 * models a fork puts in force (the docblock on `chosenModel`), its
+	 * re-sends leave one here only when Pi refuses the chosen model's. A turn
+	 * does not clear it: the first turn on the fallback records the fallback,
+	 * so no later resume sees a mismatch, and this is the only thing still
+	 * saying the recorded model was lost, for as long as this process lives.
 	 */
 	private unrestoredModel: string | null = null;
 	/**
-	 * Pi's thinking level is the effort (OW-ruzuhu). It is read, not assumed:
+	 * Pi's thinking level is the effort (OW-ruzuhu), read, never assumed:
 	 * `get_state` names it at start and after a fork, and Pi announces every
-	 * change with `thinking_level_changed`, including the ones it makes itself.
-	 * The reducer's `effort` is this level while the model reasons, and null
-	 * while it does not, since Pi pins such a model at `off` and there is
-	 * nothing to show or choose.
+	 * change, its own included, with `thinking_level_changed`. The reducer's
+	 * `effort` is this level while the model reasons, and null while it does
+	 * not, since Pi pins such a model at `off`.
 	 *
-	 * Offered per model from the catalogue entry, not from
-	 * `get_available_thinking_levels`, which answers for the current model only
-	 * (`thinkingLevels` in `protocol.ts`). `defaultEffort` is null: what Pi picks
-	 * for a model is `settings.json`'s `modelThinkingLevels` entry, else its
-	 * `defaultThinkingLevel`, else the level already in force, clamped to the
-	 * model -- none of which the catalogue carries.
+	 * Offered per model from the catalogue (`thinkingLevels` in `protocol.ts`).
+	 * `defaultEffort` is null: what Pi picks for a model is `settings.json`'s
+	 * `modelThinkingLevels` entry, else its `defaultThinkingLevel`, else the
+	 * level already in force clamped to the model, none of which the catalogue
+	 * carries.
 	 *
 	 * `chosenEffort` is re-sent after a model change, because `set_model` puts
-	 * the level back to that settings default when one exists. As of
+	 * the level back to that settings default where there is one: as of
 	 * `pi 0.87.1` (docs/MANUAL_TESTING.md, OW-ruzuhu), with
-	 * `modelThinkingLevels` naming `high`, `off` became `high` again across a
-	 * `set_model` to the same model; with neither setting, `off` survived it.
-	 * And a `set_thinking_level` sent while `set_model` is still in flight can
-	 * land first and then be undone: as read at the source on 0.87.1, not run,
-	 * `rpc-mode.js` does not wait for one command before starting the next, and
-	 * `set_model` awaits an auth check before it resets the level. A client
-	 * sending both at once, as the Emacs one does, would hit that.
-	 * A choice the new model does not list is dropped, and Pi's own clamp
-	 * stands, as Codex falls back to the new model's default.
+	 * `modelThinkingLevels` naming `high`, `off` became `high` across a
+	 * `set_model` to the same model, and with neither setting it survived.
+	 * Read at the source on 0.87.1, not run: `rpc-mode.js` starts each command
+	 * without waiting for the last, and `set_model` awaits an auth check before
+	 * it resets the level, so a `set_thinking_level` sent alongside it, as the
+	 * Emacs client sends one, can land first and be undone. A choice the new
+	 * model does not list is dropped, and Pi's own clamp stands.
 	 *
-	 * A resumed session runs at the level its file last recorded, not at the
-	 * settings default. On the same version (OW-ruzuhu), a session that chose
-	 * `off` was resumed with `--session` alone while `settings.json` named
-	 * `max` for the model and `low` as the default, and `get_state` read `off`;
-	 * `--model` without a suffix kept `off` too, but `--model ...:high` read
-	 * `high`, so a resume spawn that carries the suffix overrides the session's
-	 * own level. So the `get_state` at start is the truth here too, and no
-	 * choice is resent.
+	 * A resume runs at the level its file last recorded, not the settings
+	 * default (same version, OW-ruzuhu): a session that chose `off`, resumed
+	 * with `--session` alone or with an unsuffixed `--model` while the
+	 * settings named `max` for the model and `low` as the default, read `off`,
+	 * but `--model ...:high` read `high`. So the start's `get_state` is the
+	 * truth, and no choice is re-sent.
 	 *
 	 * A fork is that same override inside the live process, so `chosenEffort`
-	 * is re-sent after one. As of `pi 0.87.1` and `1.2.0`
-	 * (docs/MANUAL_TESTING.md, OW-dojebo and OW-vijine), spawned with
-	 * `--model ...:high` and set to `off`, a fork answered `get_state` at
-	 * `high` with no `thinking_level_changed`, the next turn's request asked
-	 * for `high`, and the forked file still named `off` as its last level. Pi
-	 * rebuilds a forked session from the options its command line parsed, the
-	 * suffix included.
-	 * An unsuffixed spawn kept `off` across the same fork.
+	 * is re-sent after one. As of `pi 0.87.1` and `1.2.0` (OW-dojebo and
+	 * OW-vijine), spawned with `--model ...:high` and set to `off`, a fork
+	 * answered `get_state` at `high` with no `thinking_level_changed`, the next
+	 * turn's request asked for `high`, and the forked file still named `off`;
+	 * an unsuffixed spawn kept `off`. Pi rebuilds a forked session from the
+	 * options its command line parsed, the suffix included.
 	 *
-	 * Which turns carry a level: every assistant turn, live or loaded. A live
-	 * one is named at `message_start`, and renamed at `message_end` by the
-	 * `thinkingLevel` its message records, which as of `pi 1.2.0` Pi stamps on
-	 * every reply its agent loop builds, not on a run failure's (OW-zarine).
-	 * One loaded by `get_messages` -- the whole transcript on a resume, and
-	 * again after a fork, which replaces every message, including turns this
-	 * adapter had named -- is named the level in force when the turn ran, not
-	 * when it was loaded: that same stamp, else the `thinking_level_change`
-	 * entries on the session file's active branch (OW-helumu). An unstamped
-	 * loaded turn that cannot be matched to its entry, or any loaded turn that
-	 * ran at `off` on a model other than the current one, which may not reason,
-	 * stays unlabelled (`withLoadedEfforts` in `reducer.ts`).
+	 * Every assistant turn, live or loaded, is named a level: a live one at
+	 * `message_start`, renamed at `message_end` by the `thinkingLevel` its
+	 * message records (OW-zarine), and one `get_messages` loads, on a resume
+	 * or after a fork, by the level it ran at (`withLoadedEfforts` in
+	 * `reducer.ts`).
 	 */
 	private thinkingLevel: string | null = null;
 	private reasoning = false;
@@ -369,24 +346,18 @@ export class PiAdapter implements BackendAdapter {
 	}
 
 	/**
-	 * Replace the held transcript with Pi's own. Emits a snapshot, not an upsert.
-	 * A replace, as every adapter's hydrate is (D24). A fork truncates: the
-	 * branch Pi answers is every message the new session holds, and all
-	 * the transcript held past it is the parent's abandoned turn (OW-yudoni,
-	 * OW-sededi), so laying one under the other keeps nothing of the second.
-	 * As of `pi 0.87.1`, and in three runs on `1.2.0`, no event arrived between
-	 * the `fork` response and the `get_messages` answer that followed, nor on a
-	 * resume between `get_state` and `get_messages`: the abandoned turn's last
-	 * events, `agent_settled` among them, all preceded the `fork` response
-	 * (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine). So nothing the live
-	 * stream builds meanwhile is Pi's to keep, and `hydrateWindow` makes it loud.
-	 * Each assistant turn is named the level its message records, as of
-	 * `pi 1.2.0` (OW-zarine), and one written before that stamp from the session
-	 * file's entries (`withLoadedEfforts` in `reducer.ts`, OW-helumu), clamped to
-	 * its turn's model in the catalogue (OW-lehita).
-	 * Both callers read `get_state` first, because whether the current model
-	 * reasons decides what an `off` turn on it is named, and because the model
-	 * it names is what `unrestoredModel` compares the recorded one with.
+	 * Replace the held transcript with Pi's own, emitting a snapshot, as every
+	 * adapter's hydrate does (D24). A fork truncates: the branch Pi answers is
+	 * every message the new session holds, and the rest the transcript held is
+	 * the parent's abandoned turn (OW-yudoni, OW-sededi). As of `pi 0.87.1`
+	 * and `1.2.0` nothing arrived between the `fork` response, or a resume's
+	 * `get_state`, and the `get_messages` answer (docs/BACKENDS.md, "Fork" and
+	 * "Transcript on a resume"), and `hydrateWindow` makes anything that does
+	 * loud. Each turn is named the level it ran at (`withLoadedEfforts`).
+	 *
+	 * Both callers read `get_state` first: whether the current model reasons
+	 * decides what an `off` turn on it is named, and the model it names is what
+	 * `unrestoredModel` compares the recorded one with.
 	 */
 	private async hydrateMessages(): Promise<void> {
 		const [messages, entries, catalogue] = await Promise.all([
@@ -513,67 +484,48 @@ export class PiAdapter implements BackendAdapter {
 	}
 
 	/**
-	 * Stop as Pi's own interactive mode does with Esc (D16): `clear_queue`, then
-	 * `abort`, resolving with the text of every prompt Pi had queued and not
-	 * delivered. As of `pi 1.2.0` (docs/MANUAL_TESTING.md, OW-yewiku), a bare
-	 * `abort` left a steer queued
-	 * behind a tool call as a user message nobody answered, and one queued
-	 * behind a streaming reply to be delivered into the next prompt's run,
-	 * which then never answered that prompt; clearing first took it out in
-	 * both. The abort waits for the clear's answer, so Pi has emptied its
-	 * queues before the turn starts to stop.
+	 * Stop as Pi's own interactive mode does with Esc (D16): `clear_queue`,
+	 * then, once that has answered, `abort`, resolving with the text of every
+	 * prompt Pi had queued and not delivered, steering first. As of `pi 1.2.0`
+	 * (docs/MANUAL_TESTING.md, OW-yewiku) a bare `abort` stranded a steer
+	 * queued behind a tool call as a user message nobody answered, and
+	 * delivered one queued behind a streaming reply into the next prompt's
+	 * run, which then never answered that prompt; clearing first took both
+	 * out. Only text comes back: Pi's response carries no images, and as of
+	 * `pi 1.2.0` Pi queues a prompt's `expandedText`, so a steered
+	 * `/skill:...` comes back expanded (read at the installed package, not
+	 * measured).
 	 *
-	 * What comes back is what Pi queued, and only its text: Pi's response
-	 * carries no images, so a steered prompt's images are lost here, which is
-	 * Pi's limit and not one to work around. And as of `pi 1.2.0`
-	 * `AgentSession.prompt` queues its `expandedText`, after input handlers,
-	 * `_expandSkillCommand` and `expandPromptTemplate` (read at the installed
-	 * package, not measured), so a steered `/skill:...` comes back expanded,
-	 * not as typed. Both queues are returned, steering first, though this
-	 * adapter only ever steers.
+	 * The stop waits for every `prompt` already written to Pi to be answered,
+	 * up to `stopWaitMs` (OW-jifibo): as read at `pi 1.2.0`, not measured,
+	 * `rpc-mode.js` answers a steer `queued` only after `_queueSteer` but runs
+	 * `clear_queue` at once, so a clear sent behind an unanswered steer could
+	 * run first and leave the steer for the abort to strand. The deadline is
+	 * there because Pi answers a prompt only once its preflight is done, an
+	 * extension command's whole handler included (docs/BACKENDS.md, "Stop and
+	 * compaction"); a steer whose preflight outlasts it, as any compaction
+	 * `_prepareRun` runs first on an idle Pi may (read at `pi 1.2.0`), meets
+	 * what a bare abort does to one. A prompt still unanswered then is left
+	 * alone, and its `submit` settles when Pi answers it.
 	 *
-	 * The stop is ordered behind every `prompt` already written to Pi, for up to
-	 * `stopWaitMs`: its `clear_queue` goes out once each has been answered, or at
-	 * that deadline (OW-jifibo, ark3/agentpane#93). As of `pi 1.2.0`, read at
-	 * the installed package and not measured, `rpc-mode.js` starts a prompt
-	 * without awaiting it and answers `queued` only after `_queueSteer`, while it
-	 * runs `clear_queue` at once, so a clear sent behind an unanswered steer can
-	 * run first and leave the steer for the abort to strand.
+	 * A prompt sent while a stop is in flight, from any client, waits for it to
+	 * settle and then goes to the idle Pi the abort leaves, Pi having answered
+	 * `abort` after `agent_settled` on the runs above, so Stop then Send starts
+	 * a fresh turn. Stops overlap -- "Stop and edit"'s at the click, another
+	 * client's, `fork`'s own -- so each follows the one before, and a later one
+	 * usually takes nothing out.
 	 *
-	 * The deadline is there because Pi answers a prompt only once its preflight
-	 * is done, which for an extension command is the command's whole handler.
-	 * As of `pi 1.5.2` one whose handler awaits `ctx.waitForIdle()` was answered
-	 * only at the turn's `agent_settled`, 14 to 19s in, while an `abort` sent
-	 * behind it stopped the turn within 22ms (docs/MANUAL_TESTING.md, "Pi's
-	 * replies to a compaction and an extension command"). The cost: a steer
-	 * whose preflight outlasts the deadline -- which on an idle Pi includes any
-	 * compaction `_prepareRun` runs first, as read at `pi 1.2.0` -- meets what a
-	 * bare abort does to one (OW-yewiku, above). A prompt still unanswered at
-	 * the deadline is left alone, and its `submit` settles when Pi answers it.
-	 *
-	 * A prompt sent while a stop is in flight, from this client or another,
-	 * waits for the stop to settle and then goes out to the idle Pi the abort
-	 * leaves -- on the runs above Pi answered `abort` after `agent_settled` --
-	 * so Stop then Send starts a fresh turn. Each stop follows the one before
-	 * it, because several can overlap: the one "Stop and edit" sends at the
-	 * click, another client's Stop, and the one `fork` sends itself. Each later
-	 * one clears once the one before has answered, and usually takes nothing
-	 * out.
-	 *
-	 * Nothing times the abort out. As of `pi 1.2.0` `AgentSession.abort` ends
+	 * Nothing times the abort out: as of `pi 1.2.0` `AgentSession.abort` ends
 	 * in `waitForIdle` (read at the source), so a turn that never settles
-	 * leaves the stop unanswered. Then every prompt sent after it waits too,
-	 * and with it every verb `SessionManager.#serially` has queued behind that
-	 * prompt on the session: `fork`, `setModel`, `setEffort`, `setName` and
-	 * `compact`. That is chosen knowingly: such a session takes no turn
-	 * whichever way a prompt is answered, and closing it, or Pi dying, rejects
-	 * the stop and then fails what waits behind it rather than leaving it hung.
+	 * leaves the stop, every prompt after it, and every verb
+	 * `SessionManager.#serially` queued behind those prompts waiting. Chosen
+	 * knowingly: such a session takes no turn either way, and closing it, or
+	 * Pi dying, rejects the stop and fails what waits behind it.
 	 *
-	 * If the `clear_queue` succeeds and the `abort` after it fails -- Pi dying
-	 * between the two, in practice -- the stop rejects and the texts the clear
-	 * took out are lost: they are in no session file, and neither wire carries
-	 * a failed stop's texts back. The death itself is reported, through
-	 * `onExit`.
+	 * If `clear_queue` succeeds and `abort` fails, Pi dying between the two in
+	 * practice, the stop rejects and the texts the clear took out are lost: no
+	 * session file holds them, and neither wire carries a failed stop's texts
+	 * back. The death is reported through `onExit`.
 	 */
 	async abort(): Promise<string[]> {
 		let cancel = (): void => {};
@@ -695,33 +647,20 @@ export class PiAdapter implements BackendAdapter {
 		if (forked.data.cancelled) {
 			throw new Error(`Pi fork from entry "${entryId}" was cancelled by an extension`);
 		}
-		// As of `pi 0.84.2` Pi's `fork` is copy-on-write, not an in-place rewind
-		// (MANUAL_TESTING.md OW-pifowo). The original session file is left
-		// byte-identical; the process's active `sessionFile` MOVES to a new
-		// file at the fork call. So the id we hold has diverged from Pi's
-		// active file and must be re-adopted -- otherwise a later turn is keyed
-		// to the abandoned pre-fork branch and a listing indexes a stale id.
-		// Runs forking at the second user message found that new file already
-		// on disk when the fork returned, carrying the rewound prefix (0.85.1,
-		// MANUAL_TESTING.md OW-gajesu, and twice on 1.2.0, OW-vijine; samples
-		// of a race, not an invariant).
-		// A fork at the first user message keeps no user or assistant message, and
-		// on 1.2.0 its file was not on disk when the fork returned and was
-		// written with the branch's first user message (OW-tigaye). Nothing here
-		// depends on either -- the consequence is that a discarded fork at a later
-		// message can leave a real session file for the picker to walk.
-		// Unlike `adoptSessionFile` (the one-time virtual->real id adoption, gated
-		// by `idResolved`), this is an already-resolved session whose active file
-		// genuinely moved, so re-query `get_state` and take the reported file
-		// unconditionally.
+		// As of `pi 0.84.2` Pi's `fork` is copy-on-write (MANUAL_TESTING.md
+		// OW-pifowo): the original file is left byte-identical and the process's
+		// active `sessionFile` moves to a new one, so the id must be re-adopted,
+		// or a later turn is keyed to the abandoned branch. Whether that file is
+		// on disk when the fork returns varies (docs/BACKENDS.md, "Fork");
+		// nothing here depends on it, though a discarded fork at a later message
+		// can leave a real file for the picker to walk. Not `adoptSessionFile`,
+		// the one-time virtual->real adoption: this id had resolved, and moved.
 		//
-		// The `fork` response names no file, so this is where the move is learnt,
-		// and it is announced at once, before the re-sends and the hydrate below
-		// emit anything under it (D24). Anything Pi emits between the `fork`
-		// response and this answer still goes out under the parent's ref; as of
-		// `pi 0.87.1` and again `1.2.0` nothing arrived there
-		// (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine); `hydrateWindow`
-		// makes it loud.
+		// The `fork` response names no file, so the move is learnt here and
+		// announced at once, before the re-sends and the hydrate below emit
+		// anything under it (D24). Anything Pi emits before this answer still
+		// goes out under the parent's ref; as of `pi 0.87.1` and `1.2.0` nothing
+		// did (docs/BACKENDS.md, "Fork"), and `hydrateWindow` makes it loud.
 		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
 		if (state.data.sessionFile) this.moveTo(state.data.sessionFile, "fork");
 		this.model = state.data.model ? modelToInfo(state.data.model).id : this.model;
