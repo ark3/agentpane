@@ -249,6 +249,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	private updateListeners = new Set<(state: AdapterState, change: StateChange) => void>();
 	private errorListeners = new Set<(message: string) => void>();
 	private refListeners = new Set<(ref: SessionRef, cause: "rename" | "fork") => void>();
+	private exitListeners = new Set<(report: string) => void>();
 
 	constructor(ref: SessionRef, options: ClaudeAdapterOptions = {}) {
 		this.currentRef = ref;
@@ -530,6 +531,11 @@ export class ClaudeAdapter implements BackendAdapter {
 		return () => this.refListeners.delete(cb);
 	}
 
+	onExit(cb: (report: string) => void): Unsubscribe {
+		this.exitListeners.add(cb);
+		return () => this.exitListeners.delete(cb);
+	}
+
 	// -- session controls ---------------------------------------------------
 
 	async setModel(model: string): Promise<void> {
@@ -733,9 +739,7 @@ export class ClaudeAdapter implements BackendAdapter {
 			if (!ownership.live) return;
 			this.turnActive = false;
 			this.rejectPendingControls(exitError);
-			this.emitError(
-				error?.message ?? `claude exited (code=${code ?? "null"}, signal=${signal ?? "null"})`,
-			);
+			this.emitExit(exitError.message);
 		});
 		return spawnResult;
 	}
@@ -882,6 +886,10 @@ export class ClaudeAdapter implements BackendAdapter {
 
 	private emitError(message: string): void {
 		for (const listener of [...this.errorListeners]) listener(message);
+	}
+
+	private emitExit(report: string): void {
+		for (const listener of [...this.exitListeners]) listener(report);
 	}
 
 	/** Take `sessionId` as the id, announcing it when it is a different one. */

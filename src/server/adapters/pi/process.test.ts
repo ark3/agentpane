@@ -104,6 +104,8 @@ interface Harness {
 	child: FakeChild;
 	spawnArgs: { command: string; args: string[]; cwd: string }[];
 	errors: string[];
+	/** Each death report `onExit` fired. */
+	exits: string[];
 }
 
 function makeHarness(setTimer?: PiAdapterDeps["setTimer"]): Harness {
@@ -118,7 +120,9 @@ function makeHarness(setTimer?: PiAdapterDeps["setTimer"]): Harness {
 	});
 	const errors: string[] = [];
 	adapter.onError((m) => errors.push(m));
-	return { adapter, child, spawnArgs, errors };
+	const exits: string[] = [];
+	adapter.onExit((report) => exits.push(report));
+	return { adapter, child, spawnArgs, errors, exits };
 }
 
 /**
@@ -233,9 +237,9 @@ describe("PiAdapter.start", () => {
 		h.child.emit("close", -2, null);
 		await started;
 
-		expect(h.errors).toHaveLength(1);
-		expect(h.errors[0]).toContain("ENOENT");
-		expect(h.errors[0]).not.toContain("code=-2");
+		expect(h.exits).toHaveLength(1);
+		expect(h.exits[0]).toContain("ENOENT");
+		expect(h.exits[0]).not.toContain("code=-2");
 	});
 });
 
@@ -2284,9 +2288,9 @@ describe("PiAdapter teardown", () => {
 		h.child.stderr.emit("data", "pi: auth.json.lock: EROFS\n");
 		h.child.emit("close", 1, null);
 
-		expect(h.errors).toHaveLength(1);
-		expect(h.errors[0]).toContain("code=1");
-		expect(h.errors[0]).toContain("EROFS");
+		expect(h.exits).toHaveLength(1);
+		expect(h.exits[0]).toContain("code=1");
+		expect(h.exits[0]).toContain("EROFS");
 	});
 
 	it("rejects in-flight commands and clears the streaming flag when the process dies", async () => {
@@ -2303,6 +2307,16 @@ describe("PiAdapter teardown", () => {
 		expect(h.adapter.getState().isStreaming).toBe(false);
 	});
 
+	it("fires onExit once with the death report when Pi exits unasked, and raises no onError (#97)", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+
+		h.child.emit("close", 1, null);
+
+		expect(h.exits).toEqual([expect.stringContaining("code=1")]);
+		expect(h.errors).toEqual([]);
+	});
+
 	it("is silent when a disposed adapter's process closes, since that is its expected end", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
@@ -2311,6 +2325,7 @@ describe("PiAdapter teardown", () => {
 		h.child.emit("close", null, "SIGTERM");
 
 		expect(h.child.killed).toBe(true);
+		expect(h.exits).toEqual([]);
 		expect(h.errors).toEqual([]);
 	});
 
@@ -2354,10 +2369,10 @@ describe("PiAdapter teardown", () => {
 			// A child that outlives SIGKILL must not hang shutdown forever.
 			await vi.advanceTimersByTimeAsync(1_000);
 			await expect(disposing).resolves.toBeUndefined();
-			// Nor go unreported: a disposed adapter raises no `onError`, and this
+			// Nor go unreported: a disposed adapter fires no `onExit`, and this
 			// is the call shutdown makes, so stderr is where the survivor goes
 			// (OW-tozuyo).
-			expect(h.errors).toEqual([]);
+			expect(h.exits).toEqual([]);
 			expect(logged).toHaveBeenCalledOnce();
 			expect(String(logged.mock.calls[0]?.[0])).toMatch(/Pi process did not close within 1000ms of SIGKILL/);
 		} finally {
@@ -2393,7 +2408,7 @@ describe("PiAdapter teardown", () => {
 		await expect(h.adapter.submit("hello")).rejects.toThrow(/not running/);
 	});
 
-	it("reports a stdin failure through onError at the death, rather than throwing out of the pipe (OW-sozopu)", async () => {
+	it("reports a stdin failure through onExit at the death, rather than throwing out of the pipe (OW-sozopu)", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
 
@@ -2404,10 +2419,10 @@ describe("PiAdapter teardown", () => {
 		h.child.emit("close", 1, null);
 
 		await expect(submitted).rejects.toThrow(/before responding/);
-		expect(h.errors).toHaveLength(1);
-		expect(h.errors[0]).toContain("EPIPE");
+		expect(h.exits).toHaveLength(1);
+		expect(h.exits[0]).toContain("EPIPE");
 		// EPIPE is a symptom of the death, not its cause: the exit status stays.
-		expect(h.errors[0]).toContain("code=1");
+		expect(h.exits[0]).toContain("code=1");
 	});
 
 	it("reports a death once, even if close somehow arrives twice", async () => {
@@ -2417,7 +2432,7 @@ describe("PiAdapter teardown", () => {
 		h.child.emit("close", 1, null);
 		h.child.emit("close", 1, null);
 
-		expect(h.errors).toHaveLength(1);
+		expect(h.exits).toHaveLength(1);
 	});
 
 	it("fails a command written after the process is gone instead of writing into the void", async () => {

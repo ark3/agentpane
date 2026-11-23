@@ -197,7 +197,7 @@ export class ChildProcessShell {
 	 * licence to exit and a shutdown that hangs forever is its own failure.
 	 * Nobody hears that report through `onExit`: every caller of `kill()` has
 	 * let go of its listeners first -- Codex's connection has no holders left,
-	 * Claude's ownership is no longer live, and Pi reports no `onError` once
+	 * Claude's ownership is no longer live, and Pi reports no death once
 	 * disposed. So the shell also writes the survivor to the server's stderr
 	 * itself, before `kill()` resolves; at shutdown the server exits right
 	 * after, and stderr is the one place a person still reads (OW-tozuyo).

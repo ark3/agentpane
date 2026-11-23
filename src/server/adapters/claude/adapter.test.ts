@@ -290,15 +290,33 @@ describe("ClaudeAdapter lifecycle", () => {
 		await expect(starting).rejects.toThrow("disposed during startup");
 	});
 
-	it("surfaces a child exit as an error", async () => {
+	it("fires onExit once with the death report when the child exits unasked, and raises no onError (#97)", async () => {
 		const h = harness();
 		await h.adapter.start({ cwd: "/workspace" });
 		const errors = vi.fn();
+		const exits = vi.fn();
 		h.adapter.onError(errors);
+		h.adapter.onExit(exits);
 
 		h.proc().exit(1, null, new Error("claude exited (code=1, signal=null)\nboom"));
 
-		expect(errors).toHaveBeenCalledWith("claude exited (code=1, signal=null)\nboom");
+		expect(exits).toHaveBeenCalledOnce();
+		expect(exits).toHaveBeenCalledWith("claude exited (code=1, signal=null)\nboom");
+		expect(errors).not.toHaveBeenCalled();
+	});
+
+	it("fires no onExit for the child a disposal killed (#97)", async () => {
+		const h = harness();
+		await h.adapter.start({ cwd: "/workspace" });
+		const exits = vi.fn();
+		h.adapter.onExit(exits);
+
+		await h.adapter.dispose();
+		// The fake's kill() runs no exit handler, so the close it causes is
+		// driven by hand.
+		h.proc().exit(null, "SIGTERM");
+
+		expect(exits).not.toHaveBeenCalled();
 	});
 });
 
@@ -430,6 +448,8 @@ describe("ClaudeAdapter turns", () => {
 		await adapter.start({ cwd: "/workspace" });
 		const errors: string[] = [];
 		adapter.onError((message) => errors.push(message));
+		const exits: string[] = [];
+		adapter.onExit((report) => exits.push(report));
 		const before = proc.written.length;
 
 		proc.closed = true;
@@ -446,11 +466,8 @@ describe("ClaudeAdapter turns", () => {
 		proc.exit(1, null, new Error("claude died"));
 
 		expect(proc.written.length).toBe(before);
-		expect(errors).toEqual([
-			expect.stringContaining("can_use_tool"),
-			expect.stringContaining("elicitation"),
-			"claude died",
-		]);
+		expect(errors).toEqual([expect.stringContaining("can_use_tool"), expect.stringContaining("elicitation")]);
+		expect(exits).toEqual(["claude died"]);
 	});
 
 	it("replays a recorded turn through the live process seam", async () => {

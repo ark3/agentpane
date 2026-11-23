@@ -4,7 +4,8 @@
  * FROZEN INTERFACE (DESIGN "The backend adapter contract"). The Pi, Codex,
  * and Claude Code adapters all implement it; changing it changes all three --
  * raise it before editing. D24 raised `onRefChanged` (OW-nikogo). D27 raised
- * `setName` and `AdapterState.name` (OW-jamaha).
+ * `setName` and `AdapterState.name` (OW-jamaha). ark3/agentpane#97 raised
+ * `onExit`.
  *
  * An adapter owns one sandboxed subprocess's stdio and is responsible for one
  * thing above all: producing and maintaining an `AgentMessage[]` plus a
@@ -232,6 +233,15 @@ export interface BackendAdapter {
 	 * the adapter refused a request the agent sent, naming its kind (D2a).
 	 */
 	onError(cb: (message: string) => void): Unsubscribe;
+	/**
+	 * Fires once when the backend's process is gone without being asked to,
+	 * with the death report: its reason and the tail of its stderr. Never
+	 * fired by `dispose()`. A death raises this and no `onError`. The server
+	 * lets the session go, its `ended` carrying the report (D26); an exit
+	 * inside `start()` is the start's failure instead, and the server ignores
+	 * this for an adapter it has not published.
+	 */
+	onExit(cb: (report: string) => void): Unsubscribe;
 	/**
 	 * Fires when the backend says something non-fatal the human should see
 	 * (OW-tujiya). Never an error: nothing here says a turn failed, so it

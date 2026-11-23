@@ -594,14 +594,18 @@ describe("CodexAdapter lifecycle", () => {
 		expect(disposed).toBe(true);
 	});
 
-	it("surfaces the process-provided exit cause to error subscribers", async () => {
+	it("fires onExit once with the process-provided exit cause, and raises no onError (#97)", async () => {
 		const { adapter, proc } = await startedAdapter();
 		const errors = vi.fn();
+		const exits = vi.fn();
 		adapter.onError(errors);
+		adapter.onExit(exits);
 
 		proc.exit(null, null, new Error("Failed to spawn Codex: ENOENT\nstderr detail"));
 
-		expect(errors).toHaveBeenCalledWith("Failed to spawn Codex: ENOENT\nstderr detail");
+		expect(exits).toHaveBeenCalledOnce();
+		expect(exits).toHaveBeenCalledWith("Failed to spawn Codex: ENOENT\nstderr detail");
+		expect(errors).not.toHaveBeenCalled();
 	});
 
 	it("rejects start after public disposal without spawning", async () => {
@@ -2205,6 +2209,8 @@ describe("CodexAdapter requests, refused at arrival (D2a)", () => {
 		await adapter.start({ cwd: "/workspace" });
 		const errors: string[] = [];
 		adapter.onError((message) => errors.push(message));
+		const exits: string[] = [];
+		adapter.onExit((report) => exits.push(report));
 		const before = responses(proc).length;
 
 		proc.closed = true;
@@ -2220,8 +2226,8 @@ describe("CodexAdapter requests, refused at arrival (D2a)", () => {
 		expect(errors).toEqual([
 			expect.stringContaining("item/fileChange/requestApproval"),
 			expect.stringContaining("workspace/trust/request"),
-			"app-server died",
 		]);
+		expect(exits).toEqual(["app-server died"]);
 	});
 
 	it("declines a child-thread blocking request through the parent, under the child's wire id (OW-futewo)", async () => {
@@ -2823,17 +2829,29 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		expect(proc.killCount).toBe(1);
 	});
 
-	it("tells both adapters when the shared child dies", async () => {
+	it("tells both adapters when the shared child dies, each once (#97)", async () => {
 		const { proc, parent, borrower, forked } = await forkedPair();
 		await borrower.start(forked.start as { cwd: string; resumeId: string });
-		const errors: string[] = [];
-		parent.onError((message) => errors.push(`parent: ${message}`));
-		borrower.onError((message) => errors.push(`fork: ${message}`));
+		const exits: string[] = [];
+		parent.onExit((report) => exits.push(`parent: ${report}`));
+		borrower.onExit((report) => exits.push(`fork: ${report}`));
 
 		proc.exit(1, null, new Error("app-server died"));
 
-		expect(errors).toHaveLength(2);
-		expect(errors.some((m) => m.startsWith("parent:"))).toBe(true);
-		expect(errors.some((m) => m.startsWith("fork:"))).toBe(true);
+		expect(exits.sort()).toEqual(["fork: app-server died", "parent: app-server died"]);
+	});
+
+	it("fires no onExit for a holder released before the shared child dies (#97)", async () => {
+		const { proc, parent, borrower, forked } = await forkedPair();
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+		const exits: string[] = [];
+		parent.onExit((report) => exits.push(`parent: ${report}`));
+		borrower.onExit((report) => exits.push(`fork: ${report}`));
+
+		await parent.dispose();
+		expect(proc.killCount).toBe(0);
+		proc.exit(1, null, new Error("app-server died"));
+
+		expect(exits).toEqual(["fork: app-server died"]);
 	});
 });

@@ -66,7 +66,7 @@ export class CodexConnection {
 				this.registry?.forget(this);
 				// Every holder, not just the one that spawned the child: a dead
 				// app-server ends all of these sessions, and a holder that is not
-				// told ends silently, with no error banner and no explanation.
+				// told leaves its session attached over a dead child.
 				for (const holder of [...this.#holders]) holder.handlers.onExit(code, signal, error);
 			},
 		});

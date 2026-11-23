@@ -48,6 +48,7 @@ type UpdateListener = (state: AdapterState, change: StateChange) => void;
 type ErrorListener = (message: string) => void;
 type RefListener = (ref: SessionRef, cause: "rename" | "fork") => void;
 type NoticeListener = (notice: AgentNotice) => void;
+type ExitListener = (report: string) => void;
 
 interface PendingCommand {
 	resolve: (response: unknown) => void;
@@ -280,6 +281,7 @@ export class PiAdapter implements BackendAdapter {
 	private readonly errorListeners = new Set<ErrorListener>();
 	private readonly refListeners = new Set<RefListener>();
 	private readonly noticeListeners = new Set<NoticeListener>();
+	private readonly exitListeners = new Set<ExitListener>();
 
 	private readonly pendingCommands = new Map<string, PendingCommand>();
 	private nextCommandId = 0;
@@ -577,7 +579,7 @@ export class PiAdapter implements BackendAdapter {
 	 * between the two, in practice -- the stop rejects and the texts the clear
 	 * took out are lost: they are in no session file, and neither wire carries
 	 * a failed stop's texts back. The death itself is reported, through
-	 * `onError`.
+	 * `onExit`.
 	 */
 	async abort(): Promise<string[]> {
 		let cancel = (): void => {};
@@ -804,6 +806,11 @@ export class PiAdapter implements BackendAdapter {
 		return () => this.refListeners.delete(cb);
 	}
 
+	onExit(cb: ExitListener): Unsubscribe {
+		this.exitListeners.add(cb);
+		return () => this.exitListeners.delete(cb);
+	}
+
 	/**
 	 * Each `notify` an extension sends (D11, OW-fusoba). Handed on as its line
 	 * arrives, `start()` or no `start()`: an extension notifies from its
@@ -971,7 +978,7 @@ export class PiAdapter implements BackendAdapter {
 			this.emitUpdate("status");
 		}
 		// A disposed adapter closing is the expected end of its life, not news.
-		if (!this.disposed) this.emitError(message);
+		if (!this.disposed) this.emitExit(message);
 	}
 
 	private sendCommand<R>(cmd: PiCommand, opens?: HydrateWindow): Promise<R> {
@@ -1004,6 +1011,10 @@ export class PiAdapter implements BackendAdapter {
 
 	private emitNotice(notice: AgentNotice): void {
 		for (const cb of this.noticeListeners) cb(notice);
+	}
+
+	private emitExit(report: string): void {
+		for (const cb of this.exitListeners) cb(report);
 	}
 
 	/** Take `sessionFile` as the id, announcing it when it is a different one. */

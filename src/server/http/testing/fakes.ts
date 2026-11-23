@@ -229,6 +229,7 @@ export class FakeAdapter implements BackendAdapter {
 	#errors = new Set<(message: string) => void>();
 	#notices = new Set<(notice: AgentNotice) => void>();
 	#refChanges = new Set<(ref: SessionRef, cause: "rename" | "fork") => void>();
+	#exits = new Set<(report: string) => void>();
 
 	/** Not stable at construction -- see `materialiseOnStart`/`materialiseOnSubmit`. */
 	get ref(): SessionRef {
@@ -351,6 +352,11 @@ export class FakeAdapter implements BackendAdapter {
 	onRefChanged(cb: (ref: SessionRef, cause: "rename" | "fork") => void): Unsubscribe {
 		this.#refChanges.add(cb);
 		return () => this.#refChanges.delete(cb);
+	}
+
+	onExit(cb: (report: string) => void): Unsubscribe {
+		this.#exits.add(cb);
+		return () => this.#exits.delete(cb);
 	}
 
 	async setModel(model: string): Promise<void> {

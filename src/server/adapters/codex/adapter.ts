@@ -232,6 +232,7 @@ export class CodexAdapter implements BackendAdapter {
 	private errorListeners = new Set<(message: string) => void>();
 	private noticeListeners = new Set<(notice: AgentNotice) => void>();
 	private refListeners = new Set<(ref: SessionRef, cause: "rename" | "fork") => void>();
+	private exitListeners = new Set<(report: string) => void>();
 
 	constructor(ref: SessionRef, options: CodexAdapterOptions = {}) {
 		this.currentRef = ref;
@@ -512,7 +513,7 @@ export class CodexAdapter implements BackendAdapter {
 					error?.message ?? `codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`;
 				this.renaming?.reject(new Error(message));
 				this.starting?.reject(new Error(message));
-				this.emitError(message);
+				this.emitExit(message);
 			},
 		});
 	}
@@ -913,6 +914,11 @@ export class CodexAdapter implements BackendAdapter {
 		return () => this.refListeners.delete(cb);
 	}
 
+	onExit(cb: (report: string) => void): Unsubscribe {
+		this.exitListeners.add(cb);
+		return () => this.exitListeners.delete(cb);
+	}
+
 	/**
 	 * Take `threadId` as the id, announcing it when it is a different one. Always
 	 * a rename: a Codex fork is another thread with an adapter of its own.
@@ -1134,6 +1140,10 @@ export class CodexAdapter implements BackendAdapter {
 
 	private emitError(message: string): void {
 		for (const listener of [...this.errorListeners]) listener(message);
+	}
+
+	private emitExit(report: string): void {
+		for (const listener of [...this.exitListeners]) listener(report);
 	}
 
 	private owns(ownership: ClientOwnership): boolean {
