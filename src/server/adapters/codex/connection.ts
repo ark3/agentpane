@@ -8,28 +8,22 @@
  * driving the parent afterwards (home server, 2026-09-15, `codex-cli 0.154.0`;
  * `docs/MANUAL_TESTING.md`, "The app-server that mints a fork can also drive
  * it", OW-lajehi). So the fork's adapter borrows this connection instead of
- * spawning its own, and the child outlives every holder but the last.
+ * spawning its own, and the child outlives every holder but the last. N, not
+ * two: a fork of a fork sends `thread/fork` over this same connection.
  *
- * Sharing the `CodexProcess` and giving each adapter its own `CodexClient`
- * would be a quieter-looking bug: both clients start `nextId = 1` and both read
- * the same line stream, so one adapter's response settles the other adapter's
- * request of the same id. There is exactly one id space here because there is
- * exactly one client.
+ * One `CodexClient` for every holder, not one each: two would both number
+ * from 1 over the same line stream, so one's response would settle the
+ * other's request of that id.
  *
- * N, not two. A fork of a fork sends `thread/fork` over this same connection,
- * so its writer is this same child, and the count has no upper bound a pair
- * could express.
- *
- * A holder letting go does NOT let go of its thread. `thread/unsubscribe`
- * answers `{"status":"unsubscribed"}` and leaves the writer lock exactly where
- * it was -- a second app-server asking to resume that thread is still refused
- * with `-32600`, on the thread this process resumed and on the thread it minted
- * alike (home server, 2026-09-15, `codex-cli 0.154.0`; `docs/MANUAL_TESTING.md`,
- * "`thread/unsubscribe` does not release a Codex thread's writer lock",
- * OW-voyezi). Only the child's death releases anything, so while a sibling
- * holds this connection open, every thread it has ever opened stays this
- * child's. That is what `CodexConnectionRegistry` exists to say: re-attaching
- * such a thread has to come back HERE rather than spawn.
+ * A holder letting go does NOT let go of its thread: after
+ * `thread/unsubscribe` answers `{"status":"unsubscribed"}`, a second
+ * app-server resuming the thread is still refused with `-32600`, whether this
+ * process resumed it or minted it (home server, 2026-09-15, `codex-cli
+ * 0.154.0`; `docs/MANUAL_TESTING.md`, "`thread/unsubscribe` does not release
+ * a Codex thread's writer lock", OW-voyezi). Only the child's death releases
+ * it, so while any holder keeps this connection open, every thread it has
+ * opened stays this child's, and re-attaching one must come back HERE
+ * (`CodexConnectionRegistry`).
  */
 
 import { CodexClient, type CodexClientView } from "./jsonrpc.ts";
@@ -145,34 +139,24 @@ export class CodexConnection {
 	}
 
 	/**
-	 * Who answers a blocking request from `threadId`.
+	 * Who answers a blocking request from `threadId`: the holder driving that
+	 * thread, else the connection's first.
 	 *
-	 * A thread some holder is driving is answered by that holder. A thread
-	 * NOBODY is driving is a spawned subagent's (D19), and D19 requires its
-	 * approval to surface in the session that spawned it, which since D2a
-	 * refuses every request at arrival means the error line naming it -- but
-	 * nothing in `CommandExecutionRequestApprovalParams`,
-	 * `FileChangeRequestApprovalParams` or `McpServerElicitationRequestParams`
-	 * names the parent thread, so which session that is cannot be read off the
-	 * wire. The connection's first holder answers instead: it is deterministic,
-	 * it is the session that spawned the connection, and being wrong costs only
-	 * attribution -- the refusal carries the wire id, so it still unblocks the
-	 * right child.
+	 * A thread nobody drives is a spawned subagent's, whose request D19 would
+	 * surface in the session that spawned it, but no approval or elicitation
+	 * params name the parent thread, so that session cannot be read off the
+	 * wire. The first holder is deterministic and spawned the connection, and
+	 * being wrong costs only attribution: the refusal carries the wire id, so
+	 * it still unblocks the right child. "Whoever is mid-turn" would still
+	 * need a tie-break, since a fork and its parent can stream at once; and
+	 * under D7a's `approvalPolicy: "never"` no approval request had been seen
+	 * reaching agentpane as of `codex-cli 0.154.0` (D18, OW-zogogo).
 	 *
-	 * Guessing by "whoever is mid-turn" was considered and declined: a fork and
-	 * its parent can stream at once, so it needs a tie-break anyway and would
-	 * only move where the guess is wrong. Under D7a's `approvalPolicy: "never"`
-	 * no approval request has been observed reaching agentpane at all as of
-	 * `codex-cli 0.154.0` (D18, OW-zogogo), so this routes an input that does not
-	 * currently arrive and the cheap deterministic rule is the right size.
-	 *
-	 * Only an `answerable` holder is ever a candidate, for the fork's own thread
-	 * as much as for the fallback. A holder joins at fork time -- that is what
-	 * takes the share early enough to survive a `close()` on the parent -- but
-	 * its adapter is not started until the fork's own start, so a borrower not
-	 * yet started cannot write the refusal and nothing has subscribed to hear
-	 * the error naming it. Handing it a blocking request is D2a's silent stall,
-	 * and it would pin this connection with it.
+	 * Only an `answerable` holder is a candidate, for its own thread too: a
+	 * borrower joins at fork time, to hold its share across a `close()` on the
+	 * parent, but nothing has subscribed to it until the fork's own start, and
+	 * a blocking request handed to it then is D2a's silent stall, pinning this
+	 * connection.
 	 */
 	#recipientFor(threadId: string | null): CodexConnectionHolder | undefined {
 		const answerable = this.#holders.filter((holder) => holder.answerable);
@@ -238,20 +222,13 @@ export class CodexConnectionHolder implements CodexClientView {
 
 /**
  * Which live `codex app-server` holds a thread, for the attaches that must not
- * spawn (OW-voyezi).
- *
- * A Codex thread's writer lock is the process that opened it and nothing short
- * of that process dying gives it up -- not the adapter being disposed, and not
- * `thread/unsubscribe` (see `CodexConnection`'s docblock). Before OW-lajehi
- * that was invisible, because the only holder's disposal killed the child; a
- * fork borrowing its parent's connection is what makes a thread outlive the
- * adapter that opened it, and a re-attach on either side of that pair then
- * meets a lock nobody is holding on agentpane's side of the wire.
+ * spawn (OW-voyezi): a thread outlives the adapter that opened it while a
+ * borrower keeps its child alive (`CodexConnection`'s docblock).
  *
  * One instance per `CodexAdapterFactory`, handed to every adapter it builds and
- * to the borrowers those adapters mint. It is deliberately NOT a module-level
- * singleton: two factories in one process (the tests build several) must not
- * see each other's children.
+ * to the borrowers those adapters mint; not a module-level singleton, since
+ * two factories in one process (the tests build several) must not see each
+ * other's children.
  *
  * Entries are dropped by the connection itself, on the last release and on the
  * child's exit -- never by an adapter disposing, which is the whole point.
