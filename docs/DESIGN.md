@@ -351,7 +351,8 @@ All three backends' children run in one shell, `ChildProcessShell` in `src/serve
 - Keep protocol fixtures in the repo so tests do not require live model calls.
 
 `bun run test:browser` remains separate from `bun run check`: the latter is the fast browser-free gate, while browser provisioning and real layout belong to a separate run selected by the touch rules in `AGENTS.md`.
-`.github/workflows/ci.yml` runs both commands as sibling jobs rather than hiding Playwright behind an environment flag in `check` (OW-49, OW-bafeja).
+`bun run test:emacs`, the Emacs client's ERT suite, stays out of `check` too, since a claude.ai cloud container has no Emacs.
+`.github/workflows/ci.yml` runs all three commands as sibling jobs rather than hiding Playwright behind an environment flag in `check` (OW-49, OW-bafeja), the ERT suite on Emacs 31.
 
 ## Remaining open questions
 

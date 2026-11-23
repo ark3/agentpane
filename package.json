@@ -18,6 +18,7 @@
     "test": "TZ=Asia/Kolkata vitest run",
     "test:watch": "TZ=Asia/Kolkata vitest",
     "test:browser": "playwright test",
+    "test:emacs": "emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json",
     "check": "bun run typecheck && bun run test"
   },
