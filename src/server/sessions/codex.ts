@@ -6,21 +6,15 @@
  * on this machine use an older bare `{id,timestamp}` header with no `cwd`.
  * Both are handled; anything else is bucketed unknown rather than thrown.
  *
- * Subagent rollouts are listed like any other session (D19): a spawned thread
- * writes its own rollout, and nothing here filters it out. The marker is
- * `session_meta.payload.thread_source === "subagent"` -- census on the home
- * server 2026-09-11, over the 72 September rollouts written by `codex-cli`
- * 0.150.1 through 0.154.0: 45 carry it. `forked_from_id` is NOT a reliable
- * second marker; only 39 of those 45 carry one, and all six without it were
- * written by 0.154.0, which emits it for 5 of its 11 subagent rollouts.
- * The parent's transcript links to the child by id, and that link resolves
- * through `getSession` and `sessions/preview`, which locate by filename and so
- * would keep reaching a child even if the listing ever hid one.
+ * Subagent rollouts are listed like any other session, unfiltered (D19, which
+ * has the census of their `thread_source: "subagent"` marker and why a
+ * hidden child would stay reachable). `forked_from_id` is NOT a reliable
+ * second marker: on the home server on 2026-09-11, 6 of the 45 subagent
+ * rollouts `codex-cli` 0.150.1 through 0.154.0 wrote carried none, all six
+ * by 0.154.0, which emitted it for 5 of its 11.
  *
- * Preview: see SYNTHETIC_USER_PREFIXES below -- this is the one place this
- * module goes beyond what DESIGN/HANDOFF describe, because "first user
- * message" turned out not to mean what it sounds like for Codex. Flagged in
- * the agent report.
+ * Preview: "first user message" does not mean what it sounds like for Codex;
+ * see `SYNTHETIC_USER_PREFIXES`.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -44,20 +38,16 @@ import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
  * instructions, `<recommended_plugins>`, project `<user_instructions>`. None
  * of it is something a human typed.
  *
- * Census on this machine (2026-08-11, 583 files): a random sample of 20
- * sessions found the first user-role item was *entirely* synthetic wrapper
- * content in 18/20 of them; the real first human message was typically the
- * second or third user-role item, several hundred to several thousand bytes
- * in. Naively using "the first user message" as DESIGN/HANDOFF describe it
- * would show a system-prompt dump as the preview almost every time.
+ * Census on this machine (2026-08-11, 583 files): in 18 of a random sample of
+ * 20 sessions the first user-role item was *entirely* synthetic wrapper
+ * content, the real first human message typically the second or third. So
+ * "the first user message", as DESIGN/HANDOFF describe the preview, would
+ * show a system-prompt dump almost every time.
  *
- * This prefix list is therefore a heuristic, not a documented contract, and
- * will need to grow as injected wrapper content drifts -- same spirit as the
- * header-format drift D9 already calls out for the session header itself.
- *
- * It serves enumeration and the transcript preview of a rollout that takes
- * the fallback. One that takes the item path draws only what the user typed
- * and never reaches this list (`extractStoreTurn`).
+ * A heuristic, not a documented contract: the list will need to grow as the
+ * wrapper content drifts. It serves enumeration and the transcript preview
+ * of a rollout that takes the fallback; one that takes the item path draws
+ * only what the user typed and never reaches it (`extractStoreTurn`).
  */
 const SYNTHETIC_USER_PREFIXES = [
 	"<environment_context>",
@@ -308,44 +298,29 @@ function turnSettings(line: string): CodexTurnSettings | null {
  * instead, after a second `session_meta`, and so draws whole with no base to
  * follow; no version between the two has been looked at.
  *
- * The ordinal counts records over the named thread's whole history, not its
- * file: a thread's own line n (header first, from 0) is ordinal n plus
- * whatever that thread itself inherited. Measured on 0.156.0 with
- * `resources/probes/codex_fork_history_probe.py`: a fork of a fork taken after
- * the first fork's own turn named that fork at ordinal 27, which is the 13
- * records it inherited plus the 14 lines of its own file through that turn's
- * `task_complete`, and whose byte offset ended at exactly that 14th line. The
- * byte offset is file-local and would do as well; the ordinal is used because
- * the line reader counts lines, not bytes. A fork of a fork cut inside the
- * first fork's inherited history names the grandparent instead (0.154.0,
- * 2026-09-15 on the home server), which is why the base, not
- * `forked_from_id`, is followed. Every cut measured fell between turns, at a
- * `task_complete` or at a `thread_settings_applied` just after one, since
- * `lastTurnId` forks whole turns. See `docs/MANUAL_TESTING.md`, "A Codex
- * fork's rollout names where its inherited history ends (OW-buligi)".
- *
- * A subagent's rollout carries `forked_from_id` but, across the 43 on the home
- * server written by 0.150.1 through 0.154.0, never `history_base`: its file
- * repeats its parent's records inline, like the 0.147.0 fork. Following
- * `forked_from_id` would draw that history twice.
+ * The ordinal counts records over the named thread's whole history, its own
+ * inherited records first, where the byte offset is local to its file
+ * (0.156.0, `resources/probes/codex_fork_history_probe.py`); the ordinal is
+ * used because the line reader counts lines, not bytes. A fork of a fork cut
+ * inside the first fork's inherited history names the grandparent instead
+ * (0.154.0, 2026-09-15 on the home server), which is why the base, not
+ * `forked_from_id`, is followed. A subagent's rollout carries
+ * `forked_from_id` but no `history_base`, and repeats its parent's records
+ * inline (all 43 on the home server, 0.150.1 through 0.154.0), so following
+ * `forked_from_id` would draw that history twice. See
+ * `docs/MANUAL_TESTING.md`, "A Codex fork's rollout names where its
+ * inherited history ends (OW-buligi)".
  *
  * Neither kind repeats its parent's item records (OW-luvema; home server,
- * 2026-10-01), so the cut serves a rollout drawn from those unchanged. None of
- * the 19 forks there with a `history_base` (0.154.0 and 0.156.0) shares an
+ * 2026-10-01), so the cut serves a rollout drawn from those unchanged: none
+ * of the 19 forks there with a `history_base` (0.154.0 and 0.156.0) shares an
  * item id with its base, nor any of the 26 subagents written by 0.153.0
- * through 0.154.0 that name their parent in `forked_from_id`: what such a
- * subagent copies inline is some of the parent's `response_item` messages.
- * Of the 32 subagents from those versions, the 10 that store collab calls
- * take the fallback (`extractStoreTurn`) and draw that copy as before; the
- * other 22 draw from their own item records and show none of it, and 17 of
- * them so lose a user message the preview drew before. That matches live:
- * on `codex-cli` 0.157.1 such a thread, loaded through its parent, holds
- * only its own items and no `userMessage`, and agentpane's own attach is
- * refused outright (`docs/MANUAL_TESTING.md`, "A Codex subagent's live
- * thread holds none of the parent messages its rollout copies
- * (OW-hagito)"). The ten 0.150.1 subagents that carry item records carry
- * only copies of their parent's `SubAgentActivity`, and draw from their
- * `response_item`s as before.
+ * through 0.154.0 that name their parent, whose inline copy is of the
+ * parent's `response_item` messages. A subagent that takes the item path
+ * (`extractStoreTurn`) so draws none of that copy, which matches live: on
+ * `codex-cli` 0.157.1 such a thread holds only its own items
+ * (`docs/MANUAL_TESTING.md`, "A Codex subagent's live thread holds none of
+ * the parent messages its rollout copies (OW-hagito)").
  */
 function historyBase(header: string): { threadId: string; endOrdinal: number } | null {
 	let parsed: unknown;
@@ -598,23 +573,22 @@ function threadItem(item: RolloutItem): ThreadItem | null {
 /**
  * One transcript message from a Codex store line: the preview's fallback path.
  *
- * The preview has two. A rollout that carries `event_msg` records of type
- * `item_completed` -- the rollout's copy of each item the thread's live stream
- * completed, same ids, same order (`docs/MANUAL_TESTING.md`, "Codex fixtures
- * that keep their rollout (OW-zadupu)", `codex-cli 0.157.1`) -- can draw its
- * items from those alone: `threadItem` translates each into the `ThreadItem`
- * the live `mapItem` takes, so live and preview have one mapper (OW-luvema).
- * A rollout with none, or whose records are not a full copy, comes here
- * instead, and this maps its Responses API `response_item` payloads directly,
- * with the differences from live that `codex-conformance.test.ts` once listed
- * accepted for those files as a first cut: injected user-role messages that
- * `SYNTHETIC_USER_PREFIXES` misses, an `exec` script for every tool the model
- * ran that way, and `isError: false` on every result.
+ * A rollout that carries `event_msg` records of type `item_completed` -- the
+ * rollout's copy of each item the thread's live stream completed, same ids,
+ * same order (`docs/MANUAL_TESTING.md`, "Codex fixtures that keep their
+ * rollout (OW-zadupu)", `codex-cli 0.157.1`) -- draws its items from those
+ * alone, through `threadItem` and the live `mapItem`, so live and preview
+ * have one mapper (OW-luvema). A rollout with none, or whose records are not
+ * a full copy, comes here, and this maps its Responses API `response_item`
+ * payloads directly, accepting as a first cut these differences from live:
+ * injected user-role messages that `SYNTHETIC_USER_PREFIXES` misses, an
+ * `exec` script for every tool the model ran that way, and `isError: false`
+ * on every result.
  *
  * A rollout takes the item path when one of its records translates and it
  * stores no collab call as a `function_call` in the `collaboration`
- * namespace. Both conditions are measured, on the home server's
- * `~/.codex/sessions` on 2026-10-01:
+ * namespace (`projectRollout`). Both conditions are measured, on the home
+ * server's `~/.codex/sessions` on 2026-10-01:
  *
  * - On `codex-cli` 0.150.1, 17 rollouts carry `item_completed` records of
  *   `SubAgentActivity` alone -- seven `vscode` threads that spawned subagents,
@@ -792,59 +766,48 @@ interface PreviewContext {
 
 /**
  * Compaction on disk, and the pre-compaction token figure that goes on its
- * marker (OW-bisubi). Two record types matter, neither of them a
- * `response_item`:
+ * marker (OW-bisubi). Two record types matter, neither a `response_item`:
  *
  * - `{"type":"compacted","payload":{...}}` is the compaction itself, one per
- *   event. Its payload has no `type` field at all; the keys are `message`,
+ *   event, its payload with no `type` field: keys `message`,
  *   `replacement_history`, `window_number`, `first_window_id`,
  *   `previous_window_id`, `window_id` on `codex-cli` 0.147.0 and 0.150.1, plus
  *   `compaction_response_id`, `guardian_history` and
- *   `latest_token_usage_record` on 0.153.0. 0.154.0 is unmeasured -- it wrote
- *   no compaction in any rollout on the home server as of 2026-09-13.
- *   0.150.1 also writes an `event_msg`/`context_compacted` a few milliseconds
- *   later; matching that too would draw two markers for one compaction, so
- *   only `compacted` is matched.
+ *   `latest_token_usage_record` on 0.153.0; 0.154.0 wrote no compaction on
+ *   the home server as of 2026-09-13. 0.150.1 also writes an
+ *   `event_msg`/`context_compacted` a few milliseconds later, which is not
+ *   matched, or one compaction would draw two markers.
  * - `{"type":"event_msg","payload":{"type":"token_count","info":{...}}}`
- *   carries the figure. `tokensBefore` is `info.last_token_usage.total_tokens`
- *   of the last such record strictly before the `compacted` one, which is the
- *   disk analogue of the live path's sample at `item/started
- *   contextCompaction` (OW-kelomi, `adapters/codex/reducer.ts`) and has to mean
- *   the same thing, because both markers can be on one screen. Those two
- *   sampling points are not the same moment -- live samples before the
- *   compaction runs, and the `compacted` record is written at its completion --
+ *   carries the figure: `info.last_token_usage.total_tokens` of the last such
+ *   record before the `compacted` one. It has to mean what the live path's
+ *   sample at `item/started contextCompaction` means (OW-kelomi,
+ *   `adapters/codex/reducer.ts`), as both markers can be on one screen. Live
+ *   samples before the compaction runs and `compacted` is written at its end,
  *   and they agree only because the intermediate updates the live path
- *   deliberately refuses (16304 -> 14692 -> 4844 in `docs/MANUAL_TESTING.md`)
- *   are not persisted as `token_count` records. Measured so on 0.150.1 and
- *   0.153.0; a release that persists them would report the post-compaction
- *   size here under a label that says "before".
+ *   refuses (16304 -> 14692 -> 4844 in `docs/MANUAL_TESTING.md`) are not
+ *   persisted as `token_count` records, measured so on 0.150.1 and 0.153.0;
+ *   a release that persists them would report the post-compaction size here
+ *   under a label that says "before".
  *
- * Two fields deliberately not used. `info.total_token_usage` is cumulative for
- * the thread and climbs straight through a compaction (0.150.1: 11095489 on
- * both sides), which is why the live path refused its `ThreadTokenUsage.total`
- * counterpart. A top-level `token_usage_record` sits nearer the `compacted`
- * record on 0.153.0 but reports the compaction call's own usage, not the
- * standing context -- the disk analogue of the later sample the live path
- * skips. Hence the filter to `event_msg`/`token_count`.
+ * Not used: `info.total_token_usage`, cumulative for the thread and climbing
+ * straight through a compaction (0.150.1: 11095489 on both sides), as the
+ * live path refuses `ThreadTokenUsage.total`; nor a top-level
+ * `token_usage_record`, nearer the `compacted` record on 0.153.0 but the
+ * compaction call's own usage, the disk analogue of the later sample the
+ * live path skips.
  *
- * Where no figure precedes the `compacted` record the marker reports 0, which
- * is what the single 0.147.0 rollout on the home server does: the one
- * `token_count` before its compaction carries `info: null`. That version does
- * write a populated `info` on the two `token_count` records after it, so the
- * null is not a property of the version so much as of that point in the file.
- *
- * A figure is *not* carried across a compaction: it is cleared as the marker is
- * drawn, so a second compaction with no `token_count` between reports nothing
- * rather than borrowing the first's figure. Same reason the live path keys its
- * figure by item id (`adapters/codex/reducer.ts`). A `token_count` whose `info`
- * is null does not clear it, matching the live path, where `tokenUsage` keeps
- * its last non-null value.
+ * With no figure before the `compacted` record the marker reports 0, as the
+ * one 0.147.0 rollout on the home server does: its one `token_count` before
+ * the compaction carries `info: null`, though the two after it do not. The
+ * figure is cleared as the marker is drawn, so a second compaction with no
+ * `token_count` between borrows nothing, as the live path keys its figure by
+ * item id; a null `info` does not clear it, as live's `tokenUsage` keeps its
+ * last non-null value.
  *
  * The vendored `resources/codex-protocol/ResponseItem.ts` does declare
- * `compaction` and `context_compaction` variants, which is what the arm this
- * replaced matched. They are wire shapes: across the 88 rollouts on the home
- * server on 2026-09-13, no `response_item` payload carries either type, so
- * matching them here drew nothing.
+ * `compaction` and `context_compaction` variants, but they are wire shapes:
+ * across the 88 rollouts on the home server on 2026-09-13, no `response_item`
+ * payload carries either type, so matching them would draw nothing.
  */
 function compactionTurnFor(
 	rec: Record<string, unknown>,
