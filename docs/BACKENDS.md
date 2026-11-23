@@ -86,7 +86,7 @@ As of the installed `pi 1.5.2`'s `docs/json.md` (read at the package, not run), 
 - **Level**, which `setEffort` and `fork()`'s re-send do not write from their `set_thinking_level` reply: `thinking_level_changed` carries it.
   Evidence: one `thinking_level_changed` per `set_thinking_level` on `pi 0.87.1` (OW-ruzuhu).
   D18: first group.
-- **Compaction**: `compact()` writes `"requesting"` before its request and clears it on a failed reply; `compaction_start` and `compaction_end` own `running` and its end, and a successful reply writes nothing.
+- **Compaction**: `compact()` is refused while a turn streams, writing nothing (D16); otherwise it writes `"requesting"` before its request and clears it on a failed reply; `compaction_start` and `compaction_end` own `running` and its end, and a successful reply writes nothing.
   Event: `compaction_start` and `compaction_end`; for a `compact` refused before it starts, not measured.
   Order: both events came before the `compact` reply in `resources/fixtures/pi/compact.jsonl` (`pi 0.84.2`) and `compact-session.jsonl` (`pi 1.2.0`), and on `pi 1.5.2`, idle and mid-turn ("Stop and compaction" above); not relied on.
   D18: first group.

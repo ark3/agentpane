@@ -605,6 +605,25 @@ describe("PiAdapter command correlation", () => {
 		await expect(done).rejects.toThrow("Nothing to compact");
 		expect(updates).toEqual(["requesting", null]);
 	});
+
+	/**
+	 * As of `pi 1.5.2` a `compact` sent mid-turn aborted the turn within 8 ms
+	 * (docs/MANUAL_TESTING.md, "Pi's replies to a compaction and an extension
+	 * command"), so it is refused here, as Claude Code's and Codex's adapters do (D16).
+	 */
+	it("refuses to compact while a turn is active, and writes nothing to Pi", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		h.child.emitLine({ type: "agent_start" });
+		const updates: ("requesting" | "running" | null)[] = [];
+		h.adapter.onUpdate((state) => updates.push(state.compaction));
+		const sent = h.child.sent().length;
+
+		const done = h.adapter.compact();
+		expect(h.child.sent()).toHaveLength(sent);
+		expect(updates).toEqual([]);
+		await expect(done).rejects.toThrow("pi adapter cannot compact while a turn is active");
+	});
 });
 
 /**

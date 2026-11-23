@@ -91,6 +91,8 @@ export interface PiAdapterDeps {
  */
 export const stopWaitMs = 5 * 1000;
 
+const TURN_ACTIVE_ERROR = "pi adapter cannot compact while a turn is active";
+
 export class PiAdapter implements BackendAdapter {
 	/**
 	 * Pi's session id *is* its JSONL path (D9), and for a `virtual` session Pi
@@ -604,19 +606,14 @@ export class PiAdapter implements BackendAdapter {
 	 * reducer already sees, so this only has to issue the command and await its
 	 * admission -- the transcript marker is the reducer's job.
 	 *
-	 * It does not clear Pi's queue first, as `abort` does, though as of
-	 * `pi 1.2.0` `AgentSession.compact` begins with `await this.abort()`, so a
-	 * steer still queued when a compaction stops the turn meets what a bare
-	 * abort did to it (read at the installed package, not measured): mid-tool,
-	 * a user message nobody answered, and mid-reply, a steer that rides into the
-	 * next prompt's run and takes its reply (OW-yewiku). Neither is right, but
-	 * both leave the words in the session rather than nowhere. Clearing would
-	 * take the text out with nowhere to put it: `sessions/compact` answers
-	 * `null` on both wires, so the words would be lost without a trace. Handing them back would mean growing both wires and both clients
-	 * for a compaction asked for mid-turn with a steer still undelivered
-	 * (OW-wisifo).
+	 * None is sent while a turn streams: as of `pi 1.5.2` a `compact` sent
+	 * mid-turn aborted the turn within 8 ms and then compacted
+	 * (docs/MANUAL_TESTING.md, "Pi's replies to a compaction and an extension
+	 * command"), so it is refused before anything is written, as Claude Code's
+	 * and Codex's adapters refuse one (D16).
 	 */
 	async compact(): Promise<void> {
+		if (this.state.isStreaming) throw new Error(TURN_ACTIVE_ERROR);
 		this.state = { ...this.state, compaction: "requesting" };
 		this.emitUpdate("status");
 		try {
