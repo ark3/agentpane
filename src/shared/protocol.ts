@@ -5,15 +5,7 @@
  * FROZEN INTERFACE (DESIGN D11). Both ends of the transport are ours and are
  * written by different people at different times, so this is the one place
  * DESIGN asks for concreteness rather than judgement. Changing anything here
- * breaks work in flight -- raise it before editing. D24 raised it twice: the
- * `handle` on `SessionSummary` and beside `session` on every per-session
- * event (OW-suyinu), and the retirement of the event that had said a rename,
- * once both clients keyed by that handle (OW-mofuho). D27 raised it for
- * `SessionSummary.name` and the command that sets it (OW-jamaha). D31 raised it
- * for the socket's frames (ark3/agentpane#52), and again to retire the event
- * stream and the REST routes once no client used them (ark3/agentpane#55).
- * ark3/agentpane#97 raised it for `ended`'s `exit`, the death report of a
- * backend that exited on its own.
+ * breaks work in flight -- raise it before editing.
  *
  * Shape follows D31 (one WebSocket carries commands in, and replies and
  * events out) and D3 (the server is authoritative; it sends assembled state,
@@ -30,26 +22,17 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 /**
  * An assistant turn, plus the level it ran at, as the footer names it.
  *
- * Codex answers `thread/start` and `thread/resume` with `reasoningEffort`, and
- * a reader wants it next to the model name. When this was written
- * `AssistantMessage` carried api/provider/model/responseModel/usage/stopReason/
- * timestamp and nothing about effort, and D10 makes the pi packages types-only
- * -- so the field cannot be added there, and augmenting their interfaces from
- * here would put an agentpane-only property on every consumer of pi-ai. One
- * optional property on a type we own is the smallest shape that does the job,
- * and it survives the JSON round trip on the existing `AgentMessage` payloads
- * untouched.
+ * A type we own, since D10 makes the pi packages types-only and augmenting
+ * their interfaces from here would put an agentpane-only property on every
+ * consumer of pi-ai; being optional, it survives the JSON round trip on
+ * `AgentMessage` payloads. As of `pi-ai 1.2.0` `AssistantMessage` declares
+ * `thinkingLevel?` and `providerThinkingLevel?`, both absent on replies that
+ * predate them (OW-zarine), but Codex's turns carry neither and a Pi reply
+ * without them is named from its session's entries, so the footer reads this
+ * one field whoever filled it.
  *
- * As of `pi-ai 1.2.0` `AssistantMessage` declares `thinkingLevel?`, the Pi
- * level the agent loop requested, and `providerThinkingLevel?`, the provider's
- * own effort string, both absent on replies that predate them (OW-zarine).
- * `effort` stays: Codex's turns carry neither, and a Pi reply without the stamp
- * is named from its session's entries, so the footer reads one field whoever
- * filled it.
- *
- * Named `effort`, not `reasoningEffort`: Codex uses both names for the same
- * concept (`reasoningEffort` on the start/resume responses, `effort` on
- * `ThreadSettings`) and the shorter one is what the meta line shows.
+ * Named as Codex's `ThreadSettings` names it, rather than the
+ * `reasoningEffort` of its `thread/start` and `thread/resume` responses.
  */
 export interface AssistantTurn extends AssistantMessage {
 	effort?: string;
@@ -209,24 +192,21 @@ export function liveStatusOf(from: LiveStatus): LiveStatus {
 /**
  * Every session's events on one socket, each naming its session (D31).
  *
- * `seq` is monotonic *per session*. A gap means the client missed an update;
- * since D25 the client, the browser or the Emacs helper, detaches the
- * session. Snapshots reset the sequence. `ended` alone carries none (D26).
+ * `seq` is monotonic per handle. A gap means the client missed an update, and
+ * the client, the browser or the Emacs helper, detaches the session (D25).
+ * Snapshots reset the sequence. `ended` alone carries none (D26).
  *
  * Every arm but `sessions-changed` carries `handle` beside `session`: the
- * session's `SessionSummary.handle`, which a rename leaves alone while `session`
- * moves (D24, OW-suyinu). The counter `seq` counts is the handle's. The
- * browser's reducer keys every live view by it (OW-kimaya), so an event under
- * a handle it holds updates that view's ref as an ordinary attribute.
+ * session's `SessionSummary.handle`, which a rename leaves alone while
+ * `session` moves (D24, OW-suyinu). So a client keys its live views by the
+ * handle (OW-kimaya), and an event's ref is an ordinary attribute of the view.
  *
- * That is all a rename is on the wire, and it is not an edge case but the
- * normal life of a new session: every backend replaces a `virtual` session's
- * minted id at attach, and the first prompt may move it again (D9), so the id
- * a client created a session with is not the id it keeps. Each time, a
- * `snapshot` under the handle carrying the new ref goes out, and every event
- * after it carries that ref. The old id reaches nothing from then on (D35
- * point 1): a command naming it is refused `not_found`, or `gone` for a
- * preview, so a client takes the new ref from the first event that carries it.
+ * That is all a rename is on the wire, and it is the normal life of a new
+ * session: every backend replaces a `virtual` session's minted id at attach,
+ * and the first prompt may move it again (D9). Each time, a `snapshot` under
+ * the handle carrying the new ref goes out, and every event after it carries
+ * that ref. The old id reaches nothing from then on (D35 point 1): a command
+ * naming it is refused `not_found`, or `gone` for a preview.
  */
 export type ServerEvent =
 	| ({
@@ -680,22 +660,21 @@ export type PromptParams = Omit<PromptRequest, "handle"> & (
  * `SOCKET_CLOSE.unauthorized`. Its reply follows the opening snapshots, so a
  * client knows it is connected even when nothing is live.
  *
- * Close names a handle like every other command on a live session, and is
- * refused `not_attached` where that handle has ended (D35 point 3): it never
- * reaches a start, which ends by publishing, failing, timing out or the
- * server's shutdown.
+ * Close, like every command on a live session, is refused `not_attached`
+ * where its handle has ended (D35 point 3): it never reaches a start, which
+ * ends by publishing, failing, timing out or the server's shutdown.
  *
  * A command that would start an agent -- `sessions/attach`,
  * `sessions/create`, a `sessions/prompt` naming a ref, and the fork
  * `sessions/forkAndPrompt` made -- may first close the least recently
- * attached live session, and is refused `at_capacity` when D12's cap is
- * reached and none may be closed for it (`maxSessions` in
- * `src/server/http/session-manager.ts`), and is refused `start_timeout`
- * when the agent's start outruns `startTimeoutMs` there, the agent stopped
- * and nothing left (D35). `sessions/attach` and a
- * `sessions/prompt` naming a ref are refused `turn_running` when the session's
- * turn is still running on a backend that holds it elsewhere, a Codex thread
- * re-attached over a live app-server (D34); nothing is started.
+ * attached live session. It is refused `at_capacity` when D12's cap is
+ * reached and none may be closed for it, and `start_timeout` when the
+ * agent's start outruns its deadline, the agent stopped and nothing left
+ * (D35; `maxSessions` and `startTimeoutMs` in
+ * `src/server/http/session-manager.ts`). `sessions/attach` and a
+ * `sessions/prompt` naming a ref are refused `turn_running`, nothing
+ * started, when the session's turn still runs on a backend that holds it
+ * elsewhere, a Codex thread re-attached over a live app-server (D34).
  */
 export interface Commands {
 	hello: { params: { token: string }; result: null };
