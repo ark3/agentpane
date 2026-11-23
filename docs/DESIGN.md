@@ -74,7 +74,7 @@ Since ark3/agentpane#31 a session idle for 15 minutes is closed, and a start pas
 | **codex-adapter** | `src/server/adapters/codex/` | `resources/fixtures/codex/*.jsonl` |
 | **claude-adapter** | `src/server/adapters/claude/` | `resources/fixtures/claude/*.jsonl` |
 | **session-index** | `src/server/sessions/` | the real Pi, Codex, and Claude Code session stores |
-| **transport** | `src/server/http/`, `src/server/index.ts` | the wire contract, with a fake adapter |
+| **transport** | `src/server/http/`, `src/server/index.ts`, `src/server/shutdown.ts` | the wire contract, with a fake adapter |
 | **renderer** | `src/client/render/` | hand-built `AgentMessage[]` samples |
 | **client-shell** | `src/client/App.svelte`, `src/client/main.ts` | the running app |
 

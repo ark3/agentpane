@@ -18,6 +18,7 @@ import { createProductionDeps } from "./composition.ts";
 import { createApp } from "./http/app.ts";
 import type { Connection } from "./http/socket.ts";
 import { createStaticHandler } from "./http/static.ts";
+import { installShutdown } from "./shutdown.ts";
 
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
 
@@ -92,28 +93,11 @@ const server = Bun.serve<{ connection?: Connection }>({
 	},
 });
 
-let shuttingDown = false;
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-	process.on(signal, () => {
-		// A second Ctrl-C means the user is done waiting. Without this, a
-		// shutdown that stalls on an adapter is a terminal you have to kill from
-		// another one.
-		if (shuttingDown) process.exit(130);
-		shuttingDown = true;
-		void (async () => {
-			try {
-				// Explicit shutdown is one of exactly two things that kills an agent
-				// subprocess; a dropped browser connection is not the other.
-				await app.close();
-				await server.stop(true);
-			} catch (err) {
-				console.error("shutdown did not complete cleanly:", err);
-			} finally {
-				process.exit(0);
-			}
-		})();
-	});
-}
+installShutdown(process, async () => {
+	// Explicit shutdown is one of exactly two things that kills an agent
+	// subprocess; a dropped browser connection is not the other.
+	await app.close();
+	await server.stop(true);
+});
 
 console.log(`agentpane listening on http://127.0.0.1:${port}`);
