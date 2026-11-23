@@ -7,8 +7,8 @@
  * fixtures, so nothing here re-asserts transcript content -- these tests are
  * about the plumbing that file deliberately knows nothing about.
  *
- * The fake reproduces the child-process event contract exactly as verified on
- * this machine, which is load-bearing for the teardown tests: a failed spawn
+ * The fake reproduces the child-process event contract exactly as verified
+ * against `node:child_process`, which is load-bearing for the teardown tests: a failed spawn
  * emits `error` then `close` and **never** `exit`.
  */
 
@@ -201,7 +201,7 @@ describe("PiAdapter.start", () => {
 
 		// The exact ENOENT sequence verified against node:child_process: `error`,
 		// then `close` with code -2, and no `exit` event at all. An adapter that
-		// only listened for `exit` left this promise pending forever.
+		// listened only for `exit` would leave this promise pending forever.
 		h.child.emit("error", Object.assign(new Error("spawn direnv ENOENT"), { code: "ENOENT" }));
 		h.child.emit("close", -2, null);
 
@@ -469,10 +469,10 @@ describe("PiAdapter command correlation", () => {
 	});
 
 	/**
-	 * `pi 1.2.0` on the home server, 2026-10-14 (docs/MANUAL_TESTING.md,
-	 * OW-kokotu): Pi counts a run from accepting its prompt, but writes
-	 * `agent_start` only after answering it, so a second prompt queued behind
-	 * the first went out bare in that gap and was refused.
+	 * As of `pi 1.2.0` (docs/MANUAL_TESTING.md, OW-kokotu), Pi counts a run
+	 * from accepting its prompt, but writes `agent_start` only after answering
+	 * it, so a second prompt queued behind the first goes out in that gap,
+	 * where a bare one was refused.
 	 */
 	it("steers every prompt, including one sent before the running turn's agent_start (OW-wibude)", async () => {
 		const h = makeHarness();
@@ -493,9 +493,8 @@ describe("PiAdapter command correlation", () => {
 	});
 
 	/**
-	 * `pi 1.2.0` on the home server, 2026-10-14 (docs/MANUAL_TESTING.md,
-	 * OW-kokotu): `/refs`, `/llama` and `/mcp` were answered
-	 * `{"disposition": "handled"}` and no run followed; an ordinary prompt was
+	 * As of `pi 1.2.0` (docs/MANUAL_TESTING.md, OW-kokotu), `/refs`, `/llama`
+	 * and `/mcp` were answered `{"disposition": "handled"}` and no run followed; an ordinary prompt was
 	 * `started`, and one steered into a running turn `queued`. A Pi before
 	 * 0.99.0 sent no `data` at all, as Pi's CHANGELOG dates the field (read,
 	 * not measured).
@@ -529,7 +528,7 @@ describe("PiAdapter command correlation", () => {
 	/**
 	 * Pi's `--model` flag takes `provider/modelId:thinkingLevel` and its
 	 * `set_model` does not, so the pin's own form answered 500 "Model not
-	 * found" (`pi 0.85.1`, 2026-09-16). The string still goes to Pi unchanged;
+	 * found" (`pi 0.85.1`). The string still goes to Pi unchanged;
 	 * only the refusal's message learns why.
 	 */
 	it("refuses a model Pi refuses, and names the level suffix when that is why (OW-pizaki)", async () => {
@@ -631,8 +630,7 @@ describe("PiAdapter command correlation", () => {
 });
 
 /**
- * `pi 1.2.0` on the home server, 2026-10-15 (docs/MANUAL_TESTING.md,
- * OW-yewiku): a bare `abort` left an undelivered steer unanswered in the
+ * As of `pi 1.2.0` (docs/MANUAL_TESTING.md, OW-yewiku), a bare `abort` left an undelivered steer unanswered in the
  * transcript or inside the next prompt's run, and `clear_queue` first took it
  * out, answering with the texts it held.
  */
@@ -1113,7 +1111,7 @@ describe("PiAdapter notices (D11, OW-fusoba)", () => {
 
 describe("PiAdapter fork points", () => {
 	/**
-	 * The pairing the client used to do, done where both lists are in hand
+	 * Fork points are paired with user messages where both lists are in hand
 	 * (OW-roveze). Pi answers one entry per user message, so the k-th entry is
 	 * the k-th user message, whatever sits between them.
 	 */
@@ -1140,8 +1138,8 @@ describe("PiAdapter fork points", () => {
 
 	/**
 	 * Nothing here can say *where* two lists of different lengths diverged, and
-	 * pairing the common prefix anyway is the silent mis-fork this change exists
-	 * to remove. Answering with nothing costs every Edit control, which is
+	 * pairing the common prefix anyway is the silent mis-fork this pairing
+	 * exists to prevent. Answering with nothing costs every Edit control, which is
 	 * visible and recoverable; forking a turn away from where the user pointed is
 	 * neither (OW-roveze).
 	 */
@@ -1170,7 +1168,7 @@ describe("PiAdapter.fork", () => {
 		h.adapter.onUpdate((_s, change) => seen.push(change));
 
 		// Pi's fork is copy-on-write: the process's active sessionFile moves to a
-		// new file at the fork call (settled live on 0.84.2, MANUAL_TESTING.md
+		// new file at the fork call (as of `pi 0.84.2`, MANUAL_TESTING.md
 		// OW-pifowo). The adapter re-queries get_state and adopts that moved file.
 		const MOVED = "/home/u/.pi/agent/sessions/s-fork.jsonl";
 		const forked = h.adapter.fork("e1");
