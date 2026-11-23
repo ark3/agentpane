@@ -5348,6 +5348,7 @@ So a Pi compaction never waits behind a running turn, which #12 had left open; i
 The command's handler was `await ctx.waitForIdle()`, sent as `/probe-wait-idle` at the long turn's first update.
 In three runs whose turn ran to `stopReason: "stop"` it was answered `disposition: "handled"` in the same millisecond as `agent_settled`, 14.2 s, 16.9 s and 19.1 s after it was sent; in a fourth, the turn was ended at 6.9 s by the provider, `stopReason: "error"`, "Output data may contain inappropriate content.", and the command was answered at that `agent_settled` too.
 So #12's first consequence still holds on `pi 1.5.2`: a Stop that `PiAdapter.abort` holds behind every unanswered prompt waits for such a command, and the command for the turn.
+ark3/agentpane#93 has since bounded that wait at 5 s; see "A Stop behind a Pi extension command that awaits idle ends at the deadline", below.
 
 **An `abort` sent while such a command was unanswered stopped the turn at once.**
 Sent 1 s after the command, the `abort` ended the turn within 14, 18 and 22 ms, `stopReason: "aborted"` and `agent_settled` with `aborted: true`, and the command's `"handled"` and then the `abort`'s reply came at that `agent_settled`, in three runs.
@@ -5356,6 +5357,19 @@ So what holds the Stop is the adapter's wait, not Pi: Pi takes an `abort` behind
 
 **Not counted.**
 The probe's first two invocations of `command_waits_idle` stamped every event at 0 ms, a bug in its own timeline since fixed, and their turns ran to `stop`; a third, the first with real times, saw its turn end `stopReason: "error"` 1.1 s into streaming, before the probe recorded a message's error, and the command was answered at that `agent_settled`.
+
+## A Stop behind a Pi extension command that awaits idle ends at the deadline, on `pi 1.6.0` (ark3/agentpane#93)
+
+Run on the home server on 2026-11-23, on `pi 1.6.0` and `bun 1.4.0`, through agentpane's production server built from 4f5406dc, which bounds `PiAdapter.abort`'s wait on the prompts before it at `stopWaitMs`, 5 s.
+`resources/probes/agentpane_pi_stop_command_probe.ts` drove it over the socket in three invocations, each creating its session with `model: "openrouter/deepseek/deepseek-v4.1-flash:high"` and the checkout as its workspace.
+Each ran in its own throwaway `PI_CODING_AGENT_DIR`, `/var/tmp/agentpane-pi-stop-command-*`, passed in the server's environment and removed afterwards; it held copies of `~/.pi/agent`'s `auth.json`, `models-store.json` and `settings.json`, and the command as `extensions/probe-wait-idle.ts`, since agentpane's spawn passes no `-e`.
+The command is `pi_stop_compact_probe.ts`'s, a handler that awaits `ctx.waitForIdle()`, sent as `/probe-wait-idle` once `LONG_PROMPT`'s reply was streaming, and the Stop was `sessions/abort` 1 s after it.
+Times below are from the Stop, measured at the probe's end of the socket.
+
+**The turn stopped at the deadline, in all three runs.**
+The turn was streaming at the Stop; the abort was answered at 5018, 5023 and 5024 ms with `queued: []`, and the turn reported idle at 5037, 5030 and 5071 ms, read by polling every 50 ms.
+The command was answered `handled` in the same millisecond as the abort each time, so on `pi 1.6.0` too Pi held it until the turn ended, here by the abort.
+In #12's runs, the section above, the same command on `pi 1.5.2` was answered 14.2 s to 19.1 s in, at a turn that ended by itself; no run here measured the adapter without the bound.
 
 ## HANDOFF findings 1–49
 
