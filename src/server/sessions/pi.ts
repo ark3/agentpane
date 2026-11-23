@@ -117,20 +117,17 @@ export async function parsePiSession(filePath: string, stat: Stats): Promise<Ses
  * adapter renders, so this validates and retains user, assistant,
  * tool-result and system messages with their thinking, tool, and image
  * blocks, and draws each compaction entry as the marker live appends at
- * `compaction_end`, where it sits on the branch (OW-livowu). The header is
- * skipped.
+ * `compaction_end`, where it sits on the branch (OW-livowu).
  *
  * A session file is a tree, and a branch made in place leaves the abandoned
  * entries in it, so this draws only the branch Pi would resume at, as the
- * live transcript does (OW-gogoka). As of `pi 1.2.0`, `SessionManager`
- * (`dist/core/session-manager.js`) loads a file and `_buildIndex` takes as
- * its leaf the last entry that is not the `session` header, of whatever type
- * -- every entry, `model_change`, `compaction` and `label` alike, carries an
- * `id` and a `parentId` and so sits on the chain. The branch is the walk from
- * there by `parentId`, stopping at an id the file does not hold, as
- * `buildSessionPath` does. A header with no `version` is version 1, whose
- * entries carry no ids at all: Pi's `migrateV1ToV2` chains them in file
- * order, so that order is the branch.
+ * live transcript does (OW-gogoka). As of `pi 1.2.0`, `SessionManager`'s
+ * `_buildIndex` (`dist/core/session-manager.js`) takes as its leaf the last
+ * entry that is not the `session` header, of whatever type, since every
+ * entry carries an `id` and a `parentId`; `buildSessionPath` walks from there
+ * by `parentId`, stopping at an id the file does not hold. A header with no
+ * `version` is version 1, whose entries carry no ids at all: Pi's
+ * `migrateV1ToV2` chains them in file order, so that order is the branch.
  */
 export async function extractPiPreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
 	let version = 1;

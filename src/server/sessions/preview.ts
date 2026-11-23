@@ -4,32 +4,18 @@
  * This is the non-attaching counterpart to `SessionManager.attach`: selecting a
  * session to *look at* must be as cheap as listing one (D9), so this spawns no
  * subprocess and -- crucially -- reads exactly one session file, never the
- * whole corpus. The one exception is a Codex fork whose rollout holds none of
- * its inherited history: it also reads the rollouts that history lives in,
- * one per fork in its ancestry, located by name like its own (OW-buligi). It
- * never calls `listSessions()`, `index.list()`, or `index.get()`, all of
- * which parse every file in both stores.
- *
- * The backends locate their one file differently:
- *
- *  - **Pi**: the ref IS the JSONL path (D9), so the file is read directly with
- *    no discovery at all.
- *  - **Codex**: the ref is a UUIDv7 thread id embedded in the filename. A
- *    readdir-only walk (`findJsonlFiles`, no file reads) turns up the candidate
- *    names; the one whose filename carries the matching uuid is read, and only
- *    that one, save a fork's base as above.
- *  - **Claude Code**: the ref is the session uuid the file is named after;
- *    same match-by-filename as Codex, over the readdir-only
- *    `findClaudeSessionFiles` walk.
+ * whole corpus: Pi's by its path, the ref (D9), and Codex's and Claude Code's
+ * by a readdir-only match on the id in its filename. The one exception is a
+ * Codex fork whose rollout holds none of its inherited history: it also reads
+ * the rollouts that history lives in, one per fork in its ancestry, located
+ * by name like its own (OW-buligi). It never calls `listSessions()` or
+ * `index.list()`, which parse every file in every store.
  *
  * A ref no file backs -- a Pi path that does not resolve inside the store,
  * or no filename match -- answers null rather than throwing, and never an
  * empty preview, which is a file with no turns: `sessions/preview` reads the
  * null, for a ref the manager does not hold, as the session gone (D26
  * point 5).
- *
- * Each backend maps its store records to the shared transcript structure;
- * locating and reading the single file remains this module's only job.
  */
 
 import type { SessionPreviewTurn, SessionRef } from "../../shared/protocol.ts";

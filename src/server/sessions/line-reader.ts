@@ -1,22 +1,16 @@
 /**
- * Bounded, LF-only line reading for session JSONL files.
+ * Bounded, LF-only line reading for session JSONL files, rather than
+ * `node:readline`:
  *
- * Two things drive this rather than `node:readline`:
- *
- * 1. LF-only framing. `docs/BACKENDS.md`'s "Pi RPC framing is LF-only" is about
- *    stdio framing, but the same hazard applies here: these files hold
- *    arbitrary agent/tool text inside JSON string values, which can legally
- *    contain U+2028/U+2029. `readline`'s default line splitting treats those
- *    as line breaks too, which would corrupt a line mid-JSON. We split on
- *    `\n` only.
- * 2. Bounded reads. DESIGN D9 wants enumeration cheap and explicitly does not
- *    want a cache built to compensate for slow reads. The cheapest way to
- *    keep it cheap is to never read more of a file than necessary: this is an
- *    async generator so a caller that finds what it needs after a few lines
- *    (typical case) can `break` out of a `for await` loop, which destroys the
- *    underlying stream via the `finally` block instead of draining it.
- *    `maxBytes`/`maxLines` bound the pathological case (huge single line, or
- *    a file that never yields what the caller wants).
+ * 1. LF-only framing. These files hold agent and tool text inside JSON
+ *    strings, which may contain U+2028/U+2029, and `readline` splits on those
+ *    too, the hazard `docs/BACKENDS.md`'s "Pi RPC framing is LF-only" records
+ *    for Pi's stdio.
+ * 2. Bounded reads. D9 wants enumeration cheap without a cache to make up for
+ *    slow reads, so this never reads more of a file than its caller needs: a
+ *    caller that breaks out of its `for await` destroys the stream rather
+ *    than draining it, and `maxBytes`/`maxLines` bound the pathological case
+ *    (a huge single line, or a file that never yields what the caller wants).
  */
 
 import { createReadStream } from "node:fs";

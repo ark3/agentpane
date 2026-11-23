@@ -13,25 +13,20 @@
  * Line types seen in real transcripts: `assistant`, `user`, `ai-title`,
  * `custom-title`, `last-prompt`, `queue-operation`, `attachment`, `mode`,
  * `system`, `file-history-snapshot`, and more -- and Claude Code versions
- * weekly, so drift is a certainty, not a hedge. Unknown shapes are bucketed,
- * never thrown on, the same stance codex.ts takes toward header drift.
+ * weekly, so unknown shapes are bucketed, never thrown on.
  *
- * Subagent transcripts are NOT inline here (unlike what OW-votasi expected):
- * they are separate files at `<munged-cwd>/<session-uuid>/subagents/
- * agent-*.jsonl` (149 of 259 files in the census), every message line of
- * which is `isSidechain: true`. `findClaudeSessionFiles` therefore never
- * descends below the project directory, and the parsers skip any stray
- * `isSidechain` line as well.
+ * Subagent transcripts are separate files, not inline (149 of 259 files in
+ * the census), every message line `isSidechain: true`:
+ * `findClaudeSessionFiles` says where they sit and never descends to them,
+ * and the parsers skip any stray `isSidechain` line as well.
  *
- * Preview: first human message, like pi.ts/codex.ts -- NOT the `ai-title`
- * generated-title line the store also carries. Chosen because (a) only 53 of
- * the 110 real sessions in the census have any ai-title, so a title-led
- * preview is null half the time; (b) titles are regenerated as the session
- * grows, so the *current* one sits near the end of the file, outside the
- * bounded enumeration read -- honouring it properly wants a tail read, a
- * different mechanism; (c) it keeps the early-exit read pattern shared with
- * the other two parsers. First cut per the iterate-from-use rule: if titles
- * win in use, revisit.
+ * Preview: first human message, like pi.ts/codex.ts, NOT the `ai-title`
+ * line, because (a) only 53 of the 110 real sessions in the census have any,
+ * so a title-led preview is null half the time; (b) titles are regenerated
+ * as the session grows, so the *current* one sits near the end of the file,
+ * outside the bounded enumeration read, and would want a tail read; (c) it
+ * keeps the early-exit read shared with the other two parsers. A first cut
+ * per the iterate-from-use rule: if titles win in use, revisit.
  */
 
 import type { Dirent, Stats } from "node:fs";
