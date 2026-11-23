@@ -162,7 +162,8 @@ export interface AgentNotice {
  * A live session's status: what the adapter reports beside the transcript,
  * carried whole from `AdapterState` to the `snapshot` and `status` events, the
  * browser's `SessionView` and the helper's `SessionStatusParams`, and flat on
- * each wire.
+ * each wire. A field with nothing to report is `null`, never absent: a client
+ * keeps the value it last held for a key a `status` event leaves out.
  */
 export interface LiveStatus {
 	isStreaming: boolean;
