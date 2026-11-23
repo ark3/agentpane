@@ -120,7 +120,7 @@ If you write another adapter, `ref` is not stable — fire `onRefChanged` where 
   A fork never sends one, on any backend (OW-suhoto) — a fork creates a second conversation under a handle of its own and the parent keeps its own id, so all a fork tells other clients is `sessions-changed`, and on Pi, whose fork moves the process off the parent, `ended` under the parent's handle (D26, OW-sodohi).
 - **`ended` is the last event under a handle** (D26).
   The server sends it where it lets go of a live session: a close, whether a client's or D12's reaper's or cap's, the backend's process exiting on its own, and on Pi a fork, under the parent's handle; not at shutdown, whose socket close says every session detached (D25 point 3).
-  Only the exit's carries `exit`, the death report (ark3/agentpane#97), which the Emacs helper forwards on `session/detached`.
+  Only the exit's carries `exit`, the death report (ark3/agentpane#97), which the Emacs helper forwards on `session/detached` and the browser shows in the detached pane's prompt area (ark3/agentpane#109).
 - **The socket's upgrade rejects a non-loopback `Origin`** (D8), **and its first frame must be a `hello` carrying the token** (D29, D31 point 5).
   Nothing to do from the app; it matters if you ever drive the socket from a page served from somewhere else, or from a script, which reads the token from the file the server keeps it in (`resources/probes/agentpane_live_support.ts`).
 - **HTTP answers only the static bundle and the upgrade** (D31 point 1).

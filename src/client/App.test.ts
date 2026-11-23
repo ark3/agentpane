@@ -1138,6 +1138,32 @@ describe("App", () => {
 		expect(controller.previewed).toEqual([{ backend: "codex", id: child }]);
 	});
 
+	/** Driven by the real controller, from the `ended` a backend's own exit sends (D26). */
+	it("draws a dead session's report in the prompt area in place of Attach, and Attach once it is dismissed (#109)", async () => {
+		const report = "pi exited (code=1, signal=null)\nError: out of memory";
+		const server = appServer({ listed: [summary(piSession, "P")] });
+		const controller = createController(server.api());
+		const { container } = render(App, { props: { controller } });
+		await controller.select(piSession);
+		await tick();
+
+		server.emit({ type: "ended", session: piSession, handle: server.handleAt(piSession)!, exit: report });
+		server.emit({ type: "sessions-changed" });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await tick();
+
+		const prompt = container.querySelector<HTMLElement>(".prompt.attach")!;
+		expect(prompt).toHaveTextContent(report.replace(/\s+/g, " "));
+		expect(within(prompt).queryByRole("button", { name: "Attach" })).not.toBeInTheDocument();
+		expect(container.querySelector(".banners")!.children).toHaveLength(0);
+
+		await fireEvent.click(within(prompt).getByRole("button", { name: "Dismiss" }));
+
+		expect(prompt).not.toHaveTextContent("out of memory");
+		expect(within(prompt).getByRole("button", { name: "Attach" })).toBeInTheDocument();
+		controller.dispose();
+	});
+
 	it("auto-selects the most recent session in scope on startup", async () => {
 		const older = summary(piSession, "Older", { updatedAt: "2026-01-01T00:00:00.000Z" });
 		const newer = summary(codexSession, "Newer", { updatedAt: "2026-06-01T00:00:00.000Z" });

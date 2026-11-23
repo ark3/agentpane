@@ -315,6 +315,10 @@
 	 * empty pane, which the owner chose over the last live transcript.
 	 */
 	const detachedPane = $derived(mode === "preview" || mode === "loading");
+	/** The death report the detached pane shows in place of Attach (`ControllerView.exits`). */
+	const exitReport = $derived(
+		view.state.selected === null ? null : (view.exits[sessionKey(view.state.selected)] ?? null),
+	);
 	/** The preview's store timestamps converted for the one Transcript both paths share. */
 	const previewMessageList = $derived(
 		view.preview ? previewMessages(view.preview.turns) : [],
@@ -1747,7 +1751,16 @@
 			{#if view.previewFailure}
 				<p class="warning" role="status">Couldn't load the transcript: {view.previewFailure.message}</p>
 			{/if}
-			<button type="button" onclick={() => void attachSelected()}>Attach</button>
+			<!-- Why the session's backend died (D26): it stands where Attach
+			     would, until dismissed. -->
+			{#if exitReport !== null}
+				<p class="error exit-report" role="alert">
+					<span>{exitReport}</span>
+					<button type="button" onclick={() => controller.dismissExit()}>Dismiss</button>
+				</p>
+			{:else}
+				<button type="button" onclick={() => void attachSelected()}>Attach</button>
+			{/if}
 		</div>
 	{:else}
 		<form class="prompt" onsubmit={submitPrompt}>
