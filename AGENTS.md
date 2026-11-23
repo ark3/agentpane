@@ -76,12 +76,13 @@ They carry no decision or card ids, source paths or internals; the reasoning beh
 
 Agents read everything else: every comment in `src/`, `e2e/` and the tests, and the internal `agentpane--` docstrings and `;;` comments.
 These carry only what the code cannot show its reader:
-- a contract that crosses a file or the wire;
+- a contract that crosses a file or the wire, or that a function's callers rely on and would otherwise read its body for;
 - a measured fact the code relies on, cut to the fact, the version it was measured on, and what the code does about it, with a pointer to the evidence where there is some;
 - why the obvious simpler code is wrong, in a clause;
 - an invariant that spans functions.
 
 They do not restate what the code does: a second copy drifts, and the reader trusts the comment over the code.
+Nor do they restate another comment, which they point to instead.
 What the code did before, and the changes that brought it here, belong in git; a pointer to the decision or issue behind a choice is welcome, a list of them is history.
 A lesson worth keeping goes into a test that fails without it where one can, else a one-clause warning at the code, and its story into the commit message.
 

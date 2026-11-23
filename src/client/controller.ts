@@ -498,70 +498,47 @@ export function createController(
 
 	/**
 	 * The one place that fetches the preview a detached-loading pane waits on
-	 * (OW-forinu): whenever the pane is in that mode, the stream is up, and no
-	 * fetch for that ref is already out. No path that drops a view --
-	 * `detachGapped`, `detach()` -- fetches its own, and this waits out a
-	 * server that is down, so a stream drop keeps the selection: the drop's
-	 * own `publish` finds the stream `reconnecting`, and the reconnect's
-	 * `connected` is the publish that fetches.
-	 *
-	 * No gesture stands behind it, so like the drop it writes neither `busy` nor
-	 * `error` nor the selection intent. Its answer lands only while the intent
-	 * it was asked under stands (below) and the selection still names that
-	 * session with the pane there still loading: a view that came back
-	 * meanwhile outranks it.
+	 * (OW-forinu); no path that drops a view -- `detachGapped`, `detach()` --
+	 * fetches its own. It waits out a server that is down, so a stream drop
+	 * keeps the selection, and the reconnect's `connected` is the publish that
+	 * fetches. No gesture stands behind it, so it writes neither `busy` nor
+	 * `error` nor the selection intent.
 	 *
 	 * A failed read is never an answer (OW-bilogo): the pane stays loading and
-	 * the selection stands. A failure cannot be told from the outage that
-	 * caused it: the read can fail as the server exits, before the tab hears
-	 * the socket close.
+	 * the selection stands, since a failure cannot be told from an outage --
+	 * the read can fail as the server exits, before the tab hears the socket
+	 * close. The one exception is `gone` (`isGone`), the server answering that
+	 * the session is nowhere: the selection clears onto the startup view,
+	 * whatever the stream reads (D26 point 6), which is how a dropped view of a
+	 * session with nothing on disk stops asking.
 	 *
-	 * The one exception is `gone` (`isGone`), which is the server answering,
-	 * not failing: the session is nowhere, so the selection clears onto the
-	 * startup view, whatever the stream reads (D26 point 6). That is how a
-	 * dropped view of a session with nothing on disk -- detached here, closed
-	 * elsewhere, or lost with a server that exited -- stops asking.
-	 *
-	 * What keeps a server answering errors from a hot loop is when the read is
-	 * asked again: at the next `connected`, which releases `previewHeld`, or
-	 * when the user clicks the row -- never from the failure, and never from
-	 * the publishes that merely find the pane still loading. A failure with the
-	 * stream down needs no hold, as nothing asks until `connected`; with it up,
-	 * it holds and puts its message on the pane, which the empty pane would
-	 * otherwise hide from a user who has a server to ask.
+	 * Nothing asks again from a failure, or from a publish that merely finds
+	 * the pane still loading, only the next `connected`, which releases
+	 * `previewHeld`, or a click on the row: that keeps a server answering
+	 * errors from a hot loop. With the stream up a failure holds, and puts its
+	 * message on the pane, which the empty pane would otherwise hide.
 	 *
 	 * Each read has one owner, the selection intent it was asked under or the
-	 * click's that joined it. A `gone` or a failure lands only while that
-	 * intent stands, as `refetchPreview` captures it: a click elsewhere has
-	 * moved on from it, whatever the selection still reads, and a `gone` of
-	 * the row it left must not clear the selection under it. A preview lands
-	 * as its owning click's while that click's intent stands, and otherwise
-	 * whenever the pane still waits on that session, whatever the intent: it
-	 * is that session's transcript, a later click replaces it, and after an
-	 * attach from the pane that failed nothing else would ask for it.
+	 * click's that joined it, as `refetchPreview` captures it. A `gone` or a
+	 * failure lands only while that intent stands: a `gone` of the row a click
+	 * left must not clear the selection under it. A preview lands as its
+	 * owning click's while that click's intent stands, and otherwise whenever
+	 * the pane still waits on that session: it is that session's transcript,
+	 * and after an attach from the pane that failed nothing else would ask.
 	 *
-	 * A click, `preview()`, shares this read (`readPreview`) rather than
-	 * asking one beside it, which would read twice and report one failure in
-	 * two places (OW-tuyewo): it joins a read out for its ref and makes
-	 * the read its own, so the answer lands as the click's -- opening the
-	 * preview whatever the pane shows, and reporting a failure where
-	 * `landPreview` says. It skips the gates above, so it still asks a held
-	 * read again and still reads while the stream reconnects. And while a
-	 * click's read owned by the current intent is out, for any row, nothing
-	 * is asked here: that read would carry the click's intent, and its `gone`
-	 * would clear the selection before the click lands. The click's landing
-	 * publishes, which asks again if the pane still waits.
+	 * A click, `preview()`, joins the read out for its ref (`readPreview`) and
+	 * makes it its own, since a second read would report one failure in two
+	 * places (OW-tuyewo); it skips the gates above. While a click's read owned
+	 * by the current intent is out, for any row, nothing is asked here: a read
+	 * asked here would carry the click's intent, and its `gone` would clear the
+	 * selection before the click lands, whose publish asks again.
 	 *
-	 * A read that has not settled within `PREVIEW_READ_TIMEOUT_MS` is aborted
-	 * and counts as failed: one that hung would keep its key in `previewLoads`
-	 * for good, and nothing would ever ask for that session's preview again.
-	 *
-	 * No read is out across an outage: the socket's close settles every
-	 * request on it as the connection lost before the tab hears the close
-	 * (D31 point 6), so a read's key is gone, and its failure, landing with
-	 * the stream down, holds nothing. A read asked while the socket opens --
-	 * App's auto-select asks one before the first open -- waits behind the
-	 * `hello` and is that socket's to answer.
+	 * A read unsettled within `PREVIEW_READ_TIMEOUT_MS` is aborted as failed,
+	 * or one that hung would hold its key in `previewLoads` for good. No read
+	 * outlives an outage: the socket's close settles every request on it
+	 * before the tab hears the close (D31 point 6). One asked while the socket
+	 * opens, as App's auto-select asks one before the first open, waits behind
+	 * the `hello`.
 	 */
 	function loadPreview(): void {
 		const selected = view.state.selected;

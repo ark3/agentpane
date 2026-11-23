@@ -505,56 +505,33 @@ minute and a half before a refused second send is accepted again.")
 
 (defun agentpane--request (method params callback &optional always failed timeout erred)
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
-Return at once; CALLBACK runs later with the result, in this buffer, unless
-the buffer has been killed or has sent a later request since, whose reply
-is the one it wants.  An error or a timeout is reported in the echo area.
-With no PARAMS the request carries no `params' at all: a null one would
-reach the helper as a JSON null, which is not the absence it tests for.
-TIMEOUT is in seconds, `jsonrpc-default-request-timeout' when nil.
+Return at once.  CALLBACK runs later with the result, in this buffer,
+unless it has been killed or, without ALWAYS, has sent a later request
+since, whose reply is the one it wants.  ALWAYS is for a command whose
+reply is not a view a later request's replaces; such a request still
+supersedes every earlier one, so a preview refetch still in flight when
+the buffer attaches is not drawn over the live transcript.  Nil PARAMS
+sends no `params', not a JSON null, as src/emacs/protocol.ts has it.
+TIMEOUT is in seconds.
 
-FAILED, when given, runs with no arguments in this buffer, if it is still
-live, after an error or a timeout has been reported, whatever ALWAYS says.
-It runs too, and the signal goes on, when sending the request or running
-CALLBACK exits non-locally -- the helper failing to start, or a reply's
-handling failing partway -- so a flag that FAILED clears never outlives the
-request that set it.
-ERRED, when given, runs after FAILED with the `data' of the error the
-helper answered with, where CALLBACK would have run with a result: in
-this buffer, if it is still live, and, unless ALWAYS, has sent no later
-request since.  That `data' is the server's refusal, its `error' code and
-`detail' (`toRpcError' in src/emacs/helper.ts), nil for an error the
-helper raised itself, so a caller can tell one error code from another,
-as `agentpane-refetch' tells a preview's `gone' (D26); a timeout and a
-non-local exit carry none and run no ERRED.
-Nothing here tells a request that reached no backend from one that may
-have: the turn-done watch a prompt arms is the helper's, which only the
-server's refusal disarms (D32 point 6).
+FAILED runs in this buffer, if it is live, after any failure the echo
+area reports -- an error reply, a timeout, a helper that has exited --
+whatever ALWAYS says; and, the signal going on, when sending the request
+or running CALLBACK exits non-locally.  So a flag FAILED clears never
+outlives the request that set it, but across a crash; see below.
+After an error reply, ERRED runs too, where CALLBACK would have, with
+the error's `data': the server's refusal, its `error' code and `detail' (`toRpcError' in
+src/emacs/helper.ts), or nil for an error of the helper's own, such as
+its answer to a request still out at its socket's close, the outcome
+unknown (D32 point 7).
 
-Each request has one answer, the first of its reply and its timeout;
-whatever comes after is dropped.  A request still out when the helper's
-socket closes is answered by the helper before it exits, with an error
-of its own carrying no `data', the outcome unknown (D32 point 7); that
-reply is among what the helper wrote last, which jsonrpc.el hands on
-after its sentinel and before the teardown (`agentpane--helper-exited').
-The \"Server died\" error jsonrpc.el's sentinel hands every pending
-request's error handler carries the code -1, which the helper never
-writes, and reaches only some requests, while a reply read after it
-still reaches its request (jsonrpc.el 1.0.29; OW-laluso); so it is
-ignored here, and answers nothing.  A helper that crashes leaves its
-requests unanswered, and nothing here records them: the teardown resets
-what a request in flight holds in a buffer (`agentpane--helper-gone').
-A request made through a helper that has exited, before its teardown
--- from a handler of what that helper wrote last, which runs in
-jsonrpc.el's timer -- is sent nowhere and signals nothing, since from
-that timer Emacs would report a signal as `Error running timer'
-\(OW-hiliti): it says so once and runs FAILED at once.
-
-With ALWAYS non-nil, CALLBACK runs even when a later request has been sent
-since: for a command -- attach, prompt, abort -- whose reply is not a view
-that the later request's replaces.  Such a request still supersedes every
-earlier one, so a preview refetch still in flight when the buffer attaches
-is not drawn over the live transcript.  Every request's answer is
-dropped with its buffer, whatever killed it.
+jsonrpc.el's sentinel hands some pending requests a \"Server died\" error
+with the code -1, which the helper never writes, while a reply read after
+it still reaches its request (jsonrpc.el 1.0.29; OW-laluso).  So it is
+ignored: what the helper wrote last is handed on after the sentinel
+\(`agentpane--helper-exited'), and a helper that crashes answers nothing,
+leaving the teardown to reset what its requests hold
+\(`agentpane--helper-gone').
 
 Asynchronous because a synchronous `jsonrpc-request' with another nested
 inside it, as the picker refetch that `sessions/changed' runs nests in a
@@ -2701,89 +2678,42 @@ below `stop' in src/client/App.svelte (OW-kijuju, OW-hakeno).  See
 (defun agentpane--send-prompt (text sent &optional images failed)
   "Send TEXT as a prompt to the session of the current buffer's transcript,
 with IMAGES, a list of the plists the prompt's `images' take, then call
-SENT.  A prompt the server refuses, such as one sent mid-turn
-\(DESIGN D16), shows the server's text in the echo area and SENT is not
-called, so the draft stays where it was; FAILED, if given, is called
-instead, as it is for any other failure of the attach or the prompt.
-While the transcript holds an edit (`agentpane-edit'), TEXT goes instead
-into a fork at the edited message, with that message's images; see
-`agentpane--send-edit'.
+SENT.  While the transcript holds an edit (`agentpane-edit'), TEXT goes
+instead into a fork at the edited message, with that message's images;
+see `agentpane--send-edit'.  Otherwise a prompt that fails, a refusal
+included, shows why in the echo area and calls FAILED, if given, instead
+of SENT, so the draft stays where it was.
 
-Every send is one `sessions/prompt' carrying the buffer's view and text,
-and the helper chooses how it goes (D30, D32 point 4).  An attached
-buffer marks its prompt `live', and the helper sends it under the handle
-the buffer's view is bound to, the server prompting only the live
-session under it and refusing it `not_attached' once that handle has
-ended, as the helper refuses it once the binding has gone, at an `ended'
-or a gap it read before the prompt: a close crossing the prompt starts
-nothing (D32 point 1).  Any other buffer's prompt is not marked `live':
-where the buffer's attach is still out the helper waits for it and sends
-the prompt under the handle it bound, refusing it with the attach's error,
-or `not_attached', where it bound nothing; with none out it sends it by
-ref, and the server attaches the session if it must and then prompts it,
-the snapshot under the view attaching this buffer as an attach's does
-\(`agentpane--attach-by'), the helper writing the reply, or a refusal
-naming the session it attached, after it.  A refusal still leaves the
-buffer attached where the server attached the session before refusing
-the prompt.  The helper refuses that one, `forking', while an edit's fork
-of the session is out (D32 point 4).
+An attached buffer marks its prompt `live'; from any other the helper
+attaches the session as the prompt goes, and the snapshot answering that
+attach attaches this buffer (`agentpane--attach-by').  The helper routes
+and refuses it as `sessions/prompt' in src/emacs/protocol.ts says.
 A reply, or a refusal's `attached', naming another view landed on the
-handle that view's buffer holds (D32 point 2): the helper bound nothing
-here, and that buffer is shown in this one's windows, the echo area
-naming it (`agentpane--show-holder').  The text counts as sent here, as
-any successful send's does, and only what was typed since stays as this
-buffer's draft; the helper arms the turn-done watch on that buffer's
-handle, and a prompt the backend handled says so there.
+handle that view's buffer holds (D32 point 2): that buffer is shown in
+this one's windows (`agentpane--show-holder'), and the text still counts
+as sent.
 
-One send at a time per session, as the browser allows (OW-nasofa): until
-the prompt has answered, which it does once the turn is accepted, a second
-send says so and sends nothing.  The draft stays visible until that answer,
-so pressing again while a backend spawns is the natural move, which would
-otherwise prompt again with the same text, a steer of the turn the first
-began on Codex (D16).  The helper refuses a second prompt from the view
-`busy' too, guarding the wire.
-Nor does one go while the session compacts: from Compact's press to
-its reply the helper refuses it `busy', which reads as any refusal,
-keeping the text, and from the server's status saying so to the status
-saying it has ended it is refused here, as the browser holds Send
-\(`send' in src/client/App.svelte, OW-natiha): the backends cannot
-safely admit a turn beside a compaction.  That covers an edit's send
-too, as the browser holds Fork.
+One send at a time per session, as the browser allows (OW-nasofa): the
+draft stays visible until the prompt answers, so pressing again while a
+backend spawns is the natural move, which would steer the first send's
+turn on Codex (D16).  Nor does one go while the session compacts, as the
+browser holds Send (`send' in src/client/App.svelte, OW-natiha): the
+backends cannot safely admit a turn beside a compaction.  That covers an
+edit's send too.
 
-The answer leaves the turn error alone.  The server owns it, and the
-`session/errorCleared' it broadcasts when it admits the prompt drops it
-here as in every other client (OW-lohubo), as `submit' in
-src/client/controller.ts leaves it to `error-cleared'.  A clear at the
-answer could not tell the error held at the send from a new turn's
-failing at once with the same text, handled before a held-back answer.
-The server writes that `session/errorCleared' ahead of the answer (D31
-point 3), and jsonrpc.el can hand an answer on later than it came,
-never earlier.
-
-The prompt names the error the buffer held when it was sent, by
-`agentpane--error-id', or none, and the server clears only that one at
-admission (OW-jokoto).  Read here, at the send, before the attach the
-helper holds the prompt for, or the one it makes: an error that attach's
-start raises, drawn from its snapshot, is newer than the prompt, and
-admitting it must not clear it.
-
-The turn-done watch is the helper's (D32 point 6): it arms it for the
-prompt where none stands, from an attached buffer's at receipt and from
-any other's under the handle its attach lands on, and takes it down for a
-server refusal or a handled answer only where this prompt armed it, as
-the browser's `disarmSubmit' does (OW-mifuki).  A timeout, the helper's
-death and an error of the helper's own leave it standing, since
-the prompt may have been admitted (OW-dunahe).
+The answer leaves the turn error alone, to the `session/errorCleared' the
+server writes when it admits the prompt, ahead of the answer (OW-lohubo,
+D31 point 3), as `submit' in
+src/client/controller.ts does: a clear at the answer could clear a new
+turn's error that jsonrpc.el handed on before a held-back answer.
+`priorErrorId' is read here, before the attach the helper may make for
+the prompt, whose start can raise an error newer than it (OW-jokoto).
 
 A prompt the backend handled itself, starting no turn for it -- a Pi
 extension command such as `/mcp' -- answers `(:disposition \"handled\")'
-where a started one answers nil (`sessions/prompt' in
-src/emacs/protocol.ts, OW-dulipe).  It still counts as sent, so SENT
-clears the draft, and the helper drops the watch it armed for it
-\(OW-taviju).
-The buffer says no turn was started for it, `agentpane--handled', until the
-next send; through an edit that is the fork's buffer, where the prompt
-went.  A buffer killed before the answer says nothing."
+\(OW-dulipe).  It still counts as sent, and the buffer it went to says no
+turn was started for it, `agentpane--handled', until the next send;
+through an edit that is the fork's buffer."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
