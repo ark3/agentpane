@@ -1,132 +1,83 @@
 /**
  * `BackendAdapter` for Claude Code, driving `claude -p` over stream-json in
- * both directions (OW-beripo).
+ * both directions (OW-beripo). This is the shell: spawn, control-channel
+ * correlation, and the command surface; the event->message translation is
+ * `reducer.ts`/`mapping.ts`'s.
  *
- * This is the shell: spawn, control-channel correlation, and the
- * lifecycle/command surface. The event->message translation lives in
- * `reducer.ts`/`mapping.ts`, which this class drives and never second-guesses.
+ * Where it differs from the Codex shell, by protocol:
  *
- * Differences from the Codex shell that are protocol, not preference:
+ * - A turn is a user-message line on stdin, which no reply answers, and only
+ *   `result` ends it. A line written mid-turn would run as a later turn and
+ *   there is no `steer` subtype, so `submit()` and `compact()` refuse while a
+ *   turn runs (docs/BACKENDS.md, "A message written mid-turn").
+ * - The session id is ours, chosen at spawn (`ClaudeSpawnOptions.sessionId`),
+ *   so a fresh session and a fork know theirs at once, and nothing waits on
+ *   `init`, which arrives only with the first turn (settled live 2026-08-25).
+ * - `fork()` runs nothing: the fork's own adapter spawns `--resume <parentId>
+ *   --resume-session-at <entryId> --fork-session --session-id <forkId>`, and
+ *   the parent keeps its child and its turn (`fork`). Respawning this child
+ *   onto the fork would kill a parent turn still streaming and lose it, its
+ *   store gaining nothing until the turn ends; as of `claude 2.1.268` the CLI
+ *   ran two live children on one workspace (docs/BACKENDS.md, "A fork
+ *   spawned mid-stream"). The parent's store file is untouched and no lineage
+ *   marker exists on disk (OW-mayuza).
+ * - No agent request is expected (D2a): sbox's claude profile injects
+ *   `bypassPermissions` (`buildClaudeSpawnCommand`), and `can_use_tool` is
+ *   sent only under the undocumented `--permission-prompt-tool stdio`, which
+ *   this adapter does not pass (fixture `permission-request.jsonl`). One that
+ *   arrives anyway is refused (`refuseControlRequest`).
  *
- * - There is no request/response RPC for turns: a turn is admitted by writing
- *   a user-message line to stdin, and only the `result` event ends it. Claude
- *   Code queues a user message written mid-turn as a later turn, and has no
- *   `steer` control subtype (OW-jihete), so `submit()` rejects while the first
- *   turn is active. `compact()` uses the same gate; this adapter never creates
- *   the CLI's queue window itself.
- * - The session id is chosen by US at spawn (`--session-id`, settled live
- *   2026-08-25): a fresh session and a fork both know their id synchronously,
- *   so nothing waits on the `init` event (which only arrives with the first
- *   turn, not at spawn -- settled live the same day).
- * - `fork()` runs nothing. It mints the fork's session id and returns the
- *   `StartOptions` (`forkOf`) that spawn it, leaving this adapter on the parent
- *   with its child, its ref and its in-flight turn intact -- so like Codex, and
- *   unlike Pi, `adapter.ref` does not change and `onRefChanged` stays silent
- *   (OW-razoki).
- *   The fork becomes a full session when the manager attaches it: a second
- *   adapter, started with `forkOf`, spawns `--resume <parentId>
- *   --resume-session-at <entryId> --fork-session --session-id <forkId>`.
- *   Respawning THIS child onto the fork was the old shape, and its kill was what
- *   destroyed a parent turn still streaming -- as of `claude 2.1.268` the CLI
- *   itself tolerates two live children on one workspace (MANUAL_TESTING
- *   OW-japuzo). The parent's store
- *   file is untouched and no lineage marker exists on disk (OW-mayuza).
- * - A chosen effort is set on the running process: `setEffort`
- *   sends `apply_flag_settings` with `effortLevel`, and what the CLI then runs
- *   at is read back from `get_settings`'s `applied.effort` -- at start, after
- *   `setEffort` and after `setModel` -- rather than assumed. Measured on the
- *   home server, 2026-09-23, `claude 2.1.280` (docs/MANUAL_TESTING.md,
- *   OW-hokaye): `low` applied at once; a model without effort (haiku)
- *   applied null with the choice still held, and it came back on a
- *   `set_model` to one with effort; an unknown level was accepted and
- *   ignored, which is why nothing here trusts the request alone.
- *   The choice lives in the process's flag-settings layer and dies with
- *   the process.
- *   The store names the effort each turn ran at, but a `--resume` spawn does
- *   not restore it and runs at the settings or model default: a sonnet
- *   session whose turn ran at `low`, and a copy of one whose every stored
- *   turn ran at `max`, each resumed at `high`, and a `--fork-session` spawn
- *   of the latter read `high` too. So a resume and a fork are spawned with
- *   `--effort` at the level the last hydrated assistant message records --
- *   for a fork, the kept prefix's -- because the store, not agentpane, holds
- *   the conversation's effort (D23). A fork before the first message keeps no
- *   prefix, so `fork()` hands it the parent's effort in force, as the last
- *   `get_settings` read it, and it is spawned with `--effort` at that; a
- *   parent whose model has no effort read null and hands over none (D23,
- *   OW-sababi). The flag, not `apply_flag_settings` after attach, because it
- *   is in force from the process's first instant.
- *   Measured on the home server, 2026-09-23, `claude 2.1.280`, no turn
- *   (docs/MANUAL_TESTING.md, OW-nabano): `--effort low` and `--effort max`
- *   on a `--resume` read back `low` and `max` -- `max` too, though it is
- *   session-scoped and named by no settings source -- and `--effort low` on
- *   a `--fork-session` spawn read `low`; `--effort bogus` was ignored rather
- *   than failing the spawn;
- *   and a later `apply_flag_settings` still overrode the flag. The start read
- *   is what makes `getState().effort` true for every path.
- *   The model, unlike the effort, the CLI restores itself, so a resume and a
- *   fork at a real entry are spawned with no `--model`, and the stored model
- *   is only what `getState().model` names first. Measured on the home server,
- *   2026-09-23, `claude 2.1.280`, no turn (docs/MANUAL_TESTING.md,
- *   OW-tebibo): with the settings naming `opus[1m]`, a `--resume` with no
- *   `--model` put in force the `message.model` of the last assistant line
- *   that is not `<synthetic>`, even where that line alone was hand-edited;
- *   a `--fork-session` spawn put in force its kept prefix's, not the file's
- *   last; and a stored `claude-opus-5-5` came back as `claude-opus-5-5[1m]`,
- *   a variant that passing the stored id would drop. A fork's kept prefix
- *   may name a different model from the parent's latest, so the prefix's is
- *   the fork's; the parent's model, which `fork()` hands over, rides the
- *   spawn only when the prefix names none, as does a model given at start
- *   to a resume.
- *   So the start read of `get_settings` renames a stored model by the one in
- *   force: the listed id whose `resolvedModel` it is, never `default`, or the
- *   resolved id itself where no listed id resolves to it. That name is what
- *   `fork()` hands a fork before the first message, a fresh spawn that
- *   carries it as `--model`, so the fork runs what the parent runs, `[1m]`
- *   included. Measured on the home server, 2026-09-23, `claude 2.1.280`, no
- *   turn (docs/MANUAL_TESTING.md, OW-faledu): under settings naming
- *   `opus[1m]`, a fresh `--model claude-opus-5-5` put `claude-opus-5-5` in
- *   force, while `--model opus[1m]` and `--model claude-opus-5-5[1m]` each
- *   put `claude-opus-5-5[1m]` in force under those settings and under
- *   `sonnet`'s; a resumed copy of a store naming `claude-opus-5-5` read
- *   `claude-opus-5-5[1m]`, which `opus[1m]` resolves to, and under `sonnet`'s
- *   settings read `claude-opus-5-5`, which no listed id resolves to and which
- *   a fresh `--model claude-opus-5-5` puts back.
- *   Each turn's `init` event then replaces that name with the id it reports,
- *   which is the model in force with its `[1m]` variant, so what `fork()`
- *   hands over after a turn still puts the variant back, though it may no
- *   longer be a listed id. Measured on the home server, 2026-09-23, `claude
- *   2.1.280` (docs/MANUAL_TESTING.md, OW-lizupu): on a sonnet `[1m]` session,
- *   fresh and resumed, `init` named `claude-sonnet-5[1m]`, as `applied.model`
- *   did, while the assistant event and store line named `claude-sonnet-5`.
- *   Each assistant turn is named with the effort in force when it started,
- *   and a resumed one with the `effort` its store line records.
- * - A session nobody chose a model on still names one before its first turn,
- *   because the clients offer efforts by the session's model and would
- *   otherwise offer none (OW-kakide). The start read of `get_settings` also
- *   carries `applied.model`, the model in force, but as a resolved id
- *   (`claude-opus-5-5[1m]`), not a listed one; `initialize`'s entries each
- *   carry the `resolvedModel` behind their `value`, so the resolved id is
- *   mapped back through them (`listedModelFor`). Measured on the home server,
- *   2026-09-23, `claude 2.1.280`, no turn (docs/MANUAL_TESTING.md, OW-kakide):
- *   `default` resolved to the account's recommended model whatever the
- *   settings named, and a settings `model` of `sonnet` put `claude-sonnet-5`
- *   in force, which maps to `sonnet`. So `default` is named only when it
- *   resolves to the model actually in force, and `--model default` or
- *   `set_model` to it then put that same model in force -- which is what
- *   makes it safe for `fork()` to hand the named model to the fork's spawn.
- *   Only a session with no model yet, or only its store's (above), adopts one
- *   this way, and only the former prefers `default`: this read never
- *   overwrites a model chosen at start or since, though a turn's `init` does
- *   (above).
- * - No agent request is expected here, unlike Codex and Pi (D2a), because
- *   none can arrive: sbox's claude profile injects `bypassPermissions`, and the
- *   jail is the confinement boundary -- the same rationale DESIGN records for
- *   Codex's `danger-full-access`. The `can_use_tool` ask only exists under the
- *   undocumented `--permission-prompt-tool stdio` flag, which this adapter
- *   does not pass (shape recorded in fixture `permission-request.jsonl`).
- *   Should a `control_request` of any subtype arrive anyway, it is refused at
- *   arrival like Codex's and Pi's and named in a session error, so a broken
- *   premise is loud rather than a stalled turn (`refuseControlRequest`).
+ * The effort in force is read back from `get_settings`'s `applied.effort` at
+ * start, after `setEffort`'s `apply_flag_settings` and after `setModel`,
+ * never assumed from a request. As of `claude 2.1.280` (home server,
+ * 2026-09-23; docs/MANUAL_TESTING.md, OW-hokaye): `low` applied at once; a
+ * model without effort (haiku) read null with the choice still held, which
+ * came back on a `set_model` to one with effort; an unknown level was
+ * accepted and ignored; and the choice died with the process.
+ *
+ * A `--resume` does not restore the stored effort: on the same version a
+ * sonnet session whose turn ran at `low`, and a copy of one whose every turn
+ * ran at `max`, each resumed at `high`, as did a `--fork-session` spawn of
+ * the latter (OW-hokaye, OW-nabano). So a resume or a fork is spawned with
+ * `--effort` at the level its last hydrated assistant message records
+ * (`storedEffort`, D23), and a fork before the first message, which keeps
+ * none, at the parent's in force, none where that read null (OW-sababi).
+ * The flag, because it holds from the process's first instant: on `claude
+ * 2.1.280` (OW-nabano) `--effort low` and `--effort max` on a `--resume`,
+ * and `low` on a `--fork-session` spawn, read back as given, `max` though it
+ * is session-scoped; `--effort bogus` was ignored rather than failing the
+ * spawn; and a later `apply_flag_settings` still overrode the flag.
+ *
+ * The CLI restores the stored model itself, so a resume and a fork at an
+ * entry are spawned with no `--model`, save one given at start to a resume,
+ * or the parent's for a fork whose kept prefix names none. On `claude
+ * 2.1.280` (OW-tebibo), with the settings naming `opus[1m]`, a `--resume`
+ * with no `--model` put in force the `message.model` of the last assistant
+ * line that is not `<synthetic>`, a `--fork-session` spawn its kept
+ * prefix's, and a stored `claude-opus-5-5` came back as
+ * `claude-opus-5-5[1m]`, a variant that passing the stored id would drop.
+ *
+ * So the stored id is only what `getState().model` names first: the start
+ * read of `get_settings` renames it by `applied.model`, the model in force,
+ * mapped back to the listed id that resolves to it (`listedModelFor`), or
+ * kept as the resolved id where none does. That is the name `fork()` hands a
+ * fork before the first message as `--model`, so it runs what the parent
+ * runs, `[1m]` included: on `claude 2.1.280` `--model opus[1m]` and `--model
+ * claude-opus-5-5[1m]` put `claude-opus-5-5[1m]` in force where a bare
+ * `claude-opus-5-5` did not, and a resolved id no listed id maps to, passed
+ * as `--model`, put itself back (OW-faledu). After a turn, `init`'s model
+ * replaces the name: it carries the `[1m]` variant, as `applied.model` does,
+ * where the assistant event and store line leave it off (same version,
+ * OW-lizupu).
+ *
+ * A session nobody chose a model on is named one at start too, since the
+ * clients offer efforts by the session's model (OW-kakide), and `default`
+ * only where it resolves to the model in force: on `claude 2.1.280`
+ * `default` resolved to the account's recommended model whatever the
+ * settings named, and `--model default` or a `set_model` to it put that same
+ * model in force, which is what makes the name safe to hand a fork. The start
+ * read never overwrites a model chosen at start or since; a turn's `init`
+ * does.
  */
 
 import { randomUUID } from "node:crypto";
@@ -428,24 +379,17 @@ export class ClaudeAdapter implements BackendAdapter {
 	 * the message entry PRECEDING X -- and the first prompt, which nothing
 	 * precedes, carries `CLAUDE_FORK_SESSION_START`.
 	 *
-	 * Which store lines are prompts, and where they land, is settled by replaying
-	 * them through a throwaway `ClaudeReducer` -- the same walk cold-start
-	 * hydration does with the same records, so the answer is the reducer's by
-	 * construction. Asking `claudePromptText` instead was the old way and it did
-	 * not agree: it filters only `isSyntheticBlock`, while `handleUser` also drops
-	 * `isSynthetic`, `isCompactSummary` and `isReplay` lines and routes
-	 * `tool_result` blocks to a `toolResult` message. A compacted session
-	 * therefore emitted a point with no user message behind it and pushed every
-	 * ordinal after the compaction off by one; the replay fixes that as a side
-	 * effect.
+	 * Which store lines are prompts, and where they land, is settled by
+	 * replaying them through a throwaway `ClaudeReducer`, the walk cold-start
+	 * hydration does, so the answer is the reducer's by construction; a filter
+	 * of its own would miss the lines `handleUser` drops or routes elsewhere,
+	 * as a compaction summary's.
 	 *
-	 * The store lags the live transcript -- as of `claude 2.1.268` it gains no
-	 * content until a turn ends (MANUAL_TESTING OW-japuzo), while `beginTurn`
-	 * echoes the human's prompt into the reducer immediately -- so the replay is
-	 * a *prefix* of the live array, and a prefix's indices are the live array's
-	 * indices. Each point is checked against the live reducer before it ships:
-	 * anything not landing on a user message there is dropped rather than
-	 * shipped as an index into an array it does not describe.
+	 * The store lags the live transcript, as of `claude 2.1.268` gaining
+	 * nothing until a turn ends (docs/BACKENDS.md, "A fork spawned
+	 * mid-stream"), while `beginTurn` adds the prompt at once, so the replay is
+	 * a prefix of the live array and its indices are the live array's. A point
+	 * that does not land on a user message in the live reducer is dropped.
 	 */
 	async listForkPoints(): Promise<ForkPoint[]> {
 		this.requireProc();

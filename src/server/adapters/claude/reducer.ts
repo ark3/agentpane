@@ -1,37 +1,27 @@
 /**
  * The Claude Code stream-json event stream -> transcript state machine.
  *
- * Pure: parsed `ClaudeEvent`s in, effects out. No subprocess, no timers --
- * driven from `resources/fixtures/claude/*.jsonl` in a unit test, the same
- * stance as `codex/reducer.ts`.
+ * Pure: parsed `ClaudeEvent`s in, effects out, with no subprocess or timer,
+ * so it is driven from `resources/fixtures/claude/*.jsonl` in a unit test, as
+ * `codex/reducer.ts` is.
  *
- * Assembly rules, settled live (docs/MANUAL_TESTING.md OW-yilabe):
+ * The stream's shape, settled live on `claude 2.1.238`
+ * (docs/MANUAL_TESTING.md OW-yilabe):
  *
- * - `assistant` events arrive once per completed CONTENT BLOCK, not per
- *   message, all under one API `message.id` -- merge by that id. The k-th
- *   authoritative block of a message id lands at content position k.
- * - Streaming assembly comes from `stream_event` lines
- *   (`--include-partial-messages`): `message_start` opens an assistant
- *   message, `content_block_start`/`content_block_delta` build blocks by
- *   index, and the `assistant` events replace them authoritatively. Tool-call
- *   arguments are the exception: `input_json_delta` is a no-op and those
- *   arguments come from the authoritative event alone (OW-bizulo).
- * - Multiple `message_start`/`message_stop` cycles occur inside one logical
- *   turn (one per API round-trip); only `result` ends the turn.
- * - Tool results come back as `user` events wrapping `tool_result` blocks,
- *   correlated by `tool_use_id`.
- * - The CLI never echoes the human's own prompt: `submit()` adds it locally
- *   via `beginTurn`. `user` events carrying real text occur only in stored
- *   sessions (hydration) and after compaction.
- * - `/compact` shows up as `system`/`compact_boundary` (reduced to the
- *   `compactionSummary` marker) followed by an `isSynthetic` user message
- *   carrying the summary text, which fills the marker.
- * - An interrupt ends with a `result` of subtype `error_during_execution` and
- *   `is_error: true` -- that is the interrupt working, mapped to stopReason
- *   "aborted", not surfaced as an error.
+ * - An `assistant` event carries one completed content block, and all of a
+ *   message's share its API `message.id`, so they merge by that id
+ *   (`handleAssistant`).
+ * - Under `--include-partial-messages`, `stream_event` lines build a
+ *   message's blocks by index ahead of those events, which replace them; a
+ *   tool call's arguments come from the `assistant` event alone (OW-bizulo).
+ * - A turn holds one `message_start`/`message_stop` cycle per API
+ *   round-trip, and only `result` ends it.
+ * - The CLI never echoes the human's prompt (`beginTurn`). A `user` event
+ *   carries tool results, by `tool_use_id`, and text only in a stored
+ *   session, after compaction, or as a replayed echo (`handleUser`).
  *
- * Haiku emits thinking blocks headless on every turn, so thinking is a
- * day-one path here, not an option.
+ * In the same run Haiku emitted thinking blocks headless on every turn, so
+ * thinking is a day-one path here, not an option.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
