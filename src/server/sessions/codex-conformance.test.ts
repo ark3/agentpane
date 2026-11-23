@@ -2,27 +2,22 @@
  * The live transcript and the preview of one Codex run held against each
  * other, one recorded run at a time (OW-zadupu).
  *
- * An attached session reaches the transcript through `mapItem`
- * (`adapters/codex/mapping.ts`, driven by `CodexReducer`). A preview reads the
- * rollout Codex wrote to disk, and one whose `item_completed` records are a
- * full copy, as every rollout here is, translates them and maps them through
- * `mapItem` as well (`./codex.ts`, OW-luvema). So what this holds is the
- * translation and the reducer's handling around `mapItem`; the preview's
- * fallback, `extractStoreTurn`, is not reached. Each scenario below is one
- * capture by `resources/probes/capture_fixtures.py` that kept both halves of
- * the same run: `<scenario>.jsonl`, the app-server stream, and
- * `<scenario>.rollout.jsonl`, the rollout. The stream is replayed through the
- * reducer, the rollout through the preview, and both are projected onto what a
- * reader would notice: the role sequence, tool names, whether each call has its
- * result and each result its call, `isError`, `stopReason`, and a compaction
- * marker's figure and whether it carries a summary. Timestamps, usage and model
- * identity differ by design and are left out, as is any text but one piece: a
- * user message that opens with a `<tag>` wrapper, such as `<turn_aborted>`,
- * keeps the tag, so a row says which injected message it is and a typed prompt
- * stays bare `user`. A result row names its call by how many calls back it
- * sits, said only when it is not the latest call, so results that answer
- * same-named calls out of order still differ, and a call the other side lacks
- * shifts no later row.
+ * Both reach `mapItem` (`adapters/codex/mapping.ts`): live through
+ * `CodexReducer`, the preview by translating the rollout's `item_completed`
+ * records, a full copy in every rollout here (`./codex.ts`, OW-luvema). So
+ * what this holds is the translation and the reducer's handling around
+ * `mapItem`; the preview's fallback, `extractStoreTurn`, is not reached. Each
+ * scenario below is one capture by `resources/probes/capture_fixtures.py` that
+ * kept both halves of the same run: `<scenario>.jsonl`, the app-server
+ * stream, and `<scenario>.rollout.jsonl`, the rollout.
+ *
+ * Both are projected onto what a reader would notice. Timestamps, usage and
+ * model identity differ by design and are left out, as is any text but a
+ * user message's opening `<tag>` wrapper, such as `<turn_aborted>`, so a row
+ * says which injected message it is. A result row names its call by how many
+ * calls back it sits, said only when it is not the latest call, so results
+ * that answer same-named calls out of order still differ, and a call the
+ * other side lacks shifts no later row.
  *
  * Every place the two disagree is listed in `KNOWN_DIFFERENCES`, keyed to the
  * card that owns it. Fixing a row is that card's work, not this file's; when it

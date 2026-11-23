@@ -1,36 +1,28 @@
 /**
  * The live transcript and the preview of one Pi run held against each other,
  * one recorded run at a time (OW-piyulu); the Pi counterpart of
- * `codex-conformance.test.ts`.
+ * `codex-conformance.test.ts`, whose header says how a row names its call
+ * and how `KNOWN_DIFFERENCES` is kept.
  *
- * An attached session's transcript is what `reducePiNotification`
- * (`adapters/pi/reducer.ts`) builds from Pi's RPC events. A preview reads the
- * session file Pi wrote, through `extractPiPreviewTurns` (`./pi.ts`) and
- * `storedAgentMessage`. Each scenario below is one capture by
+ * Live is what `reducePiNotification` (`adapters/pi/reducer.ts`) builds from
+ * Pi's RPC events; the preview reads the session file Pi wrote, through
+ * `extractPiPreviewTurns` (`./pi.ts`). Each scenario below is one capture by
  * `resources/probes/capture_fixtures.py` that kept both halves of the same
  * run: `<scenario>.jsonl`, the RPC stream, and `<scenario>.session.jsonl`, the
- * session file. The stream is replayed through the reducer, the file through
- * the preview, and both are projected onto what a reader would notice: the
- * role sequence, content-block kinds, tool names, whether each call has its
- * result and each result its call, `isError`, `stopReason`, the effort a
- * footer names, and a compaction marker's figure and whether it carries a
- * summary. Usage and model identity are left out, as in the Codex test, though
- * on these `pi 1.2.0` runs they agree; so is all text. Each row ends with its
- * message's epoch-ms timestamp, the preview's through `previewMessages`
- * (`client/preview.ts`) as the client converts it, so a row that disagrees
- * names the footer time that would. A compaction marker's is left out: live
- * stamps it with the clock when `compaction_end` arrives, which `Date.now()`
- * reads in a replay as the moment the test runs. A result row names its call
- * by how many calls back it sits, said only when it is not the latest call.
+ * session file.
+ *
+ * Usage and model identity are left out, as in the Codex test, though on
+ * these `pi 1.2.0` runs they agree; so is all text. A row keeps the effort a
+ * footer names, and ends with its message's epoch-ms timestamp, the
+ * preview's through `previewMessages` (`client/preview.ts`) as the client
+ * converts it, so a row that disagrees names the footer time that would. A
+ * compaction marker's is left out: live stamps it with the clock when
+ * `compaction_end` arrives, which reads in a replay as the moment the test
+ * runs.
  *
  * The replay starts at the effort `process.ts` holds once `get_state` answers
  * at spawn: the level the capture's `--model` ref named, since the model it
  * pins reasons. The capture sent no `get_state`, so the stream cannot say it.
- *
- * Every place the two disagree is listed in `KNOWN_DIFFERENCES`, keyed to the
- * card that owns it. Fixing a row is that card's work, not this file's; when it
- * lands, the scenario here fails until its entry is removed, which is the
- * point -- the table stays a true list of what still differs.
  */
 
 import { readFileSync } from "node:fs";
