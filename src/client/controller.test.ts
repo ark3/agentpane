@@ -528,8 +528,8 @@ describe("client controller", () => {
 	/**
 	 * A preview is a new selection, so it ends the claim of the attach it
 	 * supersedes and the `"attaching"` that claim published with it: left
-	 * standing, the status line read "Opening session…" and the external editor
-	 * refused until some later action reset `busy` (OW-nizemu).
+	 * standing, the status line would read "Opening session…" and the external
+	 * editor refuse until some later action reset `busy` (OW-nizemu).
 	 */
 	it("returns busy to idle when a preview supersedes an attach still in flight (OW-nizemu)", async () => {
 		const server = fakeServer();
@@ -576,8 +576,8 @@ describe("client controller", () => {
 	 * The clear rides the superseding gesture's own publish rather than one of
 	 * its own ahead of it: a publish while the pane is loading asks
 	 * `loadPreview`'s read, and one between the bump and `preview` making its
-	 * read the click's asked one for the row being left, under the click's
-	 * intent, whose `gone` cleared the selection (OW-nizemu).
+	 * read the click's would ask one for the row being left, under the click's
+	 * intent, whose `gone` clears the selection (OW-nizemu).
 	 */
 	it("asks no read of the loading row a preview leaves when it supersedes an attach (OW-nizemu)", async () => {
 		const server = fakeServer();
@@ -884,8 +884,8 @@ describe("client controller", () => {
 
 	// The server broadcasts `sessions-changed` at every turn boundary (OW-furinu),
 	// so one lands inside every prompt's round trip -- and the re-list it triggers
-	// used to clear `busy` under the guard above and let the second press through
-	// (OW-dinuwu).
+	// must not clear `busy` under the guard above and let the second press
+	// through (OW-dinuwu).
 	it("ignores a second submit after the in-flight prompt's own re-list (OW-dinuwu)", async () => {
 		const server = fakeServer();
 		const prompt = deferred<PromptResponse>();
@@ -930,8 +930,8 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A press that joins owns what it owned before OW-sabova and no more: the
-	// owed listing's failure and its idle, never a `busy: "listing"` or cleared
+	// A press that joins owns the owed listing's failure and its idle, and no
+	// more (OW-sabova): never a `busy: "listing"` or cleared
 	// error at the owed listing's start, which comes after the press and so
 	// possibly after a gesture the user made in between (OW-nasofa).
 	for (const attach of ["pending", "failed"] as const) {
@@ -1257,7 +1257,7 @@ describe("client controller", () => {
 
 	// `busy` is one global slot and a gap is per-session, so a gap on B must not
 	// write over the prompt the user is watching in A, nor move the selection
-	// off it; re-attaching B used to write "Opening session…" there.
+	// off it.
 	it("leaves busy at submitting and the selection in place across another session's sequence gap (OW-yasewo)", async () => {
 		const server = fakeServer();
 		const prompt = deferred<PromptResponse>();
@@ -1281,9 +1281,9 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A regression guard, not a red-first test: since OW-kelede the send guard
-	// reads `sending`, which a gap does not touch. Nothing else pins a gap
-	// against that guard, and the guard has moved once already.
+	// A regression guard, not a red-first test: the send guard reads `sending`
+	// (OW-kelede), which a gap does not touch, and nothing else pins a gap
+	// against that guard.
 	it("ignores a second submit while another session's sequence gaps (OW-yasewo)", async () => {
 		const server = fakeServer();
 		const prompt = deferred<PromptResponse>();
@@ -1437,8 +1437,8 @@ describe("client controller", () => {
 	});
 
 	// A WebSocket does not retry, so without the client's own reconnect it
-	// would sit in `reconnecting` until the user pressed Refresh, as a fatally
-	// closed `EventSource` once did (OW-dekuri). Nothing here re-opens on its
+	// would sit in `reconnecting` until the user pressed Refresh (OW-dekuri).
+	// Nothing here re-opens on its
 	// own: the only opens are the ones the rebuilt connections earn, and the
 	// healed sidebar at the end is the whole claim.
 	it("opens the socket again on a fixed delay after a close until one opens, and heals with no user gesture (D31 point 6)", async () => {
@@ -1895,7 +1895,7 @@ describe("client controller", () => {
 	// `onDisk`. Here the attach reply said nothing was on disk and no listing
 	// has caught up with the first turn that has written the store since, and
 	// the session still detaches onto its preview like any stored one
-	// (OW-tewave), where a detach that read `onDisk` cleared it.
+	// (OW-tewave), rather than clearing it as a detach reading `onDisk` would.
 	it("previews a session created here whose summary has not caught up with its first turn on disk", async () => {
 		const server = fakeServer();
 		const controller = createController(server.api());
@@ -1938,9 +1938,9 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A gap inside a detach's window used to re-attach, spawning the subprocess
-	// the user just asked to be rid of (OW-sugome); since D25 a gap attaches
-	// nothing, and the detach still ends where it would have.
+	// A gap inside a detach's window attaches nothing (D25), so it cannot
+	// re-spawn the subprocess the user just asked to be rid of (OW-sugome), and
+	// the detach still ends where it would have.
 	it("does not re-attach a session whose detach is still in flight when its sequence gaps", async () => {
 		const server = fakeServer();
 		const controller = createController(server.api());
@@ -2214,9 +2214,9 @@ describe("client controller", () => {
 	});
 
 	/**
-	 * One of OW-husivu's two accepted races: a refused compaction cleared the
-	 * "requesting" it could not tell from another client's. The client writes
-	 * no compaction of its own (D31 point 7), so a refusal leaves the server's.
+	 * A refused compaction cannot tell the server's phase from another
+	 * client's (OW-husivu), and the client writes no compaction of its own
+	 * (D31 point 7), so a refusal leaves the server's standing.
 	 */
 	it("leaves the server's requesting standing when its own compaction is refused (OW-husivu, D31 point 7)", async () => {
 		const server = fakeServer();
@@ -2318,7 +2318,7 @@ describe("client controller", () => {
 
 	/**
 	 * A fork the server created whose prompt then failed (D30). Left on the
-	 * parent, a second send forked the parent again and orphaned the first
+	 * parent, a second send would fork the parent again and orphan the first
 	 * (ark3/agentpane#17), so the refusal names the fork and the selection
 	 * moves there, with the text kept for the send that prompts it.
 	 */
@@ -2512,9 +2512,9 @@ describe("client controller", () => {
 	 * OW-lizohe. A session renamed while the refresh an attach started is in
 	 * flight (D9) keeps its handle, which the refresh is keyed by, so the reply
 	 * still passes the still-selected check (D24). Keyed by the name the session
-	 * had when the request went out, the reply failed it and published nothing,
-	 * so the transcript kept drawing Edit controls from the old set until the
-	 * next turn boundary re-asked.
+	 * had when the request went out, the reply would fail it and publish
+	 * nothing, and the transcript would draw Edit controls from the old set
+	 * until the next turn boundary re-asks.
 	 */
 	it("publishes fork points for a session renamed while the refresh was in flight (OW-lizohe)", async () => {
 		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
@@ -2634,9 +2634,9 @@ describe("client controller", () => {
 	});
 
 	/**
-	 * The rule `submit` has always had, brought to the fork path (OW-kelede).
-	 * Two fast presses in edit mode -- Ctrl-Enter twice, or Enter then a click on
-	 * the fork button -- used to start two whole forks.
+	 * One send at a time on the fork path, as on `submit` (OW-kelede): two fast
+	 * presses in edit mode -- Ctrl-Enter twice, or Enter then a click on the
+	 * fork button -- start one fork, not two.
 	 */
 	it("forks once when the fork path is entered twice while the first is still in flight (OW-kelede)", async () => {
 		const server = fakeServer();
@@ -2661,9 +2661,9 @@ describe("client controller", () => {
 	/**
 	 * The fork's request runs until its prompt is admitted, so the window in
 	 * which the user types the next prompt into a live textarea is wide -- and
-	 * the clear used to be unconditional and wipe it (OW-kelede). `submit`'s
-	 * rule covers both cases at once: a click away does not change the draft,
-	 * so that one still clears.
+	 * an unconditional clear would wipe it (OW-kelede). `submit`'s rule covers
+	 * both cases at once: a click away does not change the draft, so that one
+	 * still clears.
 	 */
 	it("keeps a draft typed while the fork was in flight (OW-kelede)", async () => {
 		const server = fakeServer();
@@ -2685,7 +2685,7 @@ describe("client controller", () => {
 	});
 
 	/**
-	 * `busy` is one global slot, so it never was a sound in-flight signal
+	 * `busy` is one global slot, so it is not a sound in-flight signal
 	 * (OW-kelede): prompt a session, watch the turn start streaming ahead of the
 	 * prompt's own reply (D31 point 3), press Stop, and `abort`'s `finally` publishes
 	 * `"idle"` over the `"submitting"` of a prompt that is still outstanding.
@@ -2703,7 +2703,7 @@ describe("client controller", () => {
 		await settle();
 
 		await controller.abort();
-		// The stop's answer once wrote idle over the prompt's `"submitting"`.
+		// The stop's answer writes no idle over the prompt's `"submitting"`.
 		expect(controller.getView()).toMatchObject({ busy: "submitting", sending: true });
 		const second = controller.submit();
 
@@ -2979,9 +2979,8 @@ describe("client controller", () => {
 
 	/**
 	 * The pane's mode is derived from what the tab holds for the selected
-	 * session, live first (OW-forinu): each path that adds or drops a view used
-	 * to keep a stored preview paired with it by hand, and these are the
-	 * orderings where that pairing slipped.
+	 * session, live first (OW-forinu), never kept paired with each view by
+	 * hand; these are the orderings where such a pairing would slip.
 	 */
 	describe("the pane's mode", () => {
 		// Another client closes S while S is selected here; the stream is up, so
@@ -3413,8 +3412,8 @@ describe("client controller", () => {
 	describe("a preview answered gone", () => {
 		const createdRef: SessionRef = { backend: "pi", id: "virtual:created" };
 
-		// Formerly OW-lejape: another client closes it with the stream up, and
-		// its `ended` drops the view (D26). Its other ordering, the reconnect's
+		// Another client closes it with the stream up, and its `ended` drops the
+		// view (D26, OW-lejape). Its other ordering, the reconnect's
 		// preview answering gone, is "keeps a live selection with nothing on
 		// disk through a drop" above.
 		it("lands on the startup view when another client closes a selected session with nothing on disk", async () => {
@@ -3493,9 +3492,9 @@ describe("client controller", () => {
 			}
 		});
 
-		// Formerly OW-tuyewo: the click on the selected detached-loading row
-		// joins the read `publish` already has out for it rather than asking a
-		// second, and its failure is the pane's to show, once.
+		// The click on the selected detached-loading row joins the read
+		// `publish` already has out for it rather than asking a second, and its
+		// failure is the pane's to show, once (OW-tuyewo).
 		it("reads a clicked detached-loading row's preview once, and reports that read's failure in one place", async () => {
 			const server = fakeServer();
 			const controller = createController(server.api());
@@ -3520,7 +3519,7 @@ describe("client controller", () => {
 			controller.dispose();
 		});
 
-		// The exit that read `onDisk` kept this selection, on a pane whose
+		// A detach reading `onDisk` would keep this selection, on a pane whose
 		// Attach the server could only refuse.
 		it("lands a detach on the startup view when the preview answers gone, though the summary says the session is on disk", async () => {
 			const server = fakeServer();

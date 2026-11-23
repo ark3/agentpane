@@ -54,10 +54,9 @@ export interface ControllerView {
 	 *
 	 * It also holds the draft exclusively of a send and of an edit, as
 	 * `sending` holds it against the editor: `submit` and `forkAndSubmit`
-	 * refuse while it is set, and so does `startEdit` in `App.svelte`. A send
-	 * started mid-trip went out with the text the editor was rewriting and
-	 * left it under Send once the answer kept it; an edit opened mid-trip took
-	 * the answer inside itself, for Cancel to drop.
+	 * refuse while it is set, and so does `startEdit` in `App.svelte`: a send
+	 * mid-trip would go out with the text the editor is rewriting, and an edit
+	 * opened mid-trip would take the answer inside itself, for Cancel to drop.
 	 */
 	editingExternally: boolean;
 	error: string | null;
@@ -70,8 +69,8 @@ export interface ControllerView {
 	/**
 	 * A compaction of the selected session is out. Compact and Send read it
 	 * beside the server's `compaction`, which is the only phase drawn
-	 * (D31 point 7): a click writes none, where its `"requesting"` raced the
-	 * server's and a refusal cleared another client's (OW-natiha, OW-husivu).
+	 * (D31 point 7): a click writes none, since a phase written here races
+	 * the server's and a refusal would clear another client's (OW-natiha).
 	 */
 	compacting: boolean;
 	/**
@@ -168,19 +167,15 @@ type Outstanding =
  *  - `preview` while it holds no view and a preview of that session is
  *    stored: the read-only transcript and the Attach button.
  *  - `loading` while it holds neither: the Attach button over an empty pane,
- *    which the owner chose on 2026-09-28 over keeping the last live transcript
- *    on screen, because it says honestly that something is going on.
+ *    chosen by the owner over keeping the last live transcript on screen,
+ *    because it says honestly that something is going on.
  *    `publish` fetches the preview that moves it on.
  *
  * Null with nothing selected, which is none of the three: the startup view,
  * whose composer answers a Send by asking for a selection.
  *
  * `App.svelte` draws from this and the controller's live verbs act only on
- * `live`, so nothing sends without a view whatever the UI draws. The pane used
- * to read "live" off the preview's absence, and every path that adds or drops
- * a view kept the two paired by hand; three of them slipped, leaving a
- * composer over no view (OW-zivamo, OW-wazija, OW-tefigi) or a preview over a
- * live one (OW-tefigi).
+ * `live`, so nothing sends without a view whatever the UI draws.
  */
 export function paneMode(view: Pick<ControllerView, "state" | "preview">): PaneMode | null {
 	const selected = view.state.selected;
@@ -260,8 +255,8 @@ export interface AgentpaneController {
 	 * carries -- and the server resolves it against the fork points by
 	 * `ForkPoint.index` (OW-roveze). Never by position in the points list: Codex
 	 * answers one point per *turn*, a steered turn holds two user messages, so
-	 * counting user messages addressed a later turn than the user clicked and
-	 * forked there silently. Never by wording either, which two identical
+	 * counting user messages addresses a later turn than the user clicked and
+	 * forks there silently. Never by wording either, which two identical
 	 * messages break.
 	 *
 	 * No point at that index is a refusal, not a fallback. The caller normally
@@ -356,13 +351,11 @@ export interface AgentpaneController {
 
 /**
  * How long to wait before opening the socket again once it has closed, or
- * failed to open (D31 point 6). The browser's own, on a fixed delay: a
- * WebSocket does not retry, where an `EventSource` retried forever looking
- * healthy. Nothing backs it off, so hammering a server that is restarting is
- * the failure mode to avoid: 5s costs at most twelve attempts a minute from a
- * tab left open against a server that never comes back, and still clears a
- * restart within one cycle of it finishing. It was the delay this client
- * rebuilt an `EventSource` the browser had given up on after (OW-dekuri).
+ * failed to open (D31 point 6), on a fixed delay since a WebSocket does not
+ * retry on its own. Nothing backs it off, so hammering a server that is
+ * restarting is the failure mode to avoid: 5s costs at most twelve attempts
+ * a minute from a tab left open against a server that never comes back, and
+ * still clears a restart within one cycle of it finishing.
  */
 export const RECONNECT_MS = 5_000;
 
@@ -480,12 +473,10 @@ export function createController(
 	 *
 	 * The flags are read here from the requests still out (`flags`), so an
 	 * `"attaching"` whose intent a newer selection ended stops reading at the
-	 * next publish (OW-nizemu): once superseded, "Opening session…" stayed up
-	 * with `editDraft` refusing until some later action reset `busy`. That
-	 * rides the superseding gesture's own publish rather than adding one: a
-	 * publish of its own between `preview`'s bump and its read becoming the
-	 * click's asked a read of the row being left, under the click's intent,
-	 * whose `gone` cleared the selection. Every bump publishes at once but the
+	 * next publish (OW-nizemu). That rides the superseding gesture's own
+	 * publish rather than adding one: a publish of its own between `preview`'s
+	 * bump and its read becoming the click's would ask a read of the row being
+	 * left, under the click's intent, whose `gone` clears the selection. Every bump publishes at once but the
 	 * fork's, whose `busy` is its own `"submitting"` by then.
 	 */
 	function publish(next: Partial<Omit<ControllerView, Flag>>): void {
@@ -507,11 +498,11 @@ export function createController(
 	/**
 	 * The one place that fetches the preview a detached-loading pane waits on
 	 * (OW-forinu): whenever the pane is in that mode, the stream is up, and no
-	 * fetch for that ref is already out. It replaced a fetch at each path that
-	 * dropped a view -- `detachGapped`'s and `detach()`'s -- and it waits out a
-	 * server that is down, which is why a stream drop can keep the selection
-	 * where it used to clear it: the drop's own `publish` finds the stream
-	 * `reconnecting`, and the reconnect's `connected` is the publish that fetches.
+	 * fetch for that ref is already out. No path that drops a view --
+	 * `detachGapped`, `detach()` -- fetches its own, and this waits out a
+	 * server that is down, so a stream drop keeps the selection: the drop's
+	 * own `publish` finds the stream `reconnecting`, and the reconnect's
+	 * `connected` is the publish that fetches.
 	 *
 	 * No gesture stands behind it, so like the drop it writes neither `busy` nor
 	 * `error` nor the selection intent. Its answer lands only while the intent
@@ -549,8 +540,8 @@ export function createController(
 	 * attach from the pane that failed nothing else would ask for it.
 	 *
 	 * A click, `preview()`, shares this read (`readPreview`) rather than
-	 * asking one beside it, which read twice and reported one failure in two
-	 * places (formerly OW-tuyewo): it joins a read out for its ref and makes
+	 * asking one beside it, which would read twice and report one failure in
+	 * two places (OW-tuyewo): it joins a read out for its ref and makes
 	 * the read its own, so the answer lands as the click's -- opening the
 	 * preview whatever the pane shows, and reporting a failure where
 	 * `landPreview` says. It skips the gates above, so it still asks a held
@@ -745,9 +736,8 @@ export function createController(
 	 * Re-ask the server which transcript indices this session can be forked at,
 	 * so the transcript knows where to draw an Edit control (OW-roveze).
 	 *
-	 * Cheap and best-effort. The client used to need nothing from the server to
-	 * decide this -- it counted user messages -- and that count is what was
-	 * wrong. It is paid for at attach and at each turn boundary, which are the
+	 * Cheap and best-effort: counting user messages cannot decide this (see
+	 * `forkAndSubmit`). It is paid for at attach and at each turn boundary, which are the
 	 * moments the set can change, and never per message.
 	 *
 	 * A failure is swallowed. This fills in an affordance, not an operation: the
@@ -759,8 +749,8 @@ export function createController(
 	function refreshForkPoints(ref: SessionRef): void {
 		// Keyed by the handle, so a rename landing while the request is in
 		// flight leaves the check below true: the selection follows the ref and
-		// still names the same handle, where a check by the click-time ref failed
-		// and published nothing (OW-lizohe). A ref with no handle is a session
+		// still names the same handle, where a check by the click-time ref would
+		// fail and publish nothing (OW-lizohe). A ref with no handle is a session
 		// nothing live holds, whose points nobody draws.
 		const handle = handleOf(view.state, ref);
 		if (handle === undefined || forkPointsInFlight.has(handle)) return;
@@ -813,8 +803,7 @@ export function createController(
 	}
 
 	// Always lists the whole corpus: the workspace filter is a client-side view
-	// over these summaries now (OW-39), not a server round-trip -- which also
-	// retires OW-3's per-keystroke enumeration at the source.
+	// over these summaries (OW-39), not a server round-trip.
 	//
 	// `surface` separates the two callers (OW-dinuwu). A gesture -- the Refresh
 	// button, or the startup list -- owns the status line and the error slot and
@@ -822,29 +811,27 @@ export function createController(
 	// frequent than it looks: the server fires it at every turn boundary to keep
 	// the `updatedAt` sort moving (OW-furinu), so one lands inside the
 	// `"submitting"` of every prompt, not just the first one's rename. Surfacing
-	// that wiped errors the user had not read yet and wrote `busy: "listing"`
-	// over the `"attaching"` or `"submitting"` of the very operation that caused
-	// the broadcast -- which defeated `submit`'s one-prompt-at-a-time guard
-	// (OW-nasofa) outright.
+	// it would wipe errors the user has not read yet and read `"listing"` over
+	// the `"attaching"` or `"submitting"` of the very operation that caused the
+	// broadcast (OW-nasofa).
 	//
 	// A call that arrives while a listing is out is owed a fresh one, and does
 	// not join the answer already coming (OW-sabova). That answer may have been
 	// given before the change the call is about: the attach whose broadcast
 	// arrives mid-listing, a turn boundary's broadcast (OW-furinu), another
-	// client's close. Joining it left the row wherever the older answer put it
-	// -- and since the listing is the only writer of a row's `status`
-	// (OW-wazija), an attach made under a listing in flight read `detached` on
-	// a live pane, stripe off and Detach disabled, until some later listing.
-	// So the listing in flight runs out, and then exactly one more is asked,
-	// whose landing is what every caller that arrived meanwhile waits on. At
-	// most one is out and one owed however many broadcasts arrive, so a burst
-	// costs one extra listing and cannot pile requests up.
+	// client's close. Joining it would leave the row wherever the older answer
+	// put it -- and since the listing is the only writer of a row's `status`
+	// (OW-wazija), an attach made under a listing in flight would read
+	// `detached` on a live pane until some later listing. So the listing in
+	// flight runs out, and then exactly one more is asked, whose landing is what
+	// every caller that arrived meanwhile waits on. At most one is out and one
+	// owed however many broadcasts arrive, so a burst costs one extra listing
+	// and cannot pile requests up.
 	//
-	// A press that arrives meanwhile owns what a joining press owned before
-	// OW-sabova, and no more: the owed listing's failure, which it reports;
-	// silence is only for the listings nobody asked for. Without that, a Refresh during a broadcast
-	// re-list -- likely, since turns broadcast -- would report nothing at all
-	// when its listing fails. It does not get the owed listing's start: that
+	// A press that arrives meanwhile owns the owed listing's failure, which it
+	// reports, and no more; silence is only for the listings nobody asked for.
+	// Without that, a Refresh during a broadcast re-list -- likely, since turns
+	// broadcast -- would report nothing at all when its listing fails. It does not get the owed listing's start: that
 	// comes after the press, possibly after a gesture made in between, and
 	// announcing it there would wipe an attach's unread error and read
 	// `"listing"` over its `"attaching"` -- the clobbering the paragraph above
@@ -884,8 +871,7 @@ export function createController(
 				outstanding.add(entry);
 				publish({ error: null });
 			}
-			// Refresh has to move the transcript too, not just the sidebar (OW-76):
-			// before this, pressing it left a stale preview under a freshened list.
+			// Refresh has to move the transcript too, not just the sidebar (OW-76).
 			// Concurrent with the listing -- two independent reads -- and awaited so
 			// the button's promise covers both.
 			const previewRefresh = refreshPreview();
@@ -917,8 +903,8 @@ export function createController(
 	 * previewed, a stale result, a failed fetch -- and for a `gone`, which
 	 * clears the selection onto the startup view if the preview it re-read is
 	 * still on screen (D26 point 6): a session closed elsewhere, or previewed
-	 * across a server restart, otherwise stayed on a preview whose Attach could
-	 * only be refused `not_found`.
+	 * across a server restart, would otherwise stay on a preview whose Attach
+	 * could only be refused `not_found`.
 	 */
 	async function refetchPreview(): Promise<boolean> {
 		const showing = view.preview;
@@ -949,7 +935,7 @@ export function createController(
 		// so what is on screen now has to be the session this read was of.
 		const current = view.preview;
 		if (!current || sessionKey(current.ref) !== sessionKey(ref)) return false;
-		// `turns.length` is the change test, decided 2026-08-18: both extractors map
+		// `turns.length` is the change test: both extractors map
 		// one JSONL record to at most one turn (`pi.ts:119`, `codex.ts:192`) and a
 		// JSONL only appends, so new content is always new turns -- while the last
 		// turn's `timestamp` is optional (OW-71) and would compare undefined to
@@ -1031,7 +1017,7 @@ export function createController(
 	 * under the handle; the server still holds the session for every other
 	 * client, so nothing is closed and its row keeps what the server listed.
 	 * Nothing is attached on the client's behalf either: an attach is what
-	 * spawns, and one here once re-spawned a session whose close was out
+	 * spawns, and one here could re-spawn a session whose close is out
 	 * (OW-sugome). The preview's Attach button is the deliberate attach.
 	 *
 	 * A selected session is left detached-loading, and `publish`'s preview
@@ -1165,10 +1151,7 @@ export function createController(
 		 * socket was down is simply gone -- and `status` (the sidebar's attached
 		 * stripe, the header's Detach) and `updatedAt` (the whole sidebar
 		 * ordering) move for no other reason than a listing. So the reconnect asks
-		 * for one (D21, OW-vukoku), which generalises OW-lejahi's narrow fix: a
-		 * detach performed while the stream was down used to leave the row lit as
-		 * attached until the user pressed Refresh, and that was one visible case
-		 * of a general loss.
+		 * for one (D21, OW-vukoku).
 		 *
 		 * One listing per open, on the socket, so it is ordered against the
 		 * events around it (D21, D31 point 1): the server registered this client
@@ -1194,8 +1177,7 @@ export function createController(
 		},
 		/**
 		 * The socket closed, or failed to open, and nothing reconnects it but
-		 * this client: a WebSocket has no retry of its own, where an
-		 * `EventSource` retried forever looking healthy (D31 point 6). So every
+		 * this client: a WebSocket has no retry of its own (D31 point 6). So every
 		 * close schedules the next attempt, on a fixed delay (`RECONNECT_MS`), and
 		 * one that fails lands back here. An open heals at `onOpen`, D21's
 		 * re-list there.
@@ -1395,10 +1377,10 @@ export function createController(
 					// The session's turn error is not this reply's to clear: the server
 					// owns it, and the `error-cleared` it broadcasts when it admits the
 					// prompt drops it here as at every other client (OW-lohubo). A
-					// clear at the reply had to guess from the error's text whether it
-					// was still the one held at the send, and a new turn failing at once
-					// with the same text -- its `error-cleared` and `error` both handled
-					// before the reply -- lost the error the server still held.
+					// clear at the reply could only guess from the error's text whether
+					// it is still the one held at the send, and a new turn failing at
+					// once with the same text -- its `error-cleared` and `error` both
+					// handled before the reply -- would lose the error the server holds.
 					if (view.draft === text) publish({ draft: "" });
 				}
 				return response?.disposition ?? "started";
@@ -1435,11 +1417,10 @@ export function createController(
 				// its rewrite; otherwise the composer is kept whole, the text sent
 				// included, and the user tidies it.
 				//
-				// A first cut, taken before the case was seen in use, and to be
-				// revisited once it has been (owner, 2026-10-15). It keeps everything
-				// rather than merging tidily because what arrived may be the only
-				// copy of prompts a stop cleared out of Pi's queue (D16), which exist
-				// in no file, and nothing dropped beats a tidy merge.
+				// A first cut. It keeps everything rather than merging tidily
+				// because what arrived may be the only copy of prompts a stop cleared
+				// out of Pi's queue (D16), which exist in no file, and nothing
+				// dropped beats a tidy merge.
 				if (!disposed) {
 					const draft = view.draft;
 					const ahead = draft.endsWith(`\n\n${text}`) ? draft.slice(0, -text.length - 2) : draft;
@@ -1461,10 +1442,10 @@ export function createController(
 			if (paneMode(view) !== "live") return null;
 			const handle = handleOf(view.state, selected);
 			if (handle === undefined) return null;
-			// One send at a time, the rule `submit` above states and this path did
-			// not have (OW-kelede). Two fast presses in edit mode started two whole
-			// forks, and the second one's failure took the *first* fork's follow
-			// and badge arming back down with it. Nor while the external editor has
+			// One send at a time, as `submit` (OW-kelede): two fast presses in edit
+			// mode would start two whole forks, and the second one's failure would
+			// take the *first* fork's follow and badge arming back down with it. Nor
+			// while the external editor has
 			// the draft, as `submit` (OW-momejo).
 			if (view.sending || view.editingExternally) return null;
 			if (!view.draft) return null;
@@ -1504,12 +1485,10 @@ export function createController(
 				// The prompt landed, so the composer must stop offering text that has
 				// already been sent -- but only if it is still that text. The
 				// textarea stays live through the request, so anything typed while
-				// waiting is the next prompt, not this one (OW-nasofa's rule, brought
-				// to this path by OW-kelede). It still covers the reason the clear
-				// used to be unconditional: the draft is global, and a user who
-				// clicked away mid-request would otherwise be looking at another
-				// session with already-sent text under a Send button -- clicking away
-				// does not change the draft, so that case still clears.
+				// waiting is the next prompt, not this one (OW-nasofa). The draft is
+				// global and clicking away does not change it, so it clears for a user
+				// who clicked away mid-request too, who would otherwise be looking at
+				// another session with already-sent text under a Send button.
 				//
 				// The error clear is gated on the intent instead: a session clicked
 				// to in that window may have raised one of its own, and this fork has
