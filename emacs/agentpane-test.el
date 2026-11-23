@@ -4483,6 +4483,25 @@ Until ark3/agentpane#71 it attached first, and marked the status
       (should-error (agentpane-compact) :type 'user-error)
       (should-not sent))))
 
+(ert-deftest agentpane-test-compact-refused-while-a-turn-streams ()
+  "`agentpane-compact' is refused, sending nothing, while the status
+reports a turn streaming, as the browser's Compact is disabled then
+\(D16), and sends once a status says the turn has ended."
+  (agentpane-test--closing
+    (with-current-buffer buffer
+      (agentpane--on-notification
+       nil 'session/status
+       (list :view agentpane--view :session ref :handle "h1" :isStreaming t
+             :compaction nil :model "luna"))
+      (should-error (agentpane-compact) :type 'user-error)
+      (should-not sent)
+      (agentpane--on-notification
+       nil 'session/status
+       (list :view agentpane--view :session ref :handle "h1" :isStreaming :json-false
+             :compaction nil :model "luna"))
+      (agentpane-compact)
+      (should (equal (mapcar #'car sent) '(sessions/compact))))))
+
 (ert-deftest agentpane-test-close-session-refused-where-the-browser-offers-no-detach ()
   "`agentpane-close-session' signals a user error and sends nothing in each
 case the browser's `detachable' refuses (src/client/App.svelte): a

@@ -3004,8 +3004,9 @@ buffer."
 (defun agentpane-compact ()
   "Compact this buffer's session through `sessions/compact'.
 Only an attached session, as `agentpane-abort' stops only one and as the
-browser compacts only a live session, and none while one compacts, as the
-browser's Compact is disabled then.  The buffer writes no mark of its
+browser compacts only a live session, and none while one compacts or its
+turn streams, as the browser's Compact is disabled then; every backend
+refuses a compaction mid-turn (D16).  The buffer writes no mark of its
 own.  From the press to the request's reply the helper holds it, as the
 browser's `compacting' does: it refuses a send, and a second compact,
 from the buffer's view `busy' (D32 point 4).  The server's status then
@@ -3023,6 +3024,8 @@ server's status came, and a status carrying none could wipe the mark
       (user-error "This session is not attached; attach it to compact it"))
     (when (plist-get agentpane--status :compaction)
       (user-error "This session is already compacting"))
+    (when agentpane--streaming
+      (user-error "This session's turn is running; compact it once the turn ends"))
     (agentpane--request 'sessions/compact
                         (list :session (agentpane--ref agentpane--session)
                               :view agentpane--view)
