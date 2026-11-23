@@ -6158,12 +6158,12 @@ D32 point 7)."
 the handle \"h1\" through a helper that, 0.3s after it starts, answers
 both requests still out as at its socket's close and exits, then send a
 synchronous request through that helper, and let Emacs handle the death.
-SEND's request is the older of the two outstanding at the death, which
-jsonrpc.el's sentinel, walking them newest first, is thrown out of its
-walk by the synchronous one's error handler before it reaches \(Emacs
-31.1, jsonrpc.el 1.0.29; OW-laluso).  SEND is called
-with a function that counts a failure, and this returns the failures
-counted once the teardown has run and Emacs has waited a beat more."
+SEND's request is the older of the two outstanding at the death:
+jsonrpc.el's sentinel walks them newest first, and the synchronous one's
+error handler throws it out of the walk before it reaches SEND's (Emacs
+31.1, jsonrpc.el 1.0.29; OW-laluso).  SEND is called with a function
+that counts a failure, and this returns the failures counted once the
+teardown has run and Emacs has waited a beat more."
   (let ((agentpane--connection nil)
         (failures 0))
     (agentpane-test--watching

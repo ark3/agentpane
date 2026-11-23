@@ -28,8 +28,8 @@
  *   folded its context at), `"system"` (a system-role message: the system
  *   prompt, or a later change to it, carrying one `system` part and no role
  *   label of its own; `pi 1.2.0` opens every session with one and sends one
- *   again whenever its configuration changes), or another backend-defined role the elisp should draw
- *   generically.
+ *   again whenever its configuration changes), or another backend-defined role
+ *   the elisp should draw generically.
  * - `parts` (array, always, possibly empty). The node's content in display
  *   order; each element is one of the parts below, told apart by `type`.
  * - `meta` (object, only on `role: "assistant"`). The turn's footer facts,
@@ -411,8 +411,8 @@
  *   The receiver cannot rely on handling the reply first: as of jsonrpc.el
  *   1.0.29 on Emacs 31.1, the reply to an asynchronous request that arrives
  *   while a synchronous one is outstanding runs only once that one returns,
- *   while notifications are handled at once (docs/MANUAL_TESTING.md, "jsonrpc.el runs an async reply
- *   after later notifications").
+ *   while notifications are handled at once (docs/MANUAL_TESTING.md,
+ *   "jsonrpc.el runs an async reply after later notifications").
  * - `session/node` -- `{ session, view, handle, node }`. One node to replace by
  *   `index`.
  * - `session/status` -- `{ session, view, handle, isStreaming, compaction, model,
