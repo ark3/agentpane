@@ -165,10 +165,10 @@ export class PiAdapter implements BackendAdapter {
 	 * A fork has two more ways to put another model in force (the docblock on
 	 * `chosenModel`): a process spawned with `--model` puts that model back over
 	 * one `set_model` chose (OW-sinoha), and a fork that keeps no message puts
-	 * the settings default in force (OW-riyeku). The fork re-sends the chosen model, or for the second the parent's, before it
-	 * reads the transcript back, so the first reaches this field only when Pi
-	 * refuses the re-send, and the second never does, since its branch holds no
-	 * message.
+	 * the settings default in force (OW-riyeku). The fork re-sends the chosen
+	 * model, or for the second the parent's, before it reads the transcript
+	 * back, so the first reaches this field only when Pi refuses the re-send,
+	 * and the second never does, since its branch holds no message.
 	 * A turn does not clear it: the first turn on the fallback records the
 	 * fallback, so every later resume restores that without a mismatch to see,
 	 * and from then on this is the only thing still saying the recorded model
@@ -205,19 +205,21 @@ export class PiAdapter implements BackendAdapter {
 	 *
 	 * A resumed session runs at the level its file last recorded, not at the
 	 * settings default. On the same version (OW-ruzuhu), a session that chose
-	 * `off` was resumed with `--session` alone while `settings.json` named `max` for the model and
-	 * `low` as the default, and `get_state` read `off`; `--model` without a
-	 * suffix kept `off` too, but `--model ...:high` read `high`, so a resume
-	 * spawn that carries the suffix overrides the session's own level. So the
-	 * `get_state` at start is the truth here too, and no choice is resent.
+	 * `off` was resumed with `--session` alone while `settings.json` named
+	 * `max` for the model and `low` as the default, and `get_state` read `off`;
+	 * `--model` without a suffix kept `off` too, but `--model ...:high` read
+	 * `high`, so a resume spawn that carries the suffix overrides the session's
+	 * own level. So the `get_state` at start is the truth here too, and no
+	 * choice is resent.
 	 *
 	 * A fork is that same override inside the live process, so `chosenEffort`
 	 * is re-sent after one. As of `pi 0.87.1` and `1.2.0`
-	 * (docs/MANUAL_TESTING.md, OW-dojebo and OW-vijine), spawned with `--model ...:high` and set to `off`, a fork
-	 * answered `get_state` at `high` with no `thinking_level_changed`, the next
-	 * turn's request asked for `high`, and the forked file still named `off` as
-	 * its last level. Pi rebuilds a forked session from the options its command
-	 * line parsed, the suffix included.
+	 * (docs/MANUAL_TESTING.md, OW-dojebo and OW-vijine), spawned with
+	 * `--model ...:high` and set to `off`, a fork answered `get_state` at
+	 * `high` with no `thinking_level_changed`, the next turn's request asked
+	 * for `high`, and the forked file still named `off` as its last level. Pi
+	 * rebuilds a forked session from the options its command line parsed, the
+	 * suffix included.
 	 * An unsuffixed spawn kept `off` across the same fork.
 	 *
 	 * Which turns carry a level: every assistant turn, live or loaded. A live
@@ -226,12 +228,12 @@ export class PiAdapter implements BackendAdapter {
 	 * every reply its agent loop builds, not on a run failure's (OW-zarine).
 	 * One loaded by `get_messages` -- the whole transcript on a resume, and
 	 * again after a fork, which replaces every message, including turns this
-	 * adapter had named -- is named the level in force when the turn ran, not when it was loaded: that same stamp, else
-	 * the `thinking_level_change` entries on the session file's active branch
-	 * (OW-helumu). An unstamped loaded turn that cannot be matched to its entry,
-	 * or any loaded turn that ran at `off` on a model other than the current
-	 * one, which may not reason, stays unlabelled (`withLoadedEfforts` in
-	 * `reducer.ts`).
+	 * adapter had named -- is named the level in force when the turn ran, not
+	 * when it was loaded: that same stamp, else the `thinking_level_change`
+	 * entries on the session file's active branch (OW-helumu). An unstamped
+	 * loaded turn that cannot be matched to its entry, or any loaded turn that
+	 * ran at `off` on a model other than the current one, which may not reason,
+	 * stays unlabelled (`withLoadedEfforts` in `reducer.ts`).
 	 */
 	private thinkingLevel: string | null = null;
 	private reasoning = false;
@@ -455,9 +457,10 @@ export class PiAdapter implements BackendAdapter {
 			// Our `isStreaming` turns true at `agent_start`, which Pi writes after
 			// the response that resolves the previous `submit()`, so a prompt
 			// queued behind another in `SessionManager.submit` goes out in that
-			// gap, where a bare one was refused (OW-kokotu). The same runs answered a "steer" prompt sent to an idle
-			// Pi `started`, an ordinary turn; `AgentSession.prompt` in `pi 1.2.0`
-			// reads `streamingBehavior` only while it is streaming, so an idle
+			// gap, where a bare one was refused (OW-kokotu). The same runs
+			// answered a "steer" prompt sent to an idle Pi `started`, an
+			// ordinary turn; `AgentSession.prompt` in `pi 1.2.0` reads
+			// `streamingBehavior` only while it is streaming, so an idle
 			// prompt's images reach the run unchanged (read, not measured).
 			streamingBehavior: "steer",
 		};
@@ -693,14 +696,15 @@ export class PiAdapter implements BackendAdapter {
 			throw new Error(`Pi fork from entry "${entryId}" was cancelled by an extension`);
 		}
 		// As of `pi 0.84.2` Pi's `fork` is copy-on-write, not an in-place rewind
-		// (MANUAL_TESTING.md OW-pifowo). The original session file is left byte-identical; the process's active
-		// `sessionFile` MOVES to a new file at the fork call. So the id we hold
-		// has diverged from Pi's active file and must be re-adopted -- otherwise
-		// a later turn is keyed to the abandoned pre-fork branch and a listing
-		// indexes a stale id. Runs forking at the second user message found that
-		// new file already on disk when the fork returned, carrying the rewound
-		// prefix (0.85.1, MANUAL_TESTING.md OW-gajesu, and twice on 1.2.0,
-		// OW-vijine; samples of a race, not an invariant).
+		// (MANUAL_TESTING.md OW-pifowo). The original session file is left
+		// byte-identical; the process's active `sessionFile` MOVES to a new
+		// file at the fork call. So the id we hold has diverged from Pi's
+		// active file and must be re-adopted -- otherwise a later turn is keyed
+		// to the abandoned pre-fork branch and a listing indexes a stale id.
+		// Runs forking at the second user message found that new file already
+		// on disk when the fork returned, carrying the rewound prefix (0.85.1,
+		// MANUAL_TESTING.md OW-gajesu, and twice on 1.2.0, OW-vijine; samples
+		// of a race, not an invariant).
 		// A fork at the first user message keeps no user or assistant message, and
 		// on 1.2.0 its file was not on disk when the fork returned and was
 		// written with the branch's first user message (OW-tigaye). Nothing here

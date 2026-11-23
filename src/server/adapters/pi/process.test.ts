@@ -494,10 +494,10 @@ describe("PiAdapter command correlation", () => {
 
 	/**
 	 * As of `pi 1.2.0` (docs/MANUAL_TESTING.md, OW-kokotu), `/refs`, `/llama`
-	 * and `/mcp` were answered `{"disposition": "handled"}` and no run followed; an ordinary prompt was
-	 * `started`, and one steered into a running turn `queued`. A Pi before
-	 * 0.99.0 sent no `data` at all, as Pi's CHANGELOG dates the field (read,
-	 * not measured).
+	 * and `/mcp` were answered `{"disposition": "handled"}` and no run
+	 * followed; an ordinary prompt was `started`, and one steered into a
+	 * running turn `queued`. A Pi before 0.99.0 sent no `data` at all, as Pi's
+	 * CHANGELOG dates the field (read, not measured).
 	 */
 	it("reports a prompt an extension command handled, which starts no turn (OW-dulipe)", async () => {
 		const h = makeHarness();
@@ -630,9 +630,9 @@ describe("PiAdapter command correlation", () => {
 });
 
 /**
- * As of `pi 1.2.0` (docs/MANUAL_TESTING.md, OW-yewiku), a bare `abort` left an undelivered steer unanswered in the
- * transcript or inside the next prompt's run, and `clear_queue` first took it
- * out, answering with the texts it held.
+ * As of `pi 1.2.0` (docs/MANUAL_TESTING.md, OW-yewiku), a bare `abort` left an
+ * undelivered steer unanswered in the transcript or inside the next prompt's
+ * run, and `clear_queue` first took it out, answering with the texts it held.
  */
 describe("PiAdapter stop (D16, OW-wisifo)", () => {
 	const flush = () => new Promise((resolve) => setTimeout(resolve, 0));

@@ -2769,8 +2769,9 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 
 	it("refuses to drive a borrower that was never started", async () => {
 		// A borrower holds a live client from the moment it is built, so holding
-		// a client does not mean it has been started. Without the stronger guard these write real JSON-RPC for a thread no `thread/resume`
-		// has ever opened, under an error message that says the opposite.
+		// a client does not mean it has been started. Without the stronger
+		// guard these write real JSON-RPC for a thread no `thread/resume` has
+		// ever opened, under an error message that says the opposite.
 		const { proc, borrower } = await forkedPair();
 
 		await expect(borrower.submit("hello")).rejects.toThrow("codex adapter not started");

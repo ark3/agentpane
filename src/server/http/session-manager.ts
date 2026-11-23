@@ -1333,8 +1333,8 @@ export class SessionManager {
 	 * and as nothing when nothing moved; and only a
 	 * replaced transcript as a snapshot. A snapshot sends every message to
 	 * every client, and the Emacs helper re-projects and redraws all of them,
-	 * which on a 348-message session holds each prompt 1-2s before its draft
-	 * clears (OW-yirosu).
+	 * which on a 348-message session would hold each prompt 1-2s before its
+	 * draft clears (OW-yirosu).
 	 */
 	#onUpdate(session: ManagedSession, state: AdapterState, change: StateChange): void {
 		const status = liveStatusOf(state);
