@@ -91,22 +91,17 @@ export interface StartOptions {
  * present whenever the fork is not reachable by the ordinary attach path. Pi
  * omits it: its fork IS the live process, which the adapter keeps driving.
  *
- * `adapter` is the fork's adapter, already constructed and holding whatever it
- * shares with the parent, for a fork that cannot be driven by an adapter the
- * factory would build. Codex is the one case: `thread/fork` flushes the rollout
- * to disk immediately, but the minting app-server keeps its writer lock and a
- * second one is refused (`codex-cli` 0.154.0, OW-lajehi), so the fork's adapter
- * borrows the parent's connection and only `CodexAdapter.fork` can hand it
- * over -- `AdapterFactory.create` takes a ref and could not. A Codex fork at
- * the first user message mints no thread and so hands back `start` alone, as
- * Claude Code's forks do (OW-hojefo).
+ * `adapter` is the fork's adapter, already holding what it shares with the
+ * parent, for a fork no adapter `AdapterFactory.create` builds could drive.
+ * Codex is the one case: only the app-server that minted a fork may open it
+ * (`CodexConnection`'s docblock, OW-lajehi). A Codex fork at the first user
+ * message mints no thread and hands back `start` alone, as Claude Code's
+ * forks do (OW-hojefo).
  *
- * A union rather than two optional fields, because an `adapter` without a
- * `start` is a shape nothing can act on: `SessionManager` hands the fork's
- * own start what came back only when there is something to start it with
- * (`#attachFork`), so such an adapter would be silently dropped -- never
- * started, never disposed, holding its share of the parent's child for the
- * life of the server. The type refuses to express it.
+ * A union, not two optional fields: `SessionManager` starts a fork only when
+ * it has a `start` (`#attachFork`), so an `adapter` without one would never
+ * be started or disposed, holding its share of the parent's child for the
+ * life of the server.
  */
 export type ForkResult =
 	/** Reachable the ordinary way: the backend has recorded it, or Pi's live process IS it. */
