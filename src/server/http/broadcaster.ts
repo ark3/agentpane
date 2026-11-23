@@ -3,21 +3,17 @@
  * said hello (D31). One socket carries every session, so every event carries
  * its `SessionRef` and clients filter.
  *
- * D3 -- `seq` is monotonic *per session*. A gap tells the client it missed an
- * update, and since D25 the client detaches the session rather than taking a
- * fresh snapshot. Two kinds of snapshot exist here and the distinction is the
- * whole trick to keeping one counter honest across several clients:
+ * Each `seq` counter is keyed by the handle the session manager minted, which
+ * a rename leaves alone, so nothing here moves with one; `ServerEvent` has
+ * the rules a client reads `seq` by (D3, D24). Two kinds of snapshot exist
+ * here and the distinction is the whole trick to keeping one counter honest
+ * across several clients:
  *
  *   - `broadcastSnapshot` goes to *every* client, so it may reset the counter
  *     to 0 -- nobody is left holding a stale expectation.
  *   - `sendSnapshot` goes to one client (a fresh connection catching up), so it
  *     carries the counter's *current* value and does not disturb it. That client
  *     resumes in step with everyone else.
- *
- * D24 -- "per session" means per handle: each counter is keyed by the handle
- * the session manager minted for the session, and every per-session event
- * carries that handle beside the session's current ref. A rename changes the
- * ref and leaves the handle, so nothing here moves with it (OW-suyinu).
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";

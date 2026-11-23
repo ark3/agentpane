@@ -100,19 +100,17 @@ export function createApp(deps: AppDeps): App {
  * spawn sandboxed agents with write access to the user's repositories.
  *
  * This stops a browser, not a local process, which can send any header; the
- * token in the socket's first frame is what stops that (D29, which overturned
- * D8's "no auth needs to exist once remote access is off the table", and D31
- * point 5). pipane has no origin check either (HANDOFF finding 17), which is
- * where the gap was inherited from.
+ * token in the socket's first frame is what stops that (D29, D31 point 5).
+ * pipane has no origin check either (HANDOFF finding 17), which is where the
+ * gap was inherited from.
  *
  * The Origin rule is loopback-*origin*, not same-origin: in dev the page is
  * served by Vite on another port and proxied here, so an exact match would
  * reject the only client we have. Browsers can omit Origin on some cross-site
- * requests, so Sec-Fetch-Site closes that gap: when present it must say
- * `same-origin` or `none`. Header absence passes this check for non-browser
- * clients such as the probes and the Emacs helper, which still need the token
- * and a loopback `Host` (D29), while the production and proxied development
- * clients are same-origin and send `same-origin`.
+ * requests, so a Sec-Fetch-Site that is present must say `same-origin` or
+ * `none`. Both headers absent pass, for non-browser clients such as the
+ * probes and the Emacs helper, which still need the token and a loopback
+ * `Host` (D29).
  */
 function isTrustedRequestMetadata(headers: Headers): boolean {
 	const site = headers.get("sec-fetch-site");
