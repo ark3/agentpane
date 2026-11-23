@@ -1910,7 +1910,7 @@ describe("CodexAdapter history loading (OW-kelene)", () => {
 		];
 	}
 
-	/** What hydrating the whole history at once painted, which is what a reattach painted before. */
+	/** What hydrating the whole history at once paints, which the paged repaint must match. */
 	function paintedWhole(turns: unknown[]): unknown[] {
 		const reducer = new CodexReducer();
 		reducer.setIdentity({ threadId: STORED_REF.id, model: "gpt-started", modelProvider: "openai" });
@@ -2748,8 +2748,8 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		// until `start()`. Close the parent before the fork has started and the
 		// unstarted borrower would otherwise become the fallback recipient for a
 		// thread nobody drives (D19's subagent): not started, so it can write no
-		// refusal, and named to nobody -- D2a's silent stall, now pinning the
-		// shared app-server too.
+		// refusal, and named to nobody -- D2a's silent stall, pinning the shared
+		// app-server too.
 		const { proc, parent, borrower } = await forkedPair();
 		const seen: string[] = [];
 		parent.onError(() => seen.push("parent"));
@@ -2768,9 +2768,8 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 	});
 
 	it("refuses to drive a borrower that was never started", async () => {
-		// A borrower holds a live client from the moment it is built, so "do I
-		// have a client" stopped meaning "have I been started". Without the
-		// stronger guard these write real JSON-RPC for a thread no `thread/resume`
+		// A borrower holds a live client from the moment it is built, so holding
+		// a client does not mean it has been started. Without the stronger guard these write real JSON-RPC for a thread no `thread/resume`
 		// has ever opened, under an error message that says the opposite.
 		const { proc, borrower } = await forkedPair();
 

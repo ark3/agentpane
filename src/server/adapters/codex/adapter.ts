@@ -194,19 +194,15 @@ export class CodexAdapter implements BackendAdapter {
 	 * `thread/resume` reported, which is what `getState` names instead.
 	 *
 	 * Re-asserted from the store rather than left to Codex, because what Codex
-	 * keeps depends on the path. Measured on the home server, 2026-09-23,
-	 * `codex-cli 0.156.0`, every turn on `gpt-5.6-luna`, in a `CODEX_HOME` whose
-	 * `config.toml` named `gpt-5.6-terra` at `high` (`docs/MANUAL_TESTING.md`,
-	 * OW-sayaju): after a turn at `low`, a `thread/resume` naming no model
-	 * answered `gpt-5.6-luna` at `low`, on the app-server that ran the turn and
-	 * in a fresh one alike. But a fresh resume that named the model, as
-	 * OW-kokalo's did, answered the config's `high`, wrote it to the rollout as
-	 * `thread_settings_applied`, and a later resume naming none restored that
-	 * `high` though no turn had run at it. And `thread/fork` carried neither:
-	 * the fork, and its borrower's resume, answered the config's
-	 * `gpt-5.6-terra` at `high`, and a turn sent on it naming only the model ran
-	 * at `high`. Which is also why the store's model is applied after the
-	 * resume and rides `turn/start`, never `thread/resume`.
+	 * keeps depends on the path. As of `codex-cli 0.156.0`
+	 * (`docs/MANUAL_TESTING.md`, OW-sayaju): a `thread/resume` naming no model
+	 * answered the model and effort of the last turn; one that named the model
+	 * answered the config's effort and wrote it to the rollout as
+	 * `thread_settings_applied`, where a later resume naming none restored it
+	 * though no turn had run at it; and `thread/fork` carried neither, so the
+	 * fork, its borrower's resume, and a turn naming only the model ran at the
+	 * config's pair. So the store's model is applied after the resume and rides
+	 * `turn/start`, never `thread/resume`.
 	 */
 	private effort: string | null = null;
 	/**
@@ -277,10 +273,9 @@ export class CodexAdapter implements BackendAdapter {
 		// the writer lock survives the adapter, and `thread/unsubscribe` does not
 		// release it (`connection.ts`, OW-voyezi), so a freshly spawned child
 		// asking to resume would be refused with `-32600 already has an active
-		// writer`. Resuming it a SECOND time on the process that holds it is
-		// allowed, and the thread is drivable afterwards -- measured on the home
-		// server, 2026-09-15, `codex-cli 0.154.0`. One whose turn is running is
-		// refused (see `startBorrowed`).
+		// writer`. As of `codex-cli 0.154.0`, resuming it a SECOND time on the
+		// process that holds it is allowed, and the thread is drivable afterwards.
+		// One whose turn is running is refused (see `startBorrowed`).
 		const shared = opts.resumeId ? this.options.connections?.find(opts.resumeId) : undefined;
 		if (shared && opts.resumeId) {
 			this.adoptConnection(shared, opts.resumeId, opts.cwd);
@@ -302,7 +297,7 @@ export class CodexAdapter implements BackendAdapter {
 		ownership.ready = true;
 		// This adapter is attached before it is started -- `SessionManager.#start`
 		// subscribes ahead of `start()` -- so it can field a blocking request for
-		// the whole of startup, as it always could.
+		// the whole of startup.
 		holder.answerable = true;
 		const assertOwned = (): void => {
 			if (!this.owns(ownership)) throw new Error(START_ABORTED_ERROR);
@@ -377,7 +372,7 @@ export class CodexAdapter implements BackendAdapter {
 			this.startCalled = false;
 			// This holder is the only one -- nothing can have forked off a
 			// connection whose `start()` has not returned -- so the release kills
-			// the child, exactly as the explicit kill here used to.
+			// the child.
 			await holder.release("codex adapter start failed");
 			throw error;
 		}
@@ -387,8 +382,7 @@ export class CodexAdapter implements BackendAdapter {
 	 * Start as a fork driven over the parent's app-server.
 	 *
 	 * No `initialize`: that handshake is per connection and the parent already
-	 * made it. A second one on the same connection has never been measured, and
-	 * sending an unprobed request blind is not how this adapter learns things.
+	 * made it, and a second one on the same connection has never been measured.
 	 * What remains is real work -- resume the thread, hydrate the transcript the
 	 * fork inherited, and read from the store the model and effort its kept
 	 * prefix last ran, which `thread/fork` does not carry (see `effort`).
@@ -566,12 +560,11 @@ export class CodexAdapter implements BackendAdapter {
 		for (const image of images ?? []) {
 			input.push({ type: "image", url: `data:${image.mimeType};base64,${image.base64}` });
 		}
-		// D16: a prompt submitted mid-turn steers that turn. Verified live on
-		// 2026-09-12 against codex-cli 0.154.0 (OW-tifuha, `docs/MANUAL_TESTING.md`):
-		// `turn/steer` fired 29 deltas into a streaming turn returned that same
-		// turn id, and the steered `userMessage` and the answering
-		// `agentMessage` both arrived under it -- one `turn/completed`, no
-		// second turn.
+		// D16: a prompt submitted mid-turn steers that turn. As of codex-cli
+		// 0.154.0 (OW-tifuha, `docs/MANUAL_TESTING.md`), `turn/steer` into a
+		// streaming turn returned that same turn id, and the steered
+		// `userMessage` and the answering `agentMessage` both arrived under it
+		// -- one `turn/completed`, no second turn.
 		//
 		// `expectedTurnId` is a precondition app-server enforces, so this needs
 		// a turn id it knows is live: `turnId` is exactly that, set only from
@@ -586,9 +579,9 @@ export class CodexAdapter implements BackendAdapter {
 		// brackets the `contextCompaction` item), so `turnId` names a turn
 		// app-server will refuse. The client disables Send while compaction is
 		// showing, but a threshold compaction nobody asked for, a second client,
-		// and a prompt written straight to the socket all reach here; without this the well-defined "busy"
-		// becomes an opaque wire error, which is what `compact`'s own guard below
-		// exists to prevent.
+		// and a prompt written straight to the socket all reach here; without
+		// this the well-defined "busy" becomes an opaque wire error, as
+		// `compact`'s own guard below also prevents.
 		// A turn this adapter has already interrupted is the other live turn that
 		// must not be steered (OW-pefawi). `abort()` sends `turn/interrupt` and
 		// only `turn/completed` clears `turnId`, so between the two this still
@@ -596,9 +589,8 @@ export class CodexAdapter implements BackendAdapter {
 		// against the *currently active* turn (`resources/codex-protocol/v2/
 		// TurnSteerParams.ts`), which a turn being torn down is not. Stop-then-send
 		// is an ordinary gesture, so the window is reachable by hand; refusing here
-		// keeps the well-defined "busy" the caller got before `submit()` gained a
-		// steer path instead of spending a round trip to translate app-server's
-		// error text back into one.
+		// gives the well-defined "busy" instead of spending a round trip to
+		// translate app-server's error text back into one.
 		if (this.turnId && this.interruptedTurnId === this.turnId) {
 			throw new Error(TURN_INTERRUPTED_ERROR);
 		}
@@ -729,8 +721,8 @@ export class CodexAdapter implements BackendAdapter {
 	 * `{ threadId }`, response an empty object -- OW-72, verified against
 	 * codex-cli 0.147.0's generated schema).
 	 *
-	 * Refused while a turn is active, and it stays refused now that `submit()`
-	 * steers instead (OW-tifuha): `compact` is one of the two
+	 * Refused while a turn is active, though `submit()` steers one (OW-tifuha):
+	 * `compact` is one of the two
 	 * `NonSteerableTurnKind`s, so there is no steering a compaction into a
 	 * running turn, and app-server will not start a second turn while one runs.
 	 * Admitting the request here only to have app-server reject it would turn a
@@ -774,9 +766,8 @@ export class CodexAdapter implements BackendAdapter {
 	 * Codex forks at *turn* granularity (`ThreadForkParams.lastTurnId`), not at
 	 * item granularity, so a fork point is a turn id even though the UI shows
 	 * the user message inside it. `thread/rollback` -- DESIGN's other
-	 * suggestion -- was marked DEPRECATED in the bindings vendored on
-	 * 2026-08-10, is gone from the `codex-cli 0.156.0` ones, and is not used
-	 * here.
+	 * suggestion -- is gone from the `codex-cli 0.156.0` bindings and is not
+	 * used here.
 	 *
 	 * A turn can hold more than one user message: steering a running turn
 	 * (D16) appends a second `userMessage` item to it, and `mapping.ts` gives
@@ -1093,10 +1084,8 @@ export class CodexAdapter implements BackendAdapter {
 					// approval `ServerRequest` observed as of `codex-cli 0.154.0`)
 					// nothing should be arriving at all -- so reaching this line means
 					// a premise broke, most likely a newer app-server asking for
-					// something new. This is not rudeness to a legitimate request: the
-					// alternative is D2a's silent stall, a turn that blocks until the
-					// session is killed, with no test and no log naming the cause.
-					// Erroring out costs one turn and names the kind that did it.
+					// something new. Erroring out costs one turn and names the kind
+					// that did it, where holding it would be D2a's silent stall.
 					//
 					// Either reply is dropped once the child is gone, so a request
 					// line still draining after it died cannot throw out of the line
@@ -1198,8 +1187,7 @@ export class CodexAdapter implements BackendAdapter {
  * `itemsView` is spelled out because its default, `summary`, kept only some of
  * a turn's items, and the reducer's replay needs every one.
  *
- * Every page is fetched: transcripts are small, and loading only the recent
- * end would be a change of its own.
+ * Every page is fetched: transcripts are small.
  */
 async function readTurns(client: CodexClientView, threadId: string): Promise<Turn[]> {
 	const turns: Turn[] = [];
