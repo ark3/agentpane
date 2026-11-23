@@ -17,7 +17,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AgentNotice, AssistantTurn, PaneMessage, SessionRef } from "../../../shared/protocol.ts";
 import { BackendRefusedError, type StateChange } from "../types.ts";
-import { type PiChild, PiAdapter } from "./process.ts";
+import { FakeTimers } from "../../http/testing/fakes.ts";
+import { type PiAdapterDeps, type PiChild, PiAdapter, stopWaitMs } from "./process.ts";
 
 const REF: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/s.jsonl" };
 const WORKSPACE = "/home/u/src/proj";
@@ -105,7 +106,7 @@ interface Harness {
 	errors: string[];
 }
 
-function makeHarness(): Harness {
+function makeHarness(setTimer?: PiAdapterDeps["setTimer"]): Harness {
 	const child = new FakeChild();
 	const spawnArgs: Harness["spawnArgs"] = [];
 	const adapter = new PiAdapter(REF, {
@@ -113,6 +114,7 @@ function makeHarness(): Harness {
 			spawnArgs.push({ command, args, cwd: options.cwd });
 			return child as unknown as PiChild;
 		},
+		setTimer,
 	});
 	const errors: string[] = [];
 	adapter.onError((m) => errors.push(m));
@@ -647,6 +649,32 @@ describe("PiAdapter stop (D16, OW-wisifo)", () => {
 		await flush();
 		h.child.respondTo("abort");
 		await expect(stopped).resolves.toEqual(["steered before the stop"]);
+	});
+
+	it("sends its clear and abort at stopWaitMs behind a prompt Pi has not answered, and leaves that prompt to Pi (#93)", async () => {
+		const timers = new FakeTimers();
+		const h = makeHarness(timers.set);
+		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+		const types = () => h.child.sent().map((c) => c.type);
+
+		// As of `pi 1.5.2` a command whose handler awaits idle is answered only at the turn's end.
+		const command = h.adapter.submit("/wait-idle");
+		const stopped = h.adapter.abort();
+		await flush();
+		expect(types()).toEqual(["get_state", "prompt"]);
+		expect(timers.pending).toEqual([stopWaitMs]);
+
+		timers.runOut();
+		await flush();
+		expect(types()).toEqual(["get_state", "prompt", "clear_queue"]);
+		h.child.respondTo("clear_queue", { steering: [], followUp: [] });
+		await flush();
+		expect(types()).toEqual(["get_state", "prompt", "clear_queue", "abort"]);
+		h.child.respondTo("abort");
+		await expect(stopped).resolves.toEqual([]);
+
+		h.child.respondTo("prompt", { disposition: "handled" });
+		await expect(command).resolves.toBe("handled");
 	});
 
 	it("holds a prompt sent during a stop until the stop has answered, then sends it to start a turn (OW-jifibo)", async () => {

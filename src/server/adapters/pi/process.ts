@@ -76,7 +76,20 @@ export type PiSpawn = (command: string, args: string[], options: { cwd: string }
 export interface PiAdapterDeps {
 	/** Defaults to `node:child_process.spawn`. Injected by tests. */
 	spawn?: PiSpawn;
+	/**
+	 * A one-shot timer, answering its cancel, as `CodexAdapterOptions.setTimer`
+	 * is: `stopWaitMs` runs on it, so a test fires it without waiting.
+	 * `setTimeout` by default.
+	 */
+	setTimer?: (run: () => void, ms: number) => () => void;
 }
+
+/**
+ * How long a stop waits on the prompts already written to Pi before it sends
+ * its `clear_queue` and `abort` anyway, counted from the stop (D16,
+ * ark3/agentpane#93). A first cut: no steer's preflight has been timed.
+ */
+export const stopWaitMs = 5 * 1000;
 
 export class PiAdapter implements BackendAdapter {
 	/**
@@ -107,6 +120,7 @@ export class PiAdapter implements BackendAdapter {
 	private idResolved = false;
 
 	private readonly spawn: PiSpawn;
+	private readonly setTimer: NonNullable<PiAdapterDeps["setTimer"]>;
 	private proc?: ChildProcessShell;
 	private state: PiReducerState = createInitialPiState();
 	private model: string | null = null;
@@ -252,7 +266,7 @@ export class PiAdapter implements BackendAdapter {
 	 * may lack it (D34 point 2, ark3/agentpane#79).
 	 */
 	private hydrateWindow: HydrateWindow | null = null;
-	/** Every `prompt` written to Pi and not yet answered; a stop waits them out (OW-jifibo). */
+	/** Every `prompt` written to Pi and not yet answered; a stop waits on them, up to `stopWaitMs` (OW-jifibo). */
 	private readonly unansweredPrompts = new Set<Promise<unknown>>();
 	/** The last stop, until it settles: a prompt waits for it, and the next stop follows it (OW-jifibo). */
 	private stopping: Promise<void> | null = null;
@@ -271,6 +285,12 @@ export class PiAdapter implements BackendAdapter {
 	constructor(ref: SessionRef, deps: PiAdapterDeps = {}) {
 		this.sessionRef = ref;
 		this.spawn = deps.spawn ?? nodeSpawn;
+		this.setTimer =
+			deps.setTimer ??
+			((run, ms) => {
+				const timer = setTimeout(run, ms);
+				return () => clearTimeout(timer);
+			});
 	}
 
 	// -- lifecycle ------------------------------------------------------------
@@ -512,19 +532,24 @@ export class PiAdapter implements BackendAdapter {
 	 * not as typed. Both queues are returned, steering first, though this
 	 * adapter only ever steers.
 	 *
-	 * The stop is ordered behind every `prompt` already written to Pi: its
-	 * `clear_queue` goes out only once each has been answered (OW-jifibo). As of
-	 * `pi 1.2.0`, read at the installed package and not measured, `rpc-mode.js`
-	 * starts a prompt without awaiting it and answers `queued` only after
-	 * `_queueSteer`, while it runs `clear_queue` at once, so a clear sent behind
-	 * an unanswered steer can run first and leave the steer for the abort to
-	 * strand. The wait has a cost, same reading: Pi answers a prompt only once
-	 * its preflight is done, which for an extension command is the command's
-	 * whole handler and on an idle Pi includes any compaction `_prepareRun`
-	 * runs first, so a Stop pressed during one waits it out before it stops
-	 * anything. An extension command whose handler awaits `ctx.waitForIdle()`,
-	 * which in `rpc-mode.js` is `session.waitForIdle()`, holds the Stop until
-	 * the turn ends by itself, so that Stop stops nothing (OW-miguyu).
+	 * The stop is ordered behind every `prompt` already written to Pi, for up to
+	 * `stopWaitMs`: its `clear_queue` goes out once each has been answered, or at
+	 * that deadline (OW-jifibo, ark3/agentpane#93). As of `pi 1.2.0`, read at
+	 * the installed package and not measured, `rpc-mode.js` starts a prompt
+	 * without awaiting it and answers `queued` only after `_queueSteer`, while it
+	 * runs `clear_queue` at once, so a clear sent behind an unanswered steer can
+	 * run first and leave the steer for the abort to strand.
+	 *
+	 * The deadline is there because Pi answers a prompt only once its preflight
+	 * is done, which for an extension command is the command's whole handler.
+	 * As of `pi 1.5.2` one whose handler awaits `ctx.waitForIdle()` was answered
+	 * only at the turn's `agent_settled`, 14 to 19s in, while an `abort` sent
+	 * behind it stopped the turn within 22ms (docs/MANUAL_TESTING.md, "Pi's
+	 * replies to a compaction and an extension command"). The cost: a steer
+	 * whose preflight outlasts the deadline -- which on an idle Pi includes any
+	 * compaction `_prepareRun` runs first, as read at `pi 1.2.0` -- meets what a
+	 * bare abort did to one (OW-yewiku, above). A prompt still unanswered at
+	 * the deadline is left alone, and its `submit` settles when Pi answers it.
 	 *
 	 * A prompt sent while a stop is in flight, from this client or another,
 	 * waits for the stop to settle and then goes out to the idle Pi the abort
@@ -535,12 +560,12 @@ export class PiAdapter implements BackendAdapter {
 	 * ark3/agentpane#75 agentpane-mode's `f` sent one ahead of its fork too. Each later one clears once the one before has
 	 * answered, and usually takes nothing out.
 	 *
-	 * Nothing times Pi out. As of `pi 1.2.0` `AgentSession.abort` ends in
-	 * `waitForIdle` (read at the source), so a turn that never settles leaves
-	 * the stop unanswered, as a prompt Pi never answers leaves it unsent. Then
-	 * every prompt sent after it waits too, and with it every verb
-	 * `SessionManager.#serially` has queued behind that prompt on the session:
-	 * `fork`, `setModel`, `setEffort`, `setName` and `compact`. That is chosen
+	 * Nothing times the abort out. As of `pi 1.2.0` `AgentSession.abort` ends
+	 * in `waitForIdle` (read at the source), so a turn that never settles
+	 * leaves the stop unanswered. Then every prompt sent after it waits too,
+	 * and with it every verb `SessionManager.#serially` has queued behind that
+	 * prompt on the session: `fork`, `setModel`, `setEffort`, `setName` and
+	 * `compact`. That is chosen
 	 * knowingly: such a session takes no turn whichever way a prompt is
 	 * answered, and closing it, or Pi dying, rejects the stop and then fails
 	 * what waits behind it rather than leaving it hung. Before OW-jifibo the
@@ -553,7 +578,12 @@ export class PiAdapter implements BackendAdapter {
 	 * `onError`.
 	 */
 	async abort(): Promise<string[]> {
-		const before = Promise.allSettled([this.stopping, ...this.unansweredPrompts]);
+		let cancel = (): void => {};
+		const deadline = new Promise<void>((resolve) => {
+			cancel = this.setTimer(resolve, stopWaitMs);
+		});
+		const prompts = Promise.race([Promise.allSettled([...this.unansweredPrompts]), deadline]).finally(cancel);
+		const before = Promise.allSettled([this.stopping, prompts]);
 		const stop = before.then(async () => {
 			const cleared = await this.sendCommand<PiResponseFor<"clear_queue">>({ type: "clear_queue" });
 			await this.sendCommand<PiResponseFor<"abort">>({ type: "abort" });
