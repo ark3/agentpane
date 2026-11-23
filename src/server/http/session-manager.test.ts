@@ -1562,6 +1562,98 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 	});
 });
 
+describe("a backend that exits on its own (#97)", () => {
+	const REPORT = "Pi process exited (code=1, signal=null)";
+
+	/** The `ended` events among `events`. */
+	function endedIn(events: ServerEvent[]): ServerEvent[] {
+		return events.filter((event) => event.type === "ended");
+	}
+
+	it("lets a stored session whose child exits mid-turn go, saying why on its ended, and the next attach starts it again", async () => {
+		const adapter = await attachAdapter(REF);
+		const handle = sessions.summaryOf(REF)?.handle;
+		adapter.setStreaming(true);
+		const events = broadcastEvents();
+
+		adapter.exit(REPORT);
+
+		expect(endedIn(events)).toEqual([{ type: "ended", session: REF, handle, exit: REPORT }]);
+		expect(events.filter((event) => event.type === "error")).toEqual([]);
+		expect(sessions.isAttached(REF)).toBe(false);
+		expect((await sessions.list()).find((s) => sessionKey(s.ref) === sessionKey(REF))?.status).toBe("detached");
+
+		const again = await sessions.attach(REF);
+		expect(pi.created).toHaveLength(2);
+		expect(adapter.disposals).toBe(1);
+		expect(sessions.adapterFor(again.ref)).toBe(pi.created[1]);
+		expect(again.handle).not.toBe(handle);
+	});
+
+	it("sends no ended for an exit during start(), which stays the start's failure", async () => {
+		const gate = deferred();
+		const flaky = new FakeAdapterFactory({ holdStart: gate.promise, failStart: `${REPORT} before responding` });
+		sessions = new SessionManager({ index, adapters: { pi: flaky } }, broadcaster);
+		const events = broadcastEvents();
+		const attaching = sessions.attach(REF);
+		await settle();
+		const adapter = flaky.created[0];
+		if (!adapter) throw new Error("the start never built its adapter");
+
+		adapter.exit(REPORT);
+		gate.resolve();
+
+		await expect(attaching).rejects.toThrow(`${REPORT} before responding`);
+		expect(endedIn(events)).toEqual([]);
+		expect(sessions.isAttached(REF)).toBe(false);
+		expect(adapter.disposals).toBe(1);
+	});
+
+	it("lets a never-prompted session go with the report on its ended, leaving no row", async () => {
+		sessions = new SessionManager({ index, adapters: { pi }, newId: () => "created" }, broadcaster);
+		const created = await sessions.create(WORKSPACE, "pi");
+		const events = broadcastEvents();
+
+		pi.created[0]?.exit(REPORT);
+
+		expect(endedIn(events)).toEqual([{ type: "ended", session: created.ref, handle: created.handle, exit: REPORT }]);
+		expect(sessions.holds(created.ref)).toBe(false);
+		expect((await sessions.list()).map((summary) => summary.ref)).toEqual([REF]);
+	});
+
+	it("lets the fork's session go after a Pi fork moved the adapter onto it", async () => {
+		const adapter = await attachAdapter(REF);
+		const forked = await sessions.fork(REF, "e1");
+		const forkHandle = sessions.summaryOf(forked)?.handle;
+		const events = broadcastEvents();
+
+		adapter.exit(REPORT);
+
+		expect(endedIn(events)).toEqual([{ type: "ended", session: forked, handle: forkHandle, exit: REPORT }]);
+		expect(sessions.liveRefs()).toEqual([]);
+	});
+
+	it("sends each session on one shared child its own ended when that child exits", async () => {
+		const parentRef: SessionRef = { backend: "codex", id: "thread-parent" };
+		const child = new FakeSharedChild();
+		const codex = new FakeAdapterFactory({ forkMode: "shared", sharedChild: child });
+		index = new FakeSessionIndex([storedSession(parentRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+		const parent = await sessions.attach(parentRef);
+		const forked = await sessions.fork(parentRef, "e1");
+		const fork = sessions.summaryOf(forked);
+		const events = broadcastEvents();
+
+		child.exit("codex app-server exited (code=1, signal=null)");
+
+		expect(endedIn(events)).toEqual([
+			{ type: "ended", session: parentRef, handle: parent.handle, exit: "codex app-server exited (code=1, signal=null)" },
+			{ type: "ended", session: forked, handle: fork?.handle, exit: "codex app-server exited (code=1, signal=null)" },
+		]);
+		expect(sessions.liveRefs()).toEqual([]);
+	});
+});
+
 describe("lifecycle", () => {
 	it("keeps virtual sessions out of the backend store until prompted (D9)", async () => {
 		const { ref } = await sessions.create(WORKSPACE, "pi", "pi-1");

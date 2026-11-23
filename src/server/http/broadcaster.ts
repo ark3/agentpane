@@ -158,10 +158,11 @@ export class Broadcaster {
 	/**
 	 * The last event under a handle the session manager has let go of (D26).
 	 * Unnumbered, and it leaves the counter alone: `forget` drops that beside it,
-	 * and numbering this would put it back.
+	 * and numbering this would put it back. `exit` is the death report of a
+	 * backend that exited on its own.
 	 */
-	ended(session: Addressed): void {
-		this.#fanout({ type: "ended", session: session.ref, handle: session.handle });
+	ended(session: Addressed, exit?: string): void {
+		this.#fanout({ type: "ended", session: session.ref, handle: session.handle, ...(exit === undefined ? {} : { exit }) });
 	}
 
 	/** Drop a closed session's counter, so the map does not grow with the uptime. */

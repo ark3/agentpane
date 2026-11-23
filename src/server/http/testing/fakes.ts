@@ -157,14 +157,22 @@ export interface FakeAdapterOptions {
 export class FakeSharedChild {
 	holders = 0;
 	kills = 0;
+	readonly #held = new Set<FakeAdapter>();
 
-	hold(): void {
+	hold(adapter: FakeAdapter): void {
 		this.holders += 1;
+		this.#held.add(adapter);
 	}
 
-	release(): void {
+	release(adapter: FakeAdapter): void {
 		this.holders -= 1;
+		this.#held.delete(adapter);
 		if (this.holders === 0) this.kills += 1;
+	}
+
+	/** The child exits unasked: every adapter still holding it fires `onExit`, as `CodexConnection` tells every holder. */
+	exit(report: string): void {
+		for (const adapter of [...this.#held]) adapter.exit(report);
 	}
 }
 
@@ -242,7 +250,7 @@ export class FakeAdapter implements BackendAdapter {
 		private readonly options: FakeAdapterOptions = {},
 	) {
 		this.#ref = ref;
-		if (options.forkMode === "shared") options.sharedChild?.hold();
+		if (options.forkMode === "shared") options.sharedChild?.hold(this);
 	}
 
 	async start(opts: StartOptions): Promise<void> {
@@ -262,7 +270,8 @@ export class FakeAdapter implements BackendAdapter {
 		this.#errors.clear();
 		this.#notices.clear();
 		this.#refChanges.clear();
-		if (first && this.options.forkMode === "shared") this.options.sharedChild?.release();
+		this.#exits.clear();
+		if (first && this.options.forkMode === "shared") this.options.sharedChild?.release(this);
 		if (this.options.failDispose) throw new Error(this.options.failDispose);
 	}
 
@@ -435,6 +444,11 @@ export class FakeAdapter implements BackendAdapter {
 
 	emitNotice(notice: AgentNotice): void {
 		for (const cb of [...this.#notices]) cb(notice);
+	}
+
+	/** The backend's process exits unasked, with `report` as its death report (`BackendAdapter.onExit`). */
+	exit(report: string): void {
+		for (const cb of [...this.#exits]) cb(report);
 	}
 
 	#emit(change: StateChange): void {

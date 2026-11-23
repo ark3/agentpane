@@ -12,6 +12,8 @@
  * `SessionSummary.name` and the command that sets it (OW-jamaha). D31 raised it
  * for the socket's frames (ark3/agentpane#52), and again to retire the event
  * stream and the REST routes once no client used them (ark3/agentpane#55).
+ * ark3/agentpane#97 raised it for `ended`'s `exit`, the death report of a
+ * backend that exited on its own.
  *
  * Shape follows D31 (one WebSocket carries commands in, and replies and
  * events out) and D3 (the server is authoritative; it sends assembled state,
@@ -319,11 +321,11 @@ export type ServerEvent =
 	  }
 	| {
 			/**
-			 * The server let go of the live session under `handle` -- a close, or
-			 * on Pi a fork moving the process onto a conversation of its own --
-			 * and nothing goes out under it again (D26, OW-sodohi). Drop the view.
-			 * One a fork sends names no fork: the parent's ref is all it carries
-			 * (OW-suhoto).
+			 * The server let go of the live session under `handle` -- a close, the
+			 * backend's process exiting on its own, or on Pi a fork moving the
+			 * process onto a conversation of its own -- and nothing goes out under
+			 * it again (D26, OW-sodohi). Drop the view. One a fork sends names no
+			 * fork: the parent's ref is all it carries (OW-suhoto).
 			 *
 			 * No `seq`: one would have to come from the counter the server has
 			 * just dropped for the handle, recreating it (`submit` in
@@ -334,6 +336,12 @@ export type ServerEvent =
 			type: "ended";
 			session: SessionRef;
 			handle: string;
+			/**
+			 * The death report, present only when the server let go because the
+			 * backend's process exited without being asked: its reason and the
+			 * tail of its stderr (ark3/agentpane#97).
+			 */
+			exit?: string;
 	  }
 	/** The session list changed (created, deleted, or newly attached). Refetch it. */
 	| { type: "sessions-changed" };

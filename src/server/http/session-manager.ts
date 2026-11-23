@@ -11,8 +11,9 @@
  *  - **The subprocess outlives the connection.** Its lifetime is tied to the
  *    server, not to a client's socket. A browser refresh drops the socket and
  *    the agent keeps working; reconnect is a repaint. A close disposes an
- *    adapter, whether a client asked for it or D12's idle reaper or cap made
- *    it, and so does server shutdown.
+ *    adapter, whether a client asked for it, D12's idle reaper or cap made
+ *    it, or the backend's process exited on its own; so does server
+ *    shutdown.
  */
 
 import { isDeepStrictEqual } from "node:util";
@@ -1233,6 +1234,13 @@ export class SessionManager {
 					owner.errorId = `${this.#handlePrefix}:${++this.#errorsRaised}`;
 					this.broadcaster.error(owner, message, owner.errorId);
 				}),
+				// The backend's process gone unasked: let the session go, as a close
+				// does. Only once its adapter is published, since an exit inside
+				// `start()` is that start's failure, and only while it is live, since
+				// a second `#close` would send a second `ended`.
+				adapter.onExit((report) => {
+					if (this.live(owner.handle)?.adapter === adapter) void this.#close(owner, report);
+				}),
 			);
 			const offNotice = adapter.onNotice?.((notice) => {
 				// One condition the backend repeats -- a thread-less warning that recurs
@@ -1428,7 +1436,8 @@ export class SessionManager {
 	}
 
 	/**
-	 * Close: this and shutdown are the two things that let go of an agent.
+	 * Close: this, a backend's process exiting on its own, and shutdown are
+	 * the three things that let go of an agent.
 	 * Letting go is not always killing -- a Codex fork shares the parent's
 	 * app-server (OW-lajehi), so closing either of them releases a share and only
 	 * the last one out kills the child.
@@ -1446,12 +1455,14 @@ export class SessionManager {
 	}
 
 	/**
-	 * Let go of a live container: a client's close, and D12's idle reaper
+	 * Let go of a live container: a client's close, D12's idle reaper
 	 * (`#active`) and cap (`#makeRoom`), each a visible close as Detach is (D25),
-	 * with the disposal guard that keeps a re-attach from sharing a session file
-	 * with the adapter being disposed.
+	 * and the backend's process exiting on its own (the `onExit` `#start`
+	 * subscribes), whose death report `exit` its `ended` carries. With the
+	 * disposal guard that keeps a re-attach from sharing a session file with
+	 * the adapter being disposed.
 	 */
-	async #close(session: ManagedSession): Promise<void> {
+	async #close(session: ManagedSession, exit?: string): Promise<void> {
 		// Everything up to the first await below is one synchronous run, so an
 		// attach cannot land between its steps and find the session half-closed.
 		// The container leaves the table, and the disposal is registered under
@@ -1465,7 +1476,7 @@ export class SessionManager {
 		// Said here, where the handle is let go of, and not after the disposal
 		// below, which can run to the kill's grace: until then another client
 		// held a live-looking view whose Send was refused `not_attached` (D26).
-		this.broadcaster.ended(session);
+		this.broadcaster.ended(session, exit);
 		this.broadcaster.sessionsChanged();
 		// Swallowed deliberately. By this point the session is out of the table
 		// and unsubscribed, so it *is* closed as far as the caller is concerned;
