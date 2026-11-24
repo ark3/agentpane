@@ -1,29 +1,22 @@
 /**
  * Pi's system-role messages, projected once for both clients (OW-wavini).
  *
- * As of `pi 1.2.0`, `Message` includes `SystemMessage`: every Pi session opens
- * with a leading one carrying the whole system prompt as named `sections` and
- * every tool definition in `toolsAdded` (about 10 KB as JSON), and a later one
- * lands mid-conversation whenever the configuration changes, carrying only the
- * delta -- sections replaced by name, `null` for one removed, tools added and
- * removed (`docs/MANUAL_TESTING.md`, "Pi's system-role messages arrive live and
- * from `get_messages`").
- * Pi counts them in its message indexes, so they stay in the transcript and
- * only their drawing is condensed.
+ * As of `pi 1.2.0` every Pi transcript opens with a `SystemMessage`
+ * carrying the whole system prompt as named `sections` and every tool
+ * definition in `toolsAdded` (about 10 KB as JSON), a later one lands
+ * mid-conversation carrying only the delta whenever the configuration
+ * changes, and Pi counts them in its message indexes (`docs/MANUAL_TESTING.md`,
+ * "Pi's system-role messages arrive live and from `get_messages`"). So they
+ * stay in the transcript and only their drawing is condensed.
  *
- * The decision, a first cut chosen by the owner on 2026-10-14 and to be judged
- * in use: every system message, the leading one included, draws as a one-line
- * marker naming what it carries, with its text behind a disclosure collapsed by
- * default, in the browser (`Message.svelte`) and in Emacs (`nodes.ts`) alike.
- * Behind it go the content, each section under its name, and the tools added
- * by name and description -- never their JSON parameter schemas -- and removed
- * by name.
- *
- * Which message is the leading one is a matter of position, as it is to Pi:
- * pi-ai's own types call the leading system message the system prompt and
- * every later one a change to it. So the first system message in the
- * transcript reads "System prompt" and counts what it declares, and every
- * later one reads "System prompt changed" and names what it changes.
+ * The decision, a first cut chosen by the owner on 2026-10-14 and to be
+ * judged in use: every system message, the leading one included, draws as a
+ * one-line marker naming what it carries, its text behind a disclosure
+ * collapsed by default, in the browser (`Message.svelte`) and in Emacs
+ * (`nodes.ts`) alike. Tools go behind it by name and description, never
+ * their JSON parameter schemas. The leading one reads as the system prompt
+ * and every later one as a change to it, by position, as pi-ai's own types
+ * have it.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
