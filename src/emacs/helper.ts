@@ -329,9 +329,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	/**
 	 * Fetch the fork points of the session under `handle`, unless a fetch for
 	 * it is out, and send them to the view bound to it when they answer, if
-	 * one still is; see the head of this file. Swallowed on failure, as the
-	 * browser's: no gesture stands behind it, and the server matches the
-	 * index again at the send (D30).
+	 * one still is, as `session/forkPoints` in `protocol.ts` says. Swallowed
+	 * on failure, as the browser's: no gesture stands behind it, and the
+	 * server matches the index again at the send (D30).
 	 */
 	const refreshForkPoints = (handle: string): void => {
 		if (stopped || forkPointsOut.has(handle)) return;
