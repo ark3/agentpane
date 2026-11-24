@@ -103,17 +103,12 @@ function updateSession(state: ClientState, handle: string, view: SessionView): C
 }
 
 /**
- * The ref is an attribute of the view (D24): an event under a handle whose
- * `session` is not the ref the view held has moved it, and that is all a
- * rename is on the wire: the server sends a snapshot under the handle
- * carrying the new ref and nothing else (OW-mofuho), and one lost to a
- * dropped stream (D21) is made good by the reconnect's opening snapshot,
- * which carries the current ref under the same handle. The summary carrying
- * the handle or the old ref, and `selected` where it named the old ref, move with it,
- * because they are compared by ref: `aria-pressed`, `selectedSummary`, and
- * the preview read of a dropped view, which goes by the selected ref, where
- * an old `virtual:` id reads `gone`, whatever the new ref has on disk
- * (OW-vasubu, D26 point 5, D35 point 1).
+ * Follow a rename, an event under a handle naming a new `session`
+ * (`ServerEvent`, D24, OW-mofuho), in what is compared by ref: the summary
+ * carrying the handle or the old ref, and `selected` where it named the old
+ * ref. They are read by `aria-pressed`, `selectedSummary`, and the preview
+ * read of a dropped view, where the old id reads `gone` (OW-vasubu, D35
+ * point 1).
  *
  * With no view before the event -- a snapshot introducing one -- the old ref
  * is the one the summary carrying the handle holds, which a listing put
@@ -172,36 +167,16 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 	}
 
 	// From here on the arms only *update* a view; none of them may create one
-	// (OW-pezazo). Creating was resurrecting sessions this client had deliberately
-	// dropped: `detach` in `controller.ts` once removed the live view itself while
-	// events for it were still on the wire -- `broadcaster.forget` only stops the
-	// counter, it cannot recall what has been fanned out -- and a late `status`
-	// rebuilt the entry, re-lighting the session list's streaming dot on a dead
-	// row until the next re-list healed it. The view now goes on `ended`, the
-	// last event under its handle (D26), but a gap still drops one whose handle
-	// goes on streaming (`Recovery`), and this is what keeps that one dropped.
+	// (OW-pezazo), or a late event would resurrect a view this client dropped,
+	// as a gap drops one whose handle goes on streaming (`Recovery`). Only a
+	// snapshot introduces a session to a client, so only its arm creates.
 	//
-	// A snapshot is how the server introduces a session to a client --
-	// `sendOpeningSnapshots` on connect for every live ref, and `broadcastSnapshot`
-	// on both branches of `attach` (`session-manager.ts`) -- so the `snapshot` arm
-	// above is the one that must create, and does.
-	//
-	// The four arms the adapter drives are not, however, unreachable before that introduction, and what
-	// they drop there is worth naming. `#start` subscribes `onUpdate`,
-	// `onError` and `onNotice` before it awaits
-	// `adapter.start(...)`, and the `"fork"` a Pi adapter announces moves it onto a
-	// container of the fork's, under a new handle, naming nothing under the
-	// parent's (`#forkOnto`, D20, D24, OW-suhoto), so all four can fan out under a handle no client holds
-	// a view of until the fork's hydrate or its attach snapshots it. None of that
-	// is lost:
-	// the snapshot that follows carries `messages`, `isStreaming`, `compaction` and
-	// `model` wholesale, and since OW-bipume the session's `error` and
-	// `notices` too, which the server holds for exactly this -- and for the client
-	// that reconnects or connects later, which never saw the event at all. What the
-	// snapshot carries is the only restoring path a client has, which is why the fix
-	// lives there and not in letting an event resurrect a dead view here: that costs
-	// more than it buys -- a resurrecting `error` lights the alert banner over a
-	// session the user just detached, where the `status` above only lit a dot.
+	// The other arms can arrive before that introduction, at a start, whose
+	// adapter events fan out before its snapshot, or for a Pi fork moved onto
+	// a handle of its own (`#forkOnto` in `session-manager.ts`). Nothing is
+	// lost: the snapshot that follows carries the whole view, its `error` and
+	// `notices` included (`ServerEvent`). A resurrecting `error` would light the
+	// alert banner over a session the user just detached.
 	//
 	// Ignoring is silent on purpose: no gap is reported either, since there is
 	// no view to detach.
