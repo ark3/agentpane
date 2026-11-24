@@ -109,23 +109,15 @@ export interface ControllerView {
 	exits: Readonly<Record<string, string>>;
 	/**
 	 * Transcript indices the *selected* session can be forked at, as of the last
-	 * `sessions/forkPoints` (OW-roveze), or null while nobody has been told yet.
-	 * Whether a user message is offered an Edit control at all reads this.
+	 * `sessions/forkPoints` (OW-roveze), or null while nobody has been told yet;
+	 * whether a user message is offered an Edit control reads this. On the view,
+	 * not each `SessionView`, since only the selected session draws Edit
+	 * controls. `refreshForkPoints` says when it is refreshed, and that nothing
+	 * is decided on it.
 	 *
-	 * On the view rather than on each `SessionView` because only the selected
-	 * session draws Edit controls and only the selected session is ever asked.
-	 *
-	 * Not-yet-known is a third state on purpose, and it offers every user message
-	 * a control: a session is attached and drawn before this can answer, and a
-	 * transcript that blinks its controls in a beat later is worse than one whose
-	 * worst case for that beat is a refusal. It can only be a refusal -- the
-	 * server resolves the point by index inside the fork-and-prompt (D30), so an
-	 * Edit offered here that the backend cannot honour is declined, never
-	 * redirected.
-	 *
-	 * An affordance, not a fact, even once known: it is refreshed at attach and
-	 * at turn boundaries, and between a refresh and the click the transcript can
-	 * move under it. Nothing is decided on it.
+	 * Null offers every user message a control on purpose: a session is drawn
+	 * before this can answer, and controls that blink in a beat later are worse
+	 * than a beat whose worst case is a refusal (`forkAndSubmit`).
 	 */
 	forkIndices: number[] | null;
 	/**
@@ -248,44 +240,26 @@ export interface AgentpaneController {
 	 * Fork the selected session just before the user message at transcript
 	 * `index` and send the current draft, plus `images`, into the fork
 	 * (OW-hezidi), as one fork-and-prompt request the server runs to the end
-	 * (D30). Always a new session: no backend is asked to rewind in place, and
-	 * Codex cannot.
+	 * (D30). Always a new session: no backend is asked to rewind in place.
 	 *
-	 * `index` addresses the transcript array itself -- the one `snapshot.messages`
-	 * carries -- and the server resolves it against the fork points by
-	 * `ForkPoint.index` (OW-roveze). Never by position in the points list: Codex
-	 * answers one point per *turn*, a steered turn holds two user messages, so
-	 * counting user messages addresses a later turn than the user clicked and
-	 * forks there silently. Never by wording either, which two identical
-	 * messages break.
+	 * `index` addresses the transcript array itself, never a position among the
+	 * fork points (`ForkPoint.index`, OW-roveze). One no point names is refused,
+	 * not redirected (`ForkAndPromptRequest`); the caller normally offers no
+	 * Edit there, so reaching one means the transcript moved under it.
 	 *
-	 * No point at that index is a refusal, not a fallback. The caller normally
-	 * offers no Edit control on such a message at all, so reaching here means the
-	 * transcript moved under the affordance.
+	 * Resolves to the reply, **the fork's live summary and its prompt's
+	 * disposition**, or null if the prompt never landed: nothing selected, no
+	 * live view (OW-forinu), an empty draft, a send still out, or a refusal.
+	 * The shell arms the fork's follow and watch from the summary's handle, and
+	 * arms neither for a handled prompt (OW-koledi, OW-vitefo, OW-yobayi): not
+	 * from the ref, which the fork's first prompt can rename before the reply
+	 * lands (`ServerEvent`, OW-kimaya).
 	 *
-	 * Resolves to the request's reply, **the fork's live summary and its
-	 * prompt's disposition**, or null if the prompt never landed. The shell arms
-	 * the fork's follow and watch from the summary's handle (OW-koledi,
-	 * OW-vitefo), and takes them down again for a handled prompt (OW-yobayi).
-	 * The handle, not the ref, because the fork's first prompt can rename it
-	 * before the reply lands -- Claude Code renames at `init` -- and a lookup by
-	 * the ref the fork was created under then finds nothing (OW-kimaya).
-	 *
-	 * Null means a genuine failure -- nothing selected, a selection this tab
-	 * holds no live view of (OW-forinu), an empty draft, a press on top of one
-	 * still in flight, or a refused request. A refusal that names a fork, one
-	 * the server created before its prompt failed, moves the selection to that
-	 * fork, as a landed one does, so that sending again prompts the fork rather
-	 * than forking the parent a second time (D30, ark3/agentpane#17); the draft
-	 * is kept either way. Clicking another session mid-fork is not a failure:
-	 * under D17 that is navigation, not a retraction, so the request runs to
-	 * completion while the selection stays where the click put it (OW-miyemo),
-	 * and neither a landed fork nor a refused one moves it back.
-	 *
-	 * The caller owns the compose mode this drives, and a failed fork has to
-	 * leave that mode standing where the selection stays: the draft is still
-	 * the edited text, and clearing the mark under it would leave a composer
-	 * that says nothing about where it is about to send.
+	 * A refusal that names a fork moves the selection to it, as a landed fork
+	 * does, so that sending again prompts the fork rather than forking the
+	 * parent again (D30, ark3/agentpane#17); the draft is kept either way. A
+	 * click elsewhere mid-fork is navigation, not a cancel (D17, OW-miyemo): the
+	 * request runs on, and neither outcome moves the selection back.
 	 */
 	forkAndSubmit(
 		index: number,
@@ -783,43 +757,25 @@ export function createController(
 	// Always lists the whole corpus: the workspace filter is a client-side view
 	// over these summaries (OW-39), not a server round-trip.
 	//
-	// `surface` separates the two callers (OW-dinuwu). A gesture -- the Refresh
-	// button, or the startup list -- owns the status line and the error slot and
-	// says so. A `sessions-changed` broadcast owns neither, and it is far more
-	// frequent than it looks: the server fires it at every turn boundary to keep
-	// the `updatedAt` sort moving (OW-furinu), so one lands inside the
-	// `"submitting"` of every prompt, not just the first one's rename. Surfacing
-	// it would wipe errors the user has not read yet and read `"listing"` over
-	// the `"attaching"` or `"submitting"` of the very operation that caused the
-	// broadcast (OW-nasofa).
+	// `surface` is whether a gesture asked (OW-dinuwu): the Refresh button or
+	// the startup list owns the status line and the error slot. A
+	// `sessions-changed` broadcast owns neither: the server sends one at every
+	// turn boundary (OW-furinu), so one lands inside every prompt's
+	// `"submitting"`, and surfacing it would wipe unread errors and read
+	// `"listing"` over the operation that caused it (OW-nasofa).
 	//
-	// A call that arrives while a listing is out is owed a fresh one, and does
-	// not join the answer already coming (OW-sabova). That answer may have been
-	// given before the change the call is about: the attach whose broadcast
-	// arrives mid-listing, a turn boundary's broadcast (OW-furinu), another
-	// client's close. Joining it would leave the row wherever the older answer
-	// put it -- and since the listing is the only writer of a row's `status`
-	// (OW-wazija), an attach made under a listing in flight would read
-	// `detached` on a live pane until some later listing. So the listing in
-	// flight runs out, and then exactly one more is asked, whose landing is what
-	// every caller that arrived meanwhile waits on. At most one is out and one
-	// owed however many broadcasts arrive, so a burst costs one extra listing
-	// and cannot pile requests up.
+	// A call while a listing is out is owed a fresh one rather than joining it
+	// (OW-sabova): that answer may predate the change the call is about, and an
+	// attach leaves its row's `status` to the listing (OW-wazija), so one made
+	// under it would read `detached` on a live pane. The listing in flight runs
+	// out, then exactly one more is asked, which every caller meanwhile waits
+	// on, so a burst costs one extra listing.
 	//
-	// A press that arrives meanwhile owns the owed listing's failure, which it
-	// reports, and no more; silence is only for the listings nobody asked for.
-	// Without that, a Refresh during a broadcast re-list -- likely, since turns
-	// broadcast -- would report nothing at all when its listing fails. It does
-	// not get the owed listing's start: that comes after the press, possibly
-	// after a gesture made in between, and announcing it there would wipe an
-	// attach's unread error and read `"listing"` over its `"attaching"` -- the
-	// clobbering the paragraph above forbids. Only a press that asks a listing
-	// itself announces it.
-	//
-	// The owed listing refreshes the preview on screen too, as every listing
-	// does (OW-76): a press waiting on it expects the transcript to move with
-	// the sidebar, and the read the listing in flight started is exactly as old
-	// as that listing's answer.
+	// A press that joins the owed listing reports its failure, or nothing
+	// would, but never announces its start, which may come after a gesture made
+	// in between and would clobber that gesture's error and `"attaching"`. The
+	// owed listing refreshes the preview on screen too, as every listing does
+	// (OW-76).
 	function refreshSessions(surface: boolean): Promise<void> {
 		// The owed listing is checked first: between the listing in flight
 		// landing and the owed one being asked, `refreshInFlight` may already be
@@ -990,33 +946,22 @@ export function createController(
 	}
 
 	/**
-	 * Detach, in this tab alone, a session whose event sequence gapped
-	 * (`acceptsSequence` in `session-state.ts`), which means this client dropped
-	 * an event (D25 point 5). The view goes, and with it everything this tab held
-	 * under the handle; the server still holds the session for every other
-	 * client, so nothing is closed and its row keeps what the server listed.
-	 * Nothing is attached on the client's behalf either: an attach is what
+	 * Detach, in this tab alone, a session whose `seq` gapped (`Recovery`, D25
+	 * point 5): its view goes, and the server still holds the session for every
+	 * other client, so nothing is closed. Nor is it attached again: an attach
 	 * spawns, and one here could re-spawn a session whose close is out
-	 * (OW-sugome). The preview's Attach button is the deliberate attach.
+	 * (OW-sugome); the preview's Attach is the deliberate one.
 	 *
-	 * A selected session is left detached-loading, and `publish`'s preview
-	 * fetch takes it from there (OW-forinu), under the gapped event's `ref`: the
-	 * reducer returns on a gap before it moves anything, so where that event is
-	 * the first to carry a rename the selection still names the old ref (D24),
-	 * and it is moved here or the fetch would read the old one. A session with
-	 * nothing on disk lands on its preview too: the server still holds it, so
-	 * the preview answers an empty transcript rather than `gone` (D26 point 5),
-	 * its Attach reaches the session, and the poll finds the transcript once
-	 * the first turn writes one.
+	 * A selected session is left detached-loading for `publish`'s preview
+	 * fetch (OW-forinu), under the gapped event's `ref`: the reducer returns on
+	 * a gap before following a rename, so where that event is the first to
+	 * carry one the selection still names the old ref (D24), which the fetch
+	 * would read. One with nothing on disk previews empty rather than `gone`,
+	 * since the server still holds it (`SessionManager.holds`).
 	 *
-	 * No gesture reaches here -- the only caller is `onEvent` -- so, like the
-	 * stream drop's detach in `onDisconnect`, this writes neither `busy` nor
-	 * `error` and does not bump the intent (OW-yasewo).
-	 *
-	 * The gap listeners hear it before the view goes, which is how the badge's
-	 * turn watch on the handle ends raising nothing, streamed or not (D25 point
-	 * 5, OW-jadoda): a later snapshot under the same handle re-forms the view,
-	 * and a turn ending there is one this tab stopped hearing.
+	 * No gesture reaches here, so like `onDisconnect` this writes neither
+	 * `busy` nor `error` and does not bump the intent (OW-yasewo). The gap
+	 * listeners hear it before the view goes (`subscribeGaps`).
 	 */
 	function detachGapped({ ref, handle }: Recovery): void {
 		for (const listener of gapListeners) listener(handle);
@@ -1123,29 +1068,17 @@ export function createController(
 		},
 		/**
 		 * A reopened socket heals its transcripts and nothing else: the opening
-		 * snapshots go out only for sessions with a live adapter and carry
-		 * `{ messages, isStreaming, compaction, model }`, never `status`,
-		 * `updatedAt`, `cwd` or `preview`. There is no cursor and no replay
-		 * buffer either, so every `sessions-changed` that fanned out while the
-		 * socket was down is simply gone -- and `status` (the sidebar's attached
-		 * stripe, the header's Detach) and `updatedAt` (the whole sidebar
-		 * ordering) move for no other reason than a listing. So the reconnect asks
-		 * for one (D21, OW-vukoku).
+		 * snapshots carry no row's fields, `status` and `updatedAt` among them,
+		 * and with no replay every `sessions-changed` sent while the socket was
+		 * down is gone, so each open asks a listing (D21, OW-vukoku). It goes on
+		 * the socket behind the `hello` that registered this client, so a change
+		 * after its read reaches the tab as an event (D31 point 1). The first
+		 * open's listing is `start()`'s own; a first socket that failed to open
+		 * took it along, and the open that follows lists here (OW-dajove).
 		 *
-		 * One listing per open, on the socket, so it is ordered against the
-		 * events around it (D21, D31 point 1): the server registered this client
-		 * at its `hello`, so a change after the listing's live read reaches the
-		 * tab as an event. The first open's is `start()`'s own, which went out
-		 * behind the `hello` to paint the sidebar and, against a server that is
-		 * away, report it; a first socket that failed to open took that listing
-		 * with it, and the open that follows lists here, which is how a page
-		 * loaded while the server was away fills its sidebar (OW-dajove).
-		 *
-		 * `false`: nobody asked for this listing, so it owns neither the status
-		 * line nor the error slot. The open answers one error there itself: a
-		 * refused token's, which `start()`'s listing or a gesture met at the
-		 * close before, is untrue once a `hello` is accepted, whether on a
-		 * paste here or on a token another tab stored.
+		 * Nobody asked for this listing, so it surfaces nothing. The open clears
+		 * one error itself, a refused token's, untrue once a `hello` is accepted,
+		 * whichever tab stored the token.
 		 */
 		onOpen() {
 			// The transition a held preview read waits for (`loadPreview`).
@@ -1155,35 +1088,23 @@ export function createController(
 			else void refreshSessions(false);
 		},
 		/**
-		 * The socket closed, or failed to open, and nothing reconnects it but
-		 * this client: a WebSocket has no retry of its own (D31 point 6). So every
-		 * close schedules the next attempt, on a fixed delay (`RECONNECT_MS`), and
-		 * one that fails lands back here. An open heals at `onOpen`, D21's
-		 * re-list there.
+		 * Every close schedules the next attempt (`RECONNECT_MS`), and one that
+		 * fails lands back here; an open heals at `onOpen`. Every request out
+		 * has settled by now (`EventHandlers.onDisconnect`), so each gesture keeps
+		 * what it keeps on a failure, a prompt its draft. The intent is not
+		 * bumped: a bump would strand a gesture's `busy`.
 		 *
-		 * Every request still out has been settled by now, as the connection
-		 * lost, its outcome unknown, so each gesture in flight settles on its own
-		 * and keeps what it keeps on a failure, a prompt its draft. The intent is
-		 * not bumped: a bump would strand a gesture's `busy`.
+		 * Every view goes at once (D25 point 3), and a close the server survived
+		 * gets back what it still holds from the reconnect's opening snapshots.
+		 * The selection stays: a live pane becomes detached-loading, whose
+		 * preview `publish` fetches once the reconnect reports `connected`
+		 * (OW-forinu), unless an opening snapshot makes it live first, and one
+		 * with nothing on disk clears at its `gone` (D26 point 6).
 		 *
-		 * The tab holds nothing live from here (D25 point 3): a socket closes
-		 * only when the server exits, so every view goes at once, and a close the
-		 * server survived gets back what it still holds from the reconnect's
-		 * opening snapshots. The selection stays, and its pane reads detached: a
-		 * preview on screen stays, and a live one becomes the detached-loading
-		 * pane, whose preview `publish` fetches once the reconnect reports
-		 * `connected` (OW-forinu) -- or which the reconnect's opening snapshot
-		 * makes live again first. That holds for a session with nothing on disk
-		 * too: whether anything is left of it is the preview's to say once a
-		 * server can answer, and `gone` clears the selection then (D26 point 6).
-		 *
-		 * The rows say the same, since the sidebar's stripe and streaming dot
-		 * read them until the reconnect's listing, which may be the whole outage:
-		 * each reads detached and idle, and one with nothing on disk stands until
-		 * that listing drops it, as it does after a detach. Each keeps its
-		 * `handle`: with its view gone, it is what pairs a reconnect's opening
-		 * snapshot with the row when a rename moved the ref during the outage
-		 * (`followRef`).
+		 * The rows read detached and idle until the reconnect's listing, which
+		 * may be the whole outage. Each keeps its `handle`, which pairs a
+		 * reconnect's opening snapshot with the row when a rename moved the ref
+		 * during the outage (`followRef`).
 		 */
 		onDisconnect() {
 			startListedOnOpening = false;
