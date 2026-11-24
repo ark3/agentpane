@@ -2414,49 +2414,45 @@ shows.  A session with no nodes never shows it."
 ;;;; Forking, against a stub connection
 
 (defmacro agentpane-test--forking (forked &rest body)
-  "Run BODY with every request answered as the helper would: for
-`sessions/forkAndPrompt' whatever BODY has put in `fork-prompted', else FORKED's summary under the handle \"h-fork\" and a started prompt, a summary of the ref
-asked for for `sessions/attach', under the handle \"h-ID\" for the ref's
-ID, unless BODY has put a summary of its own in `attached', the fixed nodes for `sessions/preview', and for
-`sessions/list' nil, for `sessions/prompt' whatever BODY has put in
-`prompted', nil, a started turn's answer, unless it has, and for
-`sessions/abort' whatever BODY has put in `aborted', nil, an abort that
-cleared nothing from Pi's queue, unless it has (OW-seleri).
-Each request is pushed onto `sent' as (METHOD . PARAMS), and each `message'
-onto `said'.  The reply to an attach is preceded, as the helper precedes
-it, by the `session/snapshot' under the attach's view that attaches the
-buffer, through `agentpane--connection', drawing the fixed nodes under
-the summary's handle (`sessions/attach' in src/emacs/helper.ts), and
-before that, where a buffer already holds the handle, by the snapshot
-the server's attach of a live session sends that buffer's view
-\(`introduce' there, D31), unless a snapshot has reached the buffer since
-the attach went out: the helper writes an attach's reply only after the
-snapshot that answers it, or once none will.  Where that buffer is
-another, the attach binds nothing, and its reply, or its refusal's
-`attached', names the holder's view instead (D32 point 2).  So is the
-reply to a `sessions/prompt' not marked `live', which the helper sends by
-ref and which attaches its session as an attach does, under the same
-summary, and its refusal where the error's `data' names the session
-`attached' (D30).  So is the reply to `sessions/forkAndPrompt', and its refusal
-where the error's `data' names a fork with a handle, by a snapshot under
-the fork's handle and the request's `forkView', drawing nothing and
-streaming where BODY has set `fork-streaming', unless BODY has set
-`fork-unbound', for a snapshot a gap took (`sessions/forkAndPrompt' in
-src/emacs/helper.ts).
-A request whose method BODY has put in `hold' is not answered
-at once: (METHOD . ANSWER) is appended to `held' instead, and BODY calls
-ANSWER with t to deliver the reply, with `reply' to deliver the reply
-alone, as the helper does for an attach no snapshot will answer, with
-nil to fail the request as `agentpane--request' fails one on an error
-that carries no `data', running its FAILED alone, or with a plist, the
-error's `data', to fail it so and then run its ERRED with that plist, as
-`agentpane--request' does for an error the helper answered with that
-`data' (OW-hiliti).  ERRED runs with nil for a failure by nil.  Either
-way the answer runs in the buffer that sent the request, and to a buffer
-since killed it runs nothing, as `agentpane--request' does.  A request the helper refuses before
-running it, one on a live session from a buffer holding no handle among
-them, is refused so at once and recorded nowhere
-\(`agentpane-test--refusing').  Every buffer BODY made is killed afterwards."
+  "Run BODY with every request answered as the helper would, each pushed
+onto `sent' as (METHOD . PARAMS), and each `message' onto `said'; every
+buffer BODY made is killed afterwards.  A reply is what BODY has put in
+the variable named beside its method, unless it is nil:
+`sessions/forkAndPrompt', `fork-prompted', else FORKED's summary under
+the handle \"h-fork\" and a started prompt; `sessions/attach',
+`attached', else a summary of the ref asked for under the handle
+\"h-ID\" for the ref's ID; `sessions/prompt', `prompted', else nil, a
+started turn's answer; and `sessions/abort', `aborted', else nil, an
+abort that cleared nothing from Pi's queue (OW-seleri).
+`sessions/preview' answers the fixed nodes, and `sessions/list' nil.
+As `sessions/attach' in src/emacs/protocol.ts has it, an attach's reply
+is preceded by the `session/snapshot' under the attach's view that
+attaches the buffer, through `agentpane--connection', drawing the fixed
+nodes under the summary's handle; and before that, where a buffer
+already holds the handle, by the snapshot the server's attach of a live
+session sends that buffer's view (D31), unless a snapshot has reached
+the buffer since the attach went out.  Where that buffer is another, the
+attach binds nothing, and its reply, or its refusal's `attached', names
+the holder's view instead (D32 point 2).  So is the reply to a
+`sessions/prompt' not marked `live', under the same summary, and its
+refusal where the error's `data' names the session `attached' (D30).  So
+is the reply to `sessions/forkAndPrompt', and its refusal where the
+error's `data' names a fork with a handle, by a snapshot under the fork's
+handle and the request's `forkView', drawing nothing, streaming where
+BODY has set `fork-streaming', and not sent where it has set
+`fork-unbound', for a snapshot a gap took.
+A request whose method BODY has put in `hold' is not answered at once:
+\(METHOD . ANSWER) is appended to `held' instead, and BODY calls ANSWER
+with t to deliver the reply; with `reply' to deliver the reply alone, as
+the helper does for an attach no snapshot will answer; or to fail the
+request, running its FAILED and then its ERRED with the same argument,
+with nil, as `agentpane--request' fails one on an error that carries no
+`data', or with a plist, the error's `data' (OW-hiliti).  Either way the
+answer runs in the buffer that sent the request, and to a buffer since
+killed it runs nothing, as `agentpane--request' does.  A request the
+helper or the server refuses before running it, one on a live session
+from a buffer holding no handle among them, is refused so at once and
+recorded nowhere (`agentpane-test--refusing')."
   (declare (indent 1))
   `(let ((sent nil)
          (said nil)
