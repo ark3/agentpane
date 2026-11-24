@@ -1,23 +1,15 @@
 <script lang="ts">
 	/**
-	 * A markdown text block.
-	 *
-	 * The known hot spot (D5) is re-parsing markdown on every token of a long
-	 * streaming message. Two things keep that cheap:
-	 *
-	 * - **Only the tail block re-parses.** Each text block is its own instance
-	 *   of this component, and an unchanged block's `text` prop reads `===`, so
-	 *   the effect below is not re-run and earlier blocks are untouched. That
-	 *   rests on `App.svelte`'s `view` being `$state.raw` (OW-detepa), not on
-	 *   the component boundary: `text={block.text}` in `Block.svelte` creates no
-	 *   derived boundary, so this effect subscribes straight to the `{#each}`
-	 *   item source and a deep proxy's reassignment marked it *dirty*, not
-	 *   maybe-dirty -- and effects, unlike deriveds, do not value-compare.
-	 * - **Throttled to a frame.** While `streaming`, updates coalesce into one
-	 *   `requestAnimationFrame`; deltas that land inside the same frame are
-	 *   collapsed. The initial parse and the final one (when `streaming` goes
-	 *   false) are synchronous, so a settled transcript is never a frame behind
-	 *   and tests do not have to await one.
+	 * A markdown text block, where re-parsing on every token of a long
+	 * streaming message is the known hot spot (D5). Only the tail block
+	 * re-parses: an unchanged block's `text` reads `===`, so its effect does
+	 * not re-run. That rests on `App.svelte`'s `view` being `$state.raw`
+	 * (OW-detepa), not on the component boundary: `text={block.text}` in
+	 * `Block.svelte` makes no derived boundary, so under a deep proxy this
+	 * effect is marked dirty, not maybe-dirty, and effects do not
+	 * value-compare. While `streaming`, updates coalesce into one animation
+	 * frame; the parse once it goes false is synchronous, so a settled
+	 * transcript is never a frame behind.
 	 */
 	import BlockActions from "./BlockActions.svelte";
 	import { renderMarkdownWithFences } from "./markdown.ts";
@@ -76,24 +68,16 @@
 	});
 
 	/**
-	 * Fence controls (OW-63). A fenced code block is one of the units the
-	 * reader copies, but there is no component for it: it reaches the DOM as
-	 * part of this one `{@html}` string, and `sanitize()` forbids `<button>`,
-	 * so the control cannot be emitted inside that string -- nor should it be,
-	 * since that is exactly the choke point D5 exists to keep narrow.
+	 * Fence controls (OW-63). A fence reaches the DOM inside the `{@html}`
+	 * string, whose `sanitize()` forbids `<button>`, and D5 keeps that choke
+	 * point narrow, so the controls are Svelte's, rendered in the dock below,
+	 * and this effect moves each next to the `<pre>` whose `data-fence` index
+	 * matches.
 	 *
-	 * So the controls are ours, rendered by Svelte below with real listeners
-	 * and no `{@html}` anywhere near them, and this effect only *moves* each
-	 * one next to the `<pre>` it belongs to, matched by the `data-fence` index
-	 * the code renderer wrote.
-	 *
-	 * A re-parse replaces the `<pre>` a control was moved next to, but not the
-	 * control: `{@html}` removes only the nodes it inserted, so a node we moved
-	 * in survives and the new `<pre>` lands in front of it (verified in jsdom --
-	 * the element identity changes, the adjacency does not). What the `rendered`
-	 * dependency actually buys is a change in the *number* of fences: a fence
-	 * that first appears in a later streaming frame has no control beside it
-	 * until this effect runs again.
+	 * A re-parse replaces the `<pre>` but not a control moved beside it:
+	 * `{@html}` removes only the nodes it inserted (seen in jsdom). The
+	 * `rendered` dependency is for a fence that first appears in a later
+	 * streaming frame, which has no control until this runs again.
 	 */
 	let host: HTMLElement | undefined = $state();
 	let controls: (HTMLElement | undefined)[] = $state([]);
