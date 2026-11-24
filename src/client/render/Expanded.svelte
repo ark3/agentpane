@@ -1,23 +1,16 @@
 <script lang="ts">
 	/**
-	 * One block, full screen (OW-63). The app's first modal, and deliberately a
-	 * small one: a backdrop, a panel, a header of chrome, and the block's own
-	 * renderer for the body.
+	 * One block, full screen (OW-63): a backdrop, a panel, a header of
+	 * chrome, and the block's own renderer for the body, which goes through
+	 * `markdown.ts`'s sanitize choke point (D5) as the transcript does. Three
+	 * choices are load-bearing rather than taste:
 	 *
-	 * Three things here are load-bearing rather than taste:
-	 *
-	 * - **The body is real, selectable text.** It renders through the very
-	 *   components the transcript uses -- so it goes through `markdown.ts`'s
-	 *   sanitize choke point (D5) like everything else -- and nothing in it is
-	 *   `pointer-events: none`. Drag-selection and the browser's own copy
-	 *   hotkey work; the copy button is a shortcut, not the only way out.
-	 * - **No dismiss on backdrop click.** A selection that starts on the text
-	 *   and ends on the backdrop would otherwise be read as a dismiss, throwing
-	 *   away the selection the reader just made. Closing is explicit: the X, or
-	 *   Esc.
-	 * - **The chrome is not in the body.** Copy-all and close sit in the header,
-	 *   outside the selectable region, so neither drag-selection nor copy-all
-	 *   can pick up the buttons' own text.
+	 * - The body is real, selectable text, nothing in it `pointer-events:
+	 *   none`: the copy button is a shortcut, not the only way out.
+	 * - No dismiss on a backdrop click, which a drag-selection from the text
+	 *   ending there would be read as; closing is the X or Esc.
+	 * - The chrome sits outside the body, so no selection or copy-all picks up
+	 *   the buttons' own text.
 	 */
 	import CopyButton from "./CopyButton.svelte";
 	import Markdown from "./Markdown.svelte";
