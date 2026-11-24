@@ -110,10 +110,11 @@
 	let reading = $state(false);
 	/**
 	 * The earlier user message the composer is editing (OW-hezidi), or null.
-	 *
-	 * Nothing here has touched the server: clicking edit fills the composer and
-	 * marks the transcript, and that is all, so the click is free and
-	 * abandonable. The fork happens at submit.
+	 * Opening one touches no server state (`startEdit`); the fork happens at
+	 * submit. `index` is the message's position in the transcript array, the
+	 * whole of how the fork point is addressed, since `PaneMessage` carries no
+	 * id (`ForkPoint.index`, OW-roveze); only an index some point names offers
+	 * the control (`forkableIndices`).
 	 *
 	 * What the composer held when the edit displaced it is `displacedDraft`'s,
 	 * and the edit's whole lifetime owns it, not any one exit (OW-kijuju).
@@ -122,24 +123,6 @@
 	 * there, a click to another session -- gives it back too, once
 	 * no send is out, ahead of whatever the composer holds then: after a fork
 	 * that lands that is normally nothing, so the draft comes back as it was.
-	 * No edit opens while a send is out (`startEdit`),
-	 * so the composer it would displace is never text already on its way, nor
-	 * while the external editor is rewriting it (OW-momejo).
-	 *
-	 * `index` is the message's position in the transcript array, and it is the
-	 * whole of how the fork point is addressed: a `ForkPoint` names the index it
-	 * forks at, and the server matches on it (OW-roveze, D30). `PaneMessage`
-	 * carries no id of its own (D11 freezes `protocol.ts`, so it cannot grow
-	 * one), and matching on wording instead would break on two identical
-	 * messages.
-	 *
-	 * Only a message some fork point names can be edited at all, which is why
-	 * `forkableIndices` gates the control rather than every user message
-	 * carrying one. On Codex that is visibly uneven inside a single turn -- a
-	 * turn steered mid-flight holds two user messages and the backend can only
-	 * cut before the first -- and that unevenness is the intended outcome: it
-	 * says what the backend can actually do, where hiding it would fork
-	 * somewhere the user never pointed.
 	 */
 	let editing = $state<{
 		index: number;
@@ -339,29 +322,19 @@
 	 */
 	const compaction = $derived(selectedSession?.compaction ?? null);
 	/**
-	 * Whether the Tools menu may offer Detach (OW-tewave). This is D12's
-	 * exemption predicate for its reaper, minus the `virtual` exemption: a
-	 * virtual session is a workspace choice with nothing on disk, so there is
-	 * no transcript to lose, and what that exemption guards against is a reaper
-	 * removing a session the user has just created -- which a deliberate click
-	 * is not. Such a session lists as `attached`; a row whose status is
-	 * `virtual` is a create mid-start (D30), which a close names no handle for
-	 * and is not offered (D35 point 3).
+	 * Whether the Tools menu may offer Detach (OW-tewave): D12's exemption
+	 * predicate for its reaper, less its `virtual` exemption, which keeps the
+	 * reaper off a session just created and has nothing to say to a deliberate
+	 * click. Such a session lists as `attached`; a `virtual` row is a create
+	 * mid-start (D30), which a close names no handle for (D35 point 3).
 	 *
-	 * The rest is kept because `close()` kills mid-turn, and on Claude Code a
-	 * kill mid-turn loses the whole reply (OW-japuzo). `view.sending` is in it
-	 * for the same reason: the turn a prompt starts is not streaming yet,
-	 * so `isStreaming` alone would leave that window open. `compaction` is the
-	 * same loss by another name -- a kill lands on the subprocess running it --
-	 * and the Compact item three lines below already refuses on that field, so
-	 * this conjunct is what makes the two agree (OW-pehile). Whether any backend
-	 * reaches it unseen by `isStreaming` is unmeasured; the guard is one line
-	 * either way. `view.compacting` is that window's `view.sending`: this
-	 * tab's compaction request is out and the server has named no phase yet.
-	 *
-	 * The streaming truth is the live `state.sessions` entry, as the list row
-	 * reads it (OW-furinu), not `selectedSummary.isStreaming`, which is only as
-	 * fresh as the last listing.
+	 * The rest stays because `close()` kills mid-turn, and as of `claude
+	 * 2.1.268` a kill mid-turn lost Claude Code's whole reply
+	 * (`docs/BACKENDS.md`, OW-japuzo). `view.sending` covers the turn a prompt
+	 * starts before it streams, and `view.compacting` the compaction before the
+	 * server names its phase; `compaction` is the same loss, as the Compact
+	 * item refuses on it (OW-pehile). Streaming is read off the live view, not
+	 * `selectedSummary`, which is only as fresh as the last listing (OW-furinu).
 	 */
 	const detachable = $derived(
 		selectedSummary?.status === "attached" &&
@@ -961,39 +934,24 @@
 	}
 
 	/**
-	 * The submit those two armed never reached the backend (OW-mifuki), or
-	 * reached it and started no turn, because the backend handled the prompt
-	 * itself (OW-yobayi). Both arms come off: left standing, the next
-	 * stream on that session -- another tab prompting it, or a turn that was
-	 * already running -- would engage follow here and badge this tab for a turn
-	 * it never sent, which is the one thing `favicon.ts` says the badge means.
+	 * Take down what `armFollow` and `armBadge` armed for a submit that started
+	 * no turn: refused before the backend (OW-mifuki), or handled by it
+	 * (OW-yobayi). Left standing, the next stream on that session, another
+	 * tab's or a turn already running, would follow and badge here for a turn
+	 * this tab never sent, which is the one thing `favicon.ts` says the badge
+	 * means. A handled prompt disarms though Pi lets the extension start a turn
+	 * of its own afterwards (`PromptDisposition`): nothing tells that turn from
+	 * another tab's, and a wrong badge costs more than a missed one.
 	 *
-	 * A handled prompt disarms even though Pi lets the extension that handled
-	 * it start a turn of its own afterwards (`PromptDisposition`): nothing on
-	 * the stream tells that turn from another tab's on the same session, and
-	 * badging for a turn this tab did not ask for is the error the badge must
-	 * never make, where missing one costs a glance (OW-yobayi).
-	 *
-	 * Each comes off only if this submit armed it. One that found an earlier
-	 * submit's follow or watch standing on the session joined it, and its
-	 * refusal or handled answer leaves it there: a prompt refused or handled
-	 * while that turn streams says nothing about that turn (OW-zikiga).
-	 *
-	 * The stream can also move before the answer arrives: on `pi 1.2.0` an
-	 * extension command's handler runs before Pi answers `handled`, so a turn
-	 * it starts can stream ahead of the answer, as can another tab's. The
-	 * disarm takes down whatever of its own it can still reach, so that order
-	 * ends as the other does wherever it can: the watch goes though it has seen
-	 * the turn stream, and a follow its pending follow already engaged gives
-	 * way to the one that stood when it armed. That is no follow at all when
-	 * none had engaged, and the pane stays where it is, as after a manual
-	 * scroll; but where an earlier turn of this tab's was still being followed,
-	 * a message from elsewhere moved the anchor off it, and putting it back
-	 * keeps the pane on that turn. A follow already over -- scrolled away from,
-	 * or its turn ended -- is left over. A whole turn that ended before the
-	 * answer has already raised the badge, and that stays: the badge is one bit
-	 * for every session, and this cannot tell its own dot from another
-	 * session's (OW-zikiga).
+	 * Each comes off only where this submit armed it: a joined arm is the
+	 * earlier submit's turn's (OW-zikiga). The stream can move before the
+	 * answer -- as of `pi 1.2.0` an extension command's handler runs before Pi
+	 * answers `handled`, and another tab's turn can start -- so the disarm takes
+	 * down what it still reaches: the watch, though it has seen streaming, and
+	 * a follow its pending one engaged, which gives way to the follow that
+	 * stood when it armed, none or an earlier turn's. A follow already over is
+	 * left over, and a badge a whole turn already raised stays, the badge being
+	 * one bit for every session (OW-zikiga).
 	 */
 	function disarmSubmit(key: string, armed: { follow: FollowArm | null; watch: boolean }): void {
 		if (armed.follow && !pendingFollow.delete(key)) {
@@ -1335,29 +1293,21 @@
 
 	/**
 	 * Redoing the last thing you said, without scrolling back to find it
-	 * (OW-relehi). It is the transcript's own edit gesture reached from the
-	 * composer, so it goes through `startEdit` and repeats none of it: any
-	 * divergence between the two would be a defect, not a feature.
+	 * (OW-relehi): the transcript's own edit gesture, through `startEdit`, from
+	 * which any divergence is a defect.
 	 *
-	 * Where the submit would stop the turn anyway -- the server says a fork of
-	 * this session stops a running turn, and one is running; see
-	 * `stopsBeforeFork` -- this stops it at the click rather than at submit, the
-	 * one exception to OW-hezidi's free-and-abandonable rule, and it says so in
-	 * its own name. Elsewhere there is nothing to stop and the shortcut is free
-	 * again, so the abort goes exactly where the label does (D15, OW-bakosi).
+	 * Where the fork would stop the turn anyway (`stopsBeforeFork`), this stops
+	 * it at the click, the one exception to `startEdit`'s free and abandonable
+	 * rule, and its label says so; elsewhere it is free (D15, OW-bakosi). The
+	 * fill runs first and the abort is not awaited: its answer clears no
+	 * `isStreaming`, so the button reads "Stop and fork" either way, and
+	 * awaiting would leave the old draft under "Send" for the round trip, where
+	 * a Ctrl-Enter prompts the running session instead of forking it. The fork
+	 * stops the turn again inside the request (`PiAdapter.fork`, D30).
 	 *
-	 * When it does fire, the fill runs first and the abort is not awaited.
-	 * Awaiting it would buy nothing: `controller.abort` never clears
-	 * `isStreaming`, only a server event does, so the primary button reads "Stop
-	 * and fork" either way. And it would cost something -- through that whole
-	 * round trip the composer would still hold the old draft under a button
-	 * reading "Send", where a Ctrl-Enter prompts the running session instead of
-	 * forking it. Filled first, "Stop and fork" is the truth: the server's fork
-	 * stops the session again inside the operation (`PiAdapter.fork`, D30).
-	 *
-	 * The stop is `stop()`, as the Stop button's is, so what it takes out of
-	 * Pi's queue never lands inside the edit it just filled (OW-fahoti). An
-	 * edit `startEdit` refused stops nothing: the stop is the edit's.
+	 * The stop is `stop()`, so what it takes out of Pi's queue never lands in
+	 * the edit it just filled (OW-fahoti); an edit `startEdit` refused stops
+	 * nothing.
 	 */
 	function editLastMessage(): void {
 		const index = lastUserIndex;
@@ -1369,30 +1319,15 @@
 	 * Every stop the composer sends: the Stop button's, and "Stop and edit"'s.
 	 *
 	 * What a stop takes out of Pi's queue (D16) is the user's own unsent words,
-	 * and they come back to the composer (OW-fahoti) -- but not straight into
-	 * it, because where they belong depends on what it holds when the answer
-	 * lands, not on which button sent the stop. Joined into an open edit they
-	 * would be sent into the fork, or overwritten by Cancel. So they wait in
-	 * `heldQueued` until no edit is open and no prompt is in flight, and are
-	 * then joined ahead of whatever the composer holds by `withQueued`, Pi's
-	 * own rule. With neither in the way, which is a plain Stop's usual case,
-	 * that is at once. The one rule covers every way an edit ends, whichever
-	 * side of the answer it falls on:
-	 *
-	 * - Cancel puts the displaced draft back first, so they land ahead of it,
-	 *   exactly as if they had been stashed with it.
-	 * - Every other exit gives the displaced draft back through the same
-	 *   release (OW-kijuju), and they go ahead of it there, so the composer
-	 *   reads as Cancel leaves it: they, the displaced draft, then whatever it
-	 *   holds. A fork's prompt is still out when its selection ends the edit,
-	 *   with the composer holding the text being sent; both wait for that
-	 *   prompt to land, which clears the text. A fork that fails before it
-	 *   moves the selection leaves the edit open, and both keep waiting with it.
-	 * - Clicking to another session, or a fork whose prompt fails after its
-	 *   attach moved the selection, ends the edit with its text still in the
-	 *   composer; that text is then only a draft, and both join ahead of it.
-	 * - An answer landing after the displaced draft is already back joins
-	 *   ahead of it, as after Cancel.
+	 * and they come back to the composer (OW-fahoti), but where depends on what
+	 * it holds when the answer lands, never on which button stopped: joined
+	 * into an open edit they would be sent into the fork, or overwritten by
+	 * Cancel, and joined under a prompt in flight they would leave its text
+	 * standing at its answer. So they wait in `heldQueued` until no edit is
+	 * open and no prompt is in flight, a plain Stop's usual case at once, and
+	 * the release below puts them ahead of the draft an ended edit displaced
+	 * and of whatever the composer holds. Every way an edit ends, on either
+	 * side of the answer, so leaves the composer as Cancel would.
 	 */
 	function stop(): void {
 		void controller.abort().then((queued) => {
@@ -1474,39 +1409,27 @@
 			});
 			return;
 		}
-		// A fork's follow and badge are both armed on the fork itself, from the
-		// reply that names its handle, never on the parent: a parent still
-		// streaming ends its own turn during the fork -- Pi's fork stops it, Codex
-		// and Claude Code may simply finish it -- and a watch on the parent would
-		// take that end for the fork's (OW-koledi). A follow armed there would
-		// engage on the parent at once, whose transcript already holds the edited
-		// message, and that turn's end would release it before the fork ever saw
-		// it (OW-vitefo).
+		// A fork's follow and badge are armed on the fork, from the reply that
+		// names its handle, never on the parent: a parent still streaming may end
+		// its own turn during the fork, which a watch there would take for the
+		// fork's (OW-koledi), and a follow there would engage at once on the
+		// edited message the parent already holds and be released by that end
+		// (OW-vitefo). Not by the fork's ref, which its first prompt may have
+		// renamed (OW-kimaya), nor by `state.selected`, which a click mid-fork
+		// moves. The follow arms from the edited message's index, not a length,
+		// since the fork's transcript is the parent's cut just before it
+		// (OW-hezidi).
 		//
-		// From the reply, which comes once the fork's prompt is admitted (D30), so
-		// its turn can already be streaming: the follow engages on the edited
-		// message's index once that message is in the fork's transcript, and the
-		// watch starts from the level the fork's view holds at the reply, as
-		// the Emacs helper's `arm` does (D32 point 6). A turn that ends
-		// before the reply lands leaves the watch for the next turn there, which
-		// takes a whole turn inside the time between the prompt's admission and
-		// its reply, and costs one stray badge.
+		// The reply comes once the fork's prompt is admitted (D30), so the watch
+		// starts from the level the fork's view holds then, as the Emacs helper's
+		// `arm` does (D32 point 6); a whole turn inside that window costs one
+		// stray badge.
 		//
-		// The handle is the reply's: not the fork's ref, which its first prompt
-		// may already have renamed (OW-kimaya), and never `state.selected`, which
-		// a click mid-fork moves and the controller honours. And the follow arms
-		// from the edited message's index, not the transcript's length: the
-		// fork's transcript is the parent's truncated just before that message,
-		// so the parent's length would sit past its end and never arm (OW-hezidi).
-		//
-		// A watch this tab's own earlier submit armed on the parent is left
-		// alone, except where the fork stops that turn: the user stopped it by
-		// forking it, and a dot for it would announce a turn the user just
-		// stopped, which the Emacs helper drops at the same point, on the
-		// edit's `stops` (OW-dunahe, D32 point 6). It goes here, as the
-		// request does, wherever the label says the fork stops
-		// the turn: the server stops it inside the request, and its `status:false`
-		// can reach this tab before the reply does (OW-rihanu). A refusal before
+		// The parent's watch from an earlier submit is left alone, except where
+		// the fork stops that turn (`stopsBeforeFork`): the user stopped it, as
+		// the Emacs helper has it at the edit's `stops` (OW-dunahe). It goes
+		// here, before the request, since the server's stop inside it can reach
+		// this tab as a `status` before the reply (OW-rihanu); a refusal before
 		// the fork leaves that turn running unwatched, as a failed stop does.
 		if (stopsBeforeFork && armedKey) turnWatch = watchAbandon(turnWatch, armedKey);
 		void controller.forkAndSubmit(edit.index, edit.images).then((landed) => {
