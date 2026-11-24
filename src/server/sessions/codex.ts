@@ -2,16 +2,16 @@
  * Codex session file -> SessionSummary, reading only what enumeration needs.
  *
  * Header: HANDOFF finding 18/20 -- current files start
- * `{"type":"session_meta","payload":{id,cwd,timestamp,...}}`; 5 of 583 files
- * on this machine use an older bare `{id,timestamp}` header with no `cwd`.
- * Both are handled; anything else is bucketed unknown rather than thrown.
+ * `{"type":"session_meta","payload":{id,cwd,timestamp,...}}`, and older ones
+ * a bare `{id,timestamp}` with no `cwd`. Both are handled; anything else is
+ * bucketed unknown rather than thrown.
  *
  * Subagent rollouts are listed like any other session, unfiltered (D19, which
  * has the census of their `thread_source: "subagent"` marker and why a
  * hidden child would stay reachable). `forked_from_id` is NOT a reliable
- * second marker: on the home server on 2026-09-11, 6 of the 45 subagent
- * rollouts `codex-cli` 0.150.1 through 0.154.0 wrote carried none, all six
- * by 0.154.0, which emitted it for 5 of its 11.
+ * second marker: as of `codex-cli 0.154.0` some subagent rollouts carried
+ * none (docs/MANUAL_TESTING.md, "Two Codex rollout censuses behind the
+ * store reader").
  *
  * Preview: "first user message" does not mean what it sounds like for Codex;
  * see `SYNTHETIC_USER_PREFIXES`.
@@ -38,11 +38,11 @@ import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
  * instructions, `<recommended_plugins>`, project `<user_instructions>`. None
  * of it is something a human typed.
  *
- * Census on this machine (2026-08-11, 583 files): in 18 of a random sample of
- * 20 sessions the first user-role item was *entirely* synthetic wrapper
- * content, the real first human message typically the second or third. So
- * "the first user message", as DESIGN/HANDOFF describe the preview, would
- * show a system-prompt dump almost every time.
+ * The first user-role item is usually *entirely* synthetic, the real first
+ * human message typically the second or third (docs/MANUAL_TESTING.md,
+ * "Two Codex rollout censuses behind the store reader"), so "the first user
+ * message", as DESIGN/HANDOFF describe the preview, would show a
+ * system-prompt dump almost every time.
  *
  * A heuristic, not a documented contract: the list will need to grow as the
  * wrapper content drifts. It serves enumeration and the transcript preview

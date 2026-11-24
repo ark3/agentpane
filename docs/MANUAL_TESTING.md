@@ -5371,6 +5371,20 @@ The turn was streaming at the Stop; the abort was answered at 5018, 5023 and 502
 The command was answered `handled` in the same millisecond as the abort each time, so on `pi 1.6.0` too Pi held it until the turn ended, here by the abort.
 In #12's runs, the section above, the same command on `pi 1.5.2` was answered 14.2 s to 19.1 s in, at a turn that ended by itself; no run here measured the adapter without the bound.
 
+## Two Codex rollout censuses behind the store reader
+
+Two counts that `src/server/sessions/codex.ts` once carried in its comments, kept here as the evidence behind the facts those comments now state.
+Neither census recorded the `codex-cli` version of every rollout it counted.
+
+**The first user-role item of a rollout is usually wholly synthetic.**
+Taken on 2026-08-11 over a corpus of 583 rollouts, by the commit that wrote the store reader, 2fe009bf: in 18 of a random sample of 20 sessions the first user-role item was entirely synthetic wrapper content, and the real first human message typically the second or third.
+The record does not name the machine; 583 is the count HANDOFF finding 19 gives for the work laptop's corpus the day before.
+This is why `SYNTHETIC_USER_PREFIXES` exists.
+
+**`forked_from_id` does not mark every subagent rollout.**
+Taken on the home server on 2026-09-11 over the 72 September rollouts, written by `codex-cli` 0.150.1 through 0.154.0, of which 45 carried `thread_source: "subagent"` (D19).
+39 of those 45 carried `forked_from_id`; all six without it were written by 0.154.0, which emitted it for 5 of its 11 subagent rollouts.
+
 ## HANDOFF findings 1–49
 
 These numbered findings established the design, from August to October 2026, and were kept in `docs/HANDOFF.md` until #40 retired that file on 2026-11-18.
