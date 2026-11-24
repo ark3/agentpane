@@ -100,34 +100,25 @@ export function watchFocus(watch: TurnWatch): TurnWatch {
  * every session the client knows about; `hasFocus` is `document.hasFocus()`
  * read at that moment.
  *
- * Done is a *transition*, not a level. After a submit the session still reads
- * `isStreaming:false` for a beat: the echoed user message and the assistant's
- * placeholder both land before `status:true` does, which is the ordering a live
- * Pi turn was observed to produce (OW-27's close note, and the `runTurn`
- * docblock in `e2e/harness.ts` that reproduces it). So a session badges only on
- * a false that follows a true -- arm on the level instead and the badge fires
- * the instant you press Send. `App.svelte`'s follow mode carries the same guard
- * as `hasStreamed`, for the same reason.
+ * Done is a *transition*, not a level: a session badges only on a false that
+ * follows a true. After a submit it can read `isStreaming:false` for a beat,
+ * the echoed user message and the assistant's placeholder landing before
+ * `status:true` (OW-27; `runTurn` in `e2e/harness.ts` reproduces it), so a
+ * watch on the level would fire at Send. `App.svelte`'s follow guards the
+ * same way, with `hasStreamed`.
  *
  * An aborted or errored turn counts as done: both arrive as the same
- * `status:false`, and you asked for something and it stopped. First cut,
- * 2026-08-18 -- revisit from use if a dot for a turn you cancelled yourself
- * reads as noise. The one stop that raises nothing is the one the server
- * makes of a running Pi turn inside a fork, whose watch `App.svelte` abandons
- * as the fork's request goes out (OW-rihanu, D30).
+ * `status:false`. First cut, 2026-08-18 -- revisit from use if a dot for a
+ * turn you cancelled yourself reads as noise. A fork that stops the parent's
+ * turn is the one stop that raises nothing (`watchAbandon`).
  *
- * A session missing from `streaming` keeps its watch waiting, because a view
- * that has not formed yet looks exactly like one that went away. Of the three
- * things that take a view away, a seq gap and a close end watches, and not
- * here: the controller tells `App.svelte`, which calls `watchAbandon` for a
- * gap (OW-jadoda) and `watchClose` for a close (D31 point 6). Until D31 a
- * stream drop left every watch waiting, and after a restart, with no snapshot
- * to re-form its view, it waited forever. An `ended` leaves it waiting, and nothing
- * re-forms under that handle (D26), so the watch is never acted on again. That
- * includes the `ended` a Pi fork sends under the parent's handle while the fork
- * is in flight (`#forkOnto`, D26 point 1): the fork's watch was never on the
- * parent (OW-koledi), and one on a parent turn the fork stopped was abandoned
- * as the fork's request went out (OW-rihanu).
+ * A session missing from `streaming` keeps its watch waiting, since a view
+ * not yet formed looks exactly like one gone. A gap and a close end watches
+ * elsewhere, through `watchAbandon` (OW-jadoda) and `watchClose` (D31 point
+ * 6). An `ended` leaves the watch waiting on a handle nothing re-forms under
+ * (D26), so it is never acted on again; that covers the `ended` a Pi fork
+ * sends under its parent's handle (`#forkOnto`), whose turn the fork's own
+ * watch was never on (OW-koledi).
  */
 export function watchSessions(
 	watch: TurnWatch,
