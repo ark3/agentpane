@@ -317,32 +317,25 @@ status is read before the teardown reads it idle (OW-bukupu)."
 (defvar agentpane--fork-sent)
 
 (defun agentpane--helper-gone (connection)
-  "Tear down CONNECTION, the helper's, which has exited: forget it, and
-leave each transcript buffer attached through it, by a snapshot it sent
-\(`agentpane--attached'), detached, through `agentpane--let-go', a
-helper that crashed over a live server being rare and costing an attach
-\(D25), since `g' previews a buffer not attached (D26).  The teardown
-raises no turn-done indicator: the helper raises each watched turn seen
-streaming as `session/turnEnded' before it exits at its socket's close,
-and nothing at the end of its input, as `agentpane-shutdown' ends it, or
-at a crash (D32 point 6, D25 point 4).
-A buffer made for a create or a fork that no snapshot has filled
-\(`agentpane--made-before') is killed, since none will fill it now.
+  "Tear down CONNECTION, the helper's, which has exited, and forget it.
 Run from its sentinel, behind what the helper wrote last; see
 `agentpane--helper-exited'.  Only this forgets a connection, and no
 helper starts before it has (`agentpane--connection'), so every buffer
-attached through a helper is attached through the one being torn down,
-and CONNECTION is still `agentpane--connection' here.
-The helper exits when its socket closes or its first open fails, so
-this is also how a server that went away reaches the buffers (D25).
+attached through a helper is attached through CONNECTION.  The helper
+exits when its socket closes or its first open fails, so this is also how
+a server that went away reaches the buffers (D25).
 
-It also resets, in every transcript buffer, what a request in flight
-holds there, since a request the helper did not answer before it exited,
-as a crash leaves one, will never be answered (D32 point 7):
-`agentpane--sending', with the text it held back released
-\(`agentpane--release-queued'), and `agentpane--fork-sent'.  A request
-the helper answered at its socket's close has run its FAILED already,
-among what the helper wrote last."
+Each buffer attached through it is detached (`agentpane--let-go'): a
+helper that crashed over a live server is rare, and costs an attach, `g'
+previewing a buffer not attached (D26).  It raises no turn-done
+indicator, the helper having raised what it would before it exited
+\(`session/turnEnded' in src/emacs/protocol.ts).  A buffer made for a
+create or a fork that no snapshot has filled is killed.  In every
+transcript buffer, `agentpane--sending', with the text it held back
+\(`agentpane--release-queued'), and `agentpane--fork-sent' are reset,
+since a request the helper did not answer before it exited, as a crash
+leaves one, never will be (D32 point 7); one it answered at its socket's
+close has run its FAILED already."
   (setq agentpane--connection nil)
   (dolist (buffer (buffer-list))
     (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
@@ -376,8 +369,8 @@ that needs the helper starts a fresh one."
   ;; (`agentpane--helper-exited') ran within `jsonrpc-shutdown''s wait too, so
   ;; the helper is forgotten once this returns (Emacs 31.1, jsonrpc.el
   ;; 1.0.29, measured 2026-09-28 by `agentpane-test-shutdown-ends-the-helper').
-  ;; The helper raises a watched turn only at its socket's close, not at its
-  ;; input's end (D32 point 6), so this raises nothing.
+  ;; The helper raises nothing at its input's end (`session/turnEnded' in
+  ;; src/emacs/protocol.ts), so this raises nothing.
   (when (and agentpane--connection (jsonrpc-running-p agentpane--connection))
     (process-send-eof (jsonrpc--process agentpane--connection))
     (jsonrpc-shutdown agentpane--connection)))
@@ -417,26 +410,24 @@ reply (D26) -- as does one attached through a helper that has exited
 (defconst agentpane--spawn-timeout 90
   "Seconds to wait for a request that may spawn the session's backend:
 `sessions/attach', `sessions/create', `sessions/forkAndPrompt' and a
-`sessions/prompt' not marked `:live', which the helper may send by ref;
-every other command acts on a session already attached, or is refused
-\(src/server/http/socket.ts).  A `sessions/prompt' marked `:live' takes
-this too, though it waits only on a backend already running; whether it
-wants jsonrpc.el's default instead, as `sessions/setModel' takes, has
-not been weighed.
-`sessions/abort' takes it to outlast the server's bound on a Pi stop
-\(`agentpane-abort').
+`sessions/prompt' not marked `:live', which the helper may send by ref
+\(`Commands' in src/shared/protocol.ts).  A `sessions/prompt' marked
+`:live' takes it too, though it waits only on a backend already running;
+whether it wants jsonrpc.el's default instead, as `sessions/setModel'
+takes, has not been weighed.  `sessions/abort' takes it to outlast the
+server's bound on a Pi stop (`agentpane-abort').
 Past this the reply is discarded even if it comes, so a request that ran
 long but succeeded reads as a failure and leaves the buffer unattached
 though its session is live.  jsonrpc.el's default is 10s, and the one
 attach measured took 1.138s, a re-attach on `pi 0.85.1' on 2026-09-16
 \(docs/MANUAL_TESTING.md, OW-jamoyi); no cold spawn has been timed.
-90s outlasts the server's own deadline on a start, 60s
-\(`startTimeoutMs' in src/server/http/session-manager.ts, D35), so a start
-that hangs reaches the buffer as the server's
-`start_timeout' refusal, which leaves nothing running, and not as a
-timeout here, which cannot say whether the server acted.
-`agentpane-new-session''s synchronous create takes it too, where waiting
-blocks Emacs; elsewhere it blocks nothing, and a hung helper costs a
+90s outlasts the server's own 60s deadline on a start (`startTimeoutMs'
+in src/server/http/session-manager.ts, D35), so a start that hangs
+reaches the buffer as the server's `start_timeout' refusal, which leaves
+nothing running, and not as a timeout here, which cannot say whether the
+server acted.
+`agentpane-new-session''s create and `agentpane--attach-now' wait it out
+blocking Emacs; elsewhere it blocks nothing, and a hung helper costs a
 minute and a half before a refused second send is accepted again.")
 
 (defun agentpane--request (method params callback &optional always failed timeout erred)
@@ -539,29 +530,18 @@ non-nil, on the way out."
 
 (defun agentpane--on-notification (conn method params)
   "Handle notification METHOD, with PARAMS, from the helper on CONN.
-Every one but `sessions/changed' is about one session, and goes to the
-transcript buffer whose view it names, if any (`agentpane--notified-buffer').
-A `session/snapshot' attaches that buffer, through CONN, under the
-snapshot's handle; see `agentpane--attach-by'.  Every notification
-gives the buffer its `session' as the session's ref: the ref is an
-attribute any notification may move, and nothing is re-keyed, so a
-rename needs no handling of its own, and the helper sends none
-\(OW-mofuho).  A buffer's name never carries the ref
-\(OW-mikayi), and neither does its composer's.  A notification no buffer
-is found for is dropped.
+`sessions/changed' and `session/turnEnded', which comes for sessions no
+buffer shows as well, are read before any buffer is looked for.  Every
+other goes to the transcript buffer whose view it names, and is dropped
+where none does (`agentpane--notified-buffer').  Each gives the buffer
+its `session' as the session's ref, so a rename, which nothing else says,
+needs no handling of its own (`session' in src/emacs/protocol.ts,
+OW-mofuho); a buffer's name never carries the ref (OW-mikayi), and
+neither does its composer's.
 A `session/node' is recorded rather than drawn; see `agentpane--record'.
 Every other notification but a snapshot, whose redraw discards what is
 recorded, draws what is recorded first, so it finds the buffer as it
-would have had each node been drawn on arrival.
-A `session/detached' says the helper sends nothing more under the handle
-the buffer holds, the server having let go of it or its `seq' having
-gapped, and the buffer lets go of it too; see `agentpane--let-go'.  Its
-`exit', the death report of a backend whose process exited on its own,
-is drawn as the buffer's error line; see `agentpane--error'.
-A `session/forkPoints' is the set the buffer marks and edits from; see
-`agentpane--forkable'.
-A `session/turnEnded' is read before any buffer is looked for, since it
-comes for sessions no buffer shows as well; see `agentpane--turn-ended'."
+would have had each node been drawn on arrival."
   (cond
    ((eq method 'sessions/changed)
     (agentpane--revert-pickers))
@@ -885,24 +865,17 @@ index to the latest node at it, the index that first arrived last; see
 `agentpane--record'.")
 
 (defvar-local agentpane--error nil
-  "The message of the turn error this buffer holds, or nil.
-The buffer's one owner of the error, as `session.error' is the server's
-\(src/server/http/session-manager.ts) and the session's `error' is the
-browser's: a snapshot sets it from its `error', a `session/error' replaces
-it, a `session/errorCleared' clears it, and `agentpane-dismiss-error'
-clears it; a prompt's answer does not, since the server's
-`session/errorCleared' says when admitting the prompt cleared it
-\(OW-lohubo; see `agentpane--send-prompt').  It is drawn as the one
+  "The message of the turn error this buffer holds, or nil, drawn as the one
 `(:error MESSAGE)' node; see `agentpane--hold-error'.
-A snapshot sets it even from a stale error: a snapshot the server
-broadcast before it cleared the error, at `submit' or `clearError' in
-session-manager.ts, may be handled after `agentpane-dismiss-error',
-which clears it before the server has heard.
-The server announces every clear with a `session/errorCleared'
-\(OW-jopifu), and the socket is one ordered stream, so that clear
-always follows the stale snapshot and the line the stale one draws is
-transient; the buffer keeps no send-time state to second-guess a snapshot
-\(OW-sedosu).
+A snapshot sets it from its `error', a `session/error' replaces it, and a
+`session/errorCleared' or `agentpane-dismiss-error' clears it; a prompt's
+answer does not (`agentpane--send-prompt').
+A snapshot sets it even from a stale error, one the server broadcast
+before it cleared the error and handled after `agentpane-dismiss-error'
+cleared it here: the `session/errorCleared' always follows that snapshot
+\(`session/errorCleared' in src/emacs/protocol.ts, OW-jopifu), so the
+line the stale one draws is transient, and the buffer keeps no send-time
+state to second-guess a snapshot (OW-sedosu).
 A `session/detached' carrying `exit' sets it to that death report, with
 no `agentpane--error-id': the server let go of the session and holds no
 error for it, so the buffer alone holds this one.")
@@ -1125,25 +1098,21 @@ laid out ahead shifts."
 (defun agentpane--fit-header (head summary tail)
   "HEAD, SUMMARY and TAIL, in that order, fitted to one screen line.
 Return (LINE CUT TAILP): LINE without the fold marker; CUT non-nil when
-SUMMARY was cut short with `…' to fit, since the summary is what gives
-way; and TAILP non-nil when TAIL is on LINE.  TAIL, a step's meta, may be
-nil, and is left off when it would not fit even beside an ellipsis alone,
-for the caller to draw on a line of its own.
+SUMMARY, which is what gives way, was cut short with `…' to fit; and
+TAILP non-nil when TAIL is on LINE.  TAIL, a step's meta, may be nil, and
+is left off when it would not fit even beside an ellipsis alone, for the
+caller to draw on a line of its own.
 The measure is `string-pixel-width' under this buffer's face remapping,
-since the buffer's prose is proportional and a character count is not a
-width, against `agentpane--window-width' less one character, the column a
-terminal keeps for its continuation glyph.  The fold marker is counted as
-`▸ ' whichever is drawn.  In batch Emacs both measures degrade to
-character cells, which is what the tests fit against.
-A header that fits costs that one measure.  One that does not is cut by
-`agentpane--cut-by-motion' in the window `agentpane--motion-window'
-answers, a motion and a check: three layouts with it.  When that motion
-finds TAIL will not fit, the summary alone is measured, and if it does
-not fit either a second motion and check cut it: five.  A check that
-fails adds the search below it.  Where no window is answered,
-`agentpane--cut-by-search' cuts, a measure per step of a binary search.
-Nothing refits a header when the window changes width except a redraw;
-see `agentpane--refit-on-resize'."
+since the buffer's prose is proportional, against
+`agentpane--window-width' less the column a terminal keeps for its
+continuation glyph.  In batch Emacs both degrade to character cells,
+which is what the tests fit against.
+A header that fits costs that one measure.  One that does not costs three
+layouts through `agentpane--cut-by-motion', or five where TAIL will not
+fit and the summary alone must be cut too, and a check that fails adds a
+search; with no window to move in (`agentpane--motion-window'),
+`agentpane--cut-by-search' costs a measure per step.  Only a redraw
+refits a header; see `agentpane--refit-on-resize'."
   (let* ((width (- (agentpane--window-width) (frame-char-width)))
          (marker (propertize "▸ " 'face 'agentpane-dim))
          (fits (lambda (text)
@@ -1704,18 +1673,16 @@ A node carries its whole message, and drawing it draws all of it again,
 text through shr and every fold header fitted: 2-6ms in batch Emacs for
 nodes of 2,600-8,300 characters, and about twice that in a graphical
 frame (measured 2026-09-25; OW-tujula).  So a node superseded before it
-is drawn is not drawn at all, and a backlog costs one redraw per index
-however many nodes it holds.
-jsonrpc.el parses every message in a chunk of output at once and runs
-each one's handler, in message order, from a ripe timer of its own, and a
-timer activated during a pass of ripe timers waits for the next pass
-whatever its time, so the one started here runs after the rest of the
-chunk: on Emacs 31.1 with jsonrpc.el 1.0.29, six notifications written at
-once reached one process-filter call, and the timer the first one's
-handler started ran after all six (measured 2026-09-25;
-docs/MANUAL_TESTING.md, OW-tujezi).  Redisplay and a pending input event
-can run between the passes, so a command can find a chunk's trailing
-nodes not yet drawn, as it would had they arrived a moment later.
+is drawn is not drawn at all, and a backlog costs one redraw per index.
+The timer runs after the rest of the chunk the node came in: jsonrpc.el
+runs each message's handler, in order, from a ripe timer of its own, and
+a timer started during a pass of ripe timers waits for the next pass; on
+Emacs 31.1 with jsonrpc.el 1.0.29, six notifications written at once
+reached one process-filter call, and the timer the first one's handler
+started ran after all six (measured 2026-09-25; docs/MANUAL_TESTING.md,
+OW-tujezi).  Redisplay and a pending input event can run between the
+passes, so a command can find a chunk's trailing nodes not yet drawn, as
+it would had they arrived a moment later.
 An index recorded for the first time is drawn after those recorded before
 it, as it would have been appended on arrival."
   (unless agentpane--recorded
@@ -2209,10 +2176,6 @@ redrawn: its buffer fills in once it is ready."
   (interactive)
   (unless agentpane--session
     (user-error "Not an agentpane transcript buffer"))
-  ;; A second press while an attach is out sends one the helper joins to it,
-  ;; and the helper refuses one while an edit's fork of the session is out
-  ;; (D32 point 4); one sent with a close in flight the server holds until
-  ;; the close's disposal (D32 point 5).
   (cond
    ;; A message, not a signal: opening a session from the picker refetches
    ;; its buffer, and an error would leave it unshown.
@@ -2433,31 +2396,18 @@ The turn-done watch is the helper's, which says a turn ended by
 (defun agentpane--attach (&optional then failed)
   "Attach this buffer's session through `sessions/attach', then call THEN,
 or FAILED if the attach fails.
-From here on the helper sends this session's notifications, starting with a
-`session/snapshot' that redraws the buffer and is what attaches it
-\(`agentpane--attach-by').  The reply only ends the request: it binds
-nothing, and calls THEN only where that snapshot has attached the buffer
-by then, and FAILED otherwise, saying so, so the caller acts on whether
-the helper feeds the buffer rather than on the reply (OW-rebawa).  A reply
-naming another view landed on the handle that view's buffer holds: the
-helper bound nothing here, and that buffer is shown in this one's windows,
-the echo area naming it once (`agentpane--show-holder', D32 point 2).  The
-helper writes the reply only after the snapshot that answers the attach,
-or once none will (`sessions/attach' in src/emacs/helper.ts), and
-jsonrpc.el may hand the reply on later than it came but never earlier, so
-at the reply the buffer is attached exactly when the helper holds an
-attachment for it.  An attach whose snapshot never reaches the buffer --
-a `seq' gap took it (OW-tifiva), the session went before its snapshot
-came, or the helper died (OW-kifuhi) -- ends not attached.
-
-A second attach while one is out joins it in the helper, which sends the
-server nothing and answers both alike (D32 point 4), so each caller gets
-its own answer and none is sent beside the first.
-
-The helper refuses one, `forking', while an edit's fork of the session
-is out, from any view (D32 point 4), so no attach reaches the server
-after it has let go of a Pi fork's parent inside the fork, where it
-would resume the parent's old branch."
+The `session/snapshot' that answers the attach is what attaches the
+buffer (`agentpane--attach-by').  The reply only ends the request: it
+calls THEN only where that snapshot has attached the buffer by then, and
+FAILED otherwise, saying so, so the caller acts on whether the helper
+feeds the buffer rather than on the reply (OW-rebawa).  The helper writes
+the reply only after that snapshot, or once none will, and jsonrpc.el may
+hand the reply on later than it came but never earlier, so at the reply
+the buffer is attached exactly when the helper holds an attachment for
+it.  A reply naming another view landed on the handle that view's buffer
+holds, and that buffer is shown in this one's windows
+\(`agentpane--show-holder', D32 point 2).  What else the helper answers,
+joins and refuses is `sessions/attach' in src/emacs/protocol.ts."
   (agentpane--request 'sessions/attach
                       (list :session (agentpane--ref agentpane--session)
                             :view agentpane--view)
@@ -2507,18 +2457,14 @@ beside it."
   "Stop the helper sending this buffer's session's notifications.
 The buffer-local `kill-buffer-hook' of a transcript, and what a Pi fork
 does for its parent, which the server leaves detached.
-`sessions/detach' rather than `sessions/close', which closes the session
-on the server and lets go of its agent (`SessionManager.close' in
-src/server/http/session-manager.ts): killing a buffer leaves the session
-running, as closing a browser tab does.
-
-It names the buffer's view, and the helper gives up every attach from that
-view still out and drops the view's binding, whatever this buffer
-believes of either: an attach that failed here -- timed out, or quit in
-`agentpane--attach-now' -- may still have succeeded in the helper, and a
-buffer killed before handling its snapshot left the helper bound to it
-\(`sessions/detach' in src/emacs/protocol.ts).  No other view's binding
-is touched, the helper binding no handle to two views (D32 point 2).
+`sessions/detach' rather than `sessions/close', so that killing a buffer
+leaves the session running, as closing a browser tab does.  The helper
+gives up every attach from the buffer's view still out and drops the
+view's binding, whatever this buffer believes of either: an attach that
+failed here -- timed out, or quit in `agentpane--attach-now' -- may still
+have succeeded in the helper, and a buffer killed before handling its
+snapshot left the helper bound to it (`sessions/detach' in
+src/emacs/protocol.ts).
 
 Never sent without a running helper, so a kill never starts one, as
 `agentpane--connection' would.  An error sending it, such as a pipe that
@@ -2526,11 +2472,10 @@ has just broken, is reported and goes no further, since an error in
 `kill-buffer-hook' stops the kill; not through `with-demoted-errors',
 which lets it through under `debug-on-error'.
 
-The helper drops the turn-done watch on the view's handle at the detach,
-raising nothing, as a closed tab hears nothing more (D32 point 6); a
-buffer attached to the session later takes the same handle while the
-server holds it, where a watch left standing would raise the indicator
-for a turn from elsewhere."
+The helper drops the turn-done watch on the view's handle, raising
+nothing (D32 point 6): a buffer attached to the session later takes the
+same handle while the server holds it, where a watch left standing would
+raise the indicator for a turn from elsewhere."
   (when (and agentpane--connection (jsonrpc-running-p agentpane--connection))
     (condition-case err
         (agentpane--request 'sessions/detach
@@ -2766,10 +2711,7 @@ attach is refused."
                      (set-window-point window (point-max))))))
       ;; No other window moves: it may be reading history, as an edit's send
       ;; shows its fork only in the window the send came from
-      ;; (`agentpane--send-edit').  The helper joins an attach to one still
-      ;; out, and refuses one while an edit's fork of the session is in
-      ;; flight: a Pi fork's parent the server already let go of would be
-      ;; attached again, spawning its old branch (D32 point 4).
+      ;; (`agentpane--send-edit').
       (if (agentpane--attached-p)
           (funcall move)
         (agentpane--attach move)))))
@@ -2813,16 +2755,15 @@ a fork: after an edit, it lands ahead of the draft the edit put aside."
     ;; and an answer dropped at jsonrpc.el's 10s default would lose its
     ;; `:queued' texts, hence `agentpane--spawn-timeout'.
     ;; Where `:queued' lands is decided by what the region holds when the
-    ;; answer arrives, never by which command stopped, as the browser's `stop'
-    ;; in src/client/App.svelte decides it: joined into an open edit it would be
-    ;; sent into the fork, and joined under a prompt in flight it would leave
-    ;; that prompt's text standing at its answer (`agentpane--clear-sent').  So
-    ;; it waits for `agentpane--release-queued', which runs wherever an edit
-    ;; or a prompt ends.  It stays in this buffer even when an edit's send has
-    ;; put the fork in its window, since every transcript has a region of its
-    ;; own where the browser has one composer.  It goes to the region, never a
-    ;; composer: the region is where an edit lives, a transcript may have no
-    ;; composer, and a composer's discard would kill words never typed there.
+    ;; answer arrives, for the browser's reasons (`stop' in
+    ;; src/client/App.svelte; under a prompt in flight here, through
+    ;; `agentpane--clear-sent'), so it waits for `agentpane--release-queued',
+    ;; which runs wherever an edit or a prompt ends.  It stays in this buffer
+    ;; even when an edit's send has put the fork in its window, since every
+    ;; transcript has a region of its own where the browser has one composer.
+    ;; It goes to the region, never a composer: the region is where an edit
+    ;; lives, a transcript may have no composer, and a composer's discard
+    ;; would kill words never typed there.
     (agentpane--request 'sessions/abort
                         (list :session (agentpane--ref agentpane--session)
                               :view agentpane--view)
@@ -2846,11 +2787,10 @@ until it ends."
     (when agentpane--streaming
       (user-error "This session's turn is running; compact it once the turn ends"))
     ;; Every backend refuses a compaction mid-turn (D16).  The buffer writes
-    ;; no mark of its own: from the press to the reply the helper refuses a
-    ;; send and a second compact from this view as `busy' (D32 point 4), as
-    ;; the browser's `compacting' does, and the server's `requesting' and
-    ;; `running' status, written ahead of the reply (D31 point 3), then holds
-    ;; them off in `agentpane--send-prompt'.
+    ;; no mark of its own: the helper refuses a send and a second compact
+    ;; until the reply, and from before it the session's `compaction' holds
+    ;; them off here and in `agentpane--send-prompt' (`sessions/compact' in
+    ;; src/emacs/protocol.ts).
     (agentpane--request 'sessions/compact
                         (list :session (agentpane--ref agentpane--session)
                               :view agentpane--view)
@@ -2871,12 +2811,10 @@ the kill ring.  A close that fails leaves the buffer as it was, and the
 echo area says why."
   (interactive)
   (with-current-buffer (agentpane--transcript)
-    ;; Refused wherever the browser offers no Detach (`detachable' in
-    ;; src/client/App.svelte): not attached, which covers a create still
-    ;; starting (D35 point 3); streaming or compacting, since a kill mid-turn
-    ;; loses the reply, on Claude Code all of it; and a prompt or fork in
-    ;; flight, which the browser's `sending' covers.  `sessions/close', not
-    ;; `agentpane--detach', which only stops the helper's notifications.
+    ;; Refused wherever the browser offers no Detach, for its reasons
+    ;; (`detachable' in src/client/App.svelte), a prompt or fork in flight
+    ;; being its `sending'.  `sessions/close', not `agentpane--detach', which
+    ;; only stops the helper's notifications.
     (cond
      ((not (agentpane--attached-p))
       (user-error "This session is not attached; there is nothing to close"))
@@ -2886,10 +2824,8 @@ echo area says why."
       (user-error "A request to this session is in flight; close it once it answers")))
     ;; Nothing refuses while the close is out, as in the browser (D32 point 5):
     ;; its `session/detached' arrives ahead of the reply (D26, D31 point 3),
-    ;; and a press after it asks for the session back; an attach or a prompt
-    ;; reaching the server mid-disposal waits it out and starts a fresh agent
-    ;; (`SessionManager.attach').  A second close before the
-    ;; `session/detached' is refused `not_attached' (D35 point 3).
+    ;; a press after it asks for the session back, and a second close before
+    ;; it the server refuses `not_attached' (D35 point 3).
     ;; At the reply, let go of the handle closed, never of one attached since,
     ;; then preview as `agentpane-refetch' does, the server letting go of the
     ;; session before its subprocess is gone (D26).  A send while that
@@ -2918,13 +2854,12 @@ dismiss it."
   (with-current-buffer (agentpane--transcript)
     (unless agentpane--error
       (user-error "No turn error to dismiss"))
-    ;; The server holds the error for every later snapshot, so it is told,
-    ;; by `agentpane--error-id', so that a newer one survives even with the
-    ;; same text; the buffer clears it at once, as the browser's banner goes
-    ;; before its dismissal answers.  A death report names no `errorId', and
-    ;; the server has let go of its session.  Any other error in a buffer
-    ;; holding no handle the server may still hold, and only an attached
-    ;; buffer can name it there.
+    ;; The server holds the error for every later snapshot, so it is told, by
+    ;; `agentpane--error-id'; the buffer clears it at once, as the browser's
+    ;; banner goes before its dismissal answers.  A death report names no
+    ;; `errorId' (`agentpane--error').  Any other error in a buffer holding
+    ;; no handle the server may still hold, and only an attached buffer can
+    ;; name it there.
     (cond
      (agentpane--handle
       (agentpane--request 'sessions/dismissError
@@ -2992,13 +2927,10 @@ the request fails, which the echo area reports."
   (interactive
    (progn
      (agentpane--check-gate "model")
-     ;; Attached first, synchronously, as `agentpane-new-session' creates: the
-     ;; server answers `models/list' from a live adapter of the backend, else
-     ;; from an unstarted one, which for Codex or Pi fails.  Read first, the
-     ;; models would be unreadable for a session never prompted whenever no
-     ;; other session of its backend is live, as after a server restart
-     ;; (OW-kisemu, read from `listModels' in src/server/http/app.ts at
-     ;; daf5f52, not run live).
+     ;; Attached first, synchronously, for the reason `agentpane-new-session'
+     ;; creates first: read first, the models would be unreadable for a
+     ;; session never prompted whenever no other session of its backend is
+     ;; live, as after a server restart (OW-kisemu).
      (with-current-buffer (agentpane--transcript)
        (unless (agentpane--attached-p)
          (agentpane--attach-now))
@@ -3128,8 +3060,8 @@ stays attached.  Either way it keeps showing the transcript it showed."
   (interactive)
   ;; Bound to `e' and `f': the edit is the only fork, as in the browser (D33).
   ;; A user message is offered by the fork points the helper last sent
-  ;; (`agentpane--forkable'), by transcript index, never counted: a Codex
-  ;; steer puts two user messages in one turn, which is one point.
+  ;; (`agentpane--forkable'), by transcript index, never counted
+  ;; (`ForkPoint.index' in src/shared/protocol.ts).
   ;; A preview attaches rather than edits: its indices are the stored
   ;; projection's and the fork points the live adapter's, and the two can
   ;; name different messages -- a Pi preview drops the `custom_message'
@@ -3137,25 +3069,15 @@ stays attached.  Either way it keeps showing the transcript it showed."
   ;; (read from `pi 0.87.1''s source), and nothing makes Claude Code's stored
   ;; and live projections agree (OW-gekiki).  Refusing, as the browser offers
   ;; no Edit on a preview, would cost an `agentpane-attach' first.  The
-  ;; attach redraws from the live transcript, the helper writing its reply
-  ;; only after the snapshot that answers it (`sessions/attach' in
-  ;; src/emacs/helper.ts), so the second press confirms the message after
-  ;; that redraw.  This covers a Pi fork's parent, left detached; a second
-  ;; press while the attach is out joins it (D32 point 4).
+  ;; attach redraws from the live transcript before its reply
+  ;; (`agentpane--attach'), so the second press confirms the message after
+  ;; that redraw.  This covers a Pi fork's parent, left detached
+  ;; (`agentpane--send-edit').
   ;; No edit opens while a send is in flight, as the browser's `startEdit'
   ;; refuses: it would displace the region's text for Cancel or the fork to
   ;; put back, and that text may be the very prompt on its way, or an edit
   ;; whose send is still out, which that send ends only while it is the edit
   ;; it sent.
-  ;; A Pi fork moves the parent's live process onto the fork's container and
-  ;; takes the parent's out of the server's table (D24, `SessionManager' in
-  ;; src/server/http/session-manager.ts), so the parent's handle hears only
-  ;; the `ended' that says so (D26), which the helper passes on as a
-  ;; `session/detached' ahead of the send's reply.  At the reply the parent
-  ;; buffer counts itself detached, so `g' previews it rather than attaching
-  ;; its old branch again (`agentpane--forked-away').  The parent keeps its
-  ;; transcript unredrawn on every backend: what the server emits of the
-  ;; fork's goes out under the fork's handle and ref.
   ;; Moved to another message, the draft put back is still the one the first
   ;; press displaced, as in the browser.
   (let* ((at (agentpane--locate))
@@ -3185,10 +3107,9 @@ aside."
   ;; control rather than quietly load an older one.
   ;; The stop goes once the edit is open, so a message that is not forkable
   ;; costs the turn nothing, and is not waited on, since the server's fork
-  ;; stops the session again before it forks (`PiAdapter.fork').  As of
-  ;; ark3/agentpane#47 only Pi's fork points say a fork stops a running turn;
-  ;; Codex and Claude Code keep a parent turn running through a fork.  What
-  ;; the stop takes out of Pi's queue waits as `agentpane-abort' says.
+  ;; stops the session again before it forks (`PiAdapter.fork'), the one
+  ;; adapter whose `forkStopsTurn' is true.  What the stop takes out of Pi's
+  ;; queue waits as `agentpane-abort' says.
   (let ((composer (and (derived-mode-p 'agentpane-composer-mode) (current-buffer))))
     (with-current-buffer (agentpane--transcript)
       (agentpane--draw-recorded (current-buffer))
@@ -3317,59 +3238,46 @@ call SENT, and show the fork, in a buffer of its own, in the window that
 showed this buffer at the send, if it is still live.  The fork's buffer
 is made before the request, not shown, and the request names its view as
 `forkView' (`agentpane--made-before', D32 point 3); the snapshot under
-that view, which the helper writes before the reply, attaches it, as an
-attach's does (D25), and where none came it is left not attached, holding
-the fork's ref from the reply.  The helper arms the fork's turn-done
-watch at the reply, from the level its snapshot left, and none for a
-prompt the backend handled, which says so in the fork's buffer, as
-`agentpane--send-prompt' says it.
+that view attaches it, and where none came it is left not attached,
+holding the fork's ref from the reply.  This buffer keeps its transcript
+unredrawn on every backend: what the server emits of the fork's goes out
+under the fork's handle and ref.
 
 Nothing stops a running turn here: where the backend abandons it at a
 fork, which is Pi (D15), the server's fork stops it (`PiAdapter.fork').
 The request carries `stops' where the edit's hint says the send stops a
-running turn (`agentpane--edit-stops-p'), and the helper drops the
-turn-done watch on this buffer's handle as it goes out, raising nothing,
-since the stop's last status, and a Pi parent's `ended', arrive before
-the reply (D32 point 6).  A Pi fork moves the
-parent's live process onto the fork, so at the reply, or at a refusal
-naming a fork, this buffer detaches, if it still holds the handle the
-send went from (`agentpane--forked-away'); see `agentpane-edit'.
+running turn (`agentpane--edit-stops-p'), so that the helper drops the
+turn-done watch on this buffer's handle as the request goes out, ahead of
+the stop's last status and a Pi parent's `ended' (`sessions/forkAndPrompt'
+in src/emacs/protocol.ts).  A Pi fork moves the parent's live process
+onto the fork, so at the reply, or at a refusal naming a fork, this
+buffer detaches, so that `g' previews it rather than attaching its old
+branch again (`agentpane--forked-away').
 
 A refusal that names a fork, created before its prompt failed, ends the
 edit and moves to the fork, so that sending again prompts that fork
 rather than forking this session a second time (ark3/agentpane#17): this
 buffer's prompt region gets the draft the edit displaced back, as
 `agentpane-cancel-edit' leaves it, and the fork's buffer, shown as above,
-gets the text the region held, the edited text unless it was changed
-meanwhile.  The fork is attached where the refusal names its handle, the
-helper having bound it as above, and not where it names none, the fork
-closed before its prompt was refused.  A fork whose own start failed is
-not named: the server leaves nothing of it (D35 point 6).  A
-refusal that names none, the message no longer a fork point among them,
-created nothing, and leaves the edit standing, the edited text still in
-the prompt region, as the browser's `send' leaves its edit mode.  Any
-failure kills the fork's buffer unless a snapshot has filled it, its
-kill giving the fork's attach up in the helper; a refusal naming a fork
-with no handle then shows a buffer made for the fork's ref.  From
-a buffer holding no handle, one a helper's death or a gap detached, the
-send is refused here, sending nothing and leaving the edit standing:
-the request names the session by its view, which the helper refuses
-`not_attached' where it is bound to no handle (D32 point 1).
+gets the text the region held.  The fork is attached where the refusal
+names its handle, and not where it names none.  A refusal that names no
+fork created nothing, and leaves the edit standing, as the browser's
+`send' leaves its edit mode.  Any failure kills the fork's buffer unless
+a snapshot has filled it; a refusal naming a fork with no handle then
+shows a buffer made for the fork's ref.  From a buffer holding no handle
+the send is refused here, leaving the edit standing, as the helper would
+refuse it `not_attached'.
 
 This buffer counts as sending, `agentpane--sending', until the request
-answers, as the browser's `forkAndSubmit' holds `sending' (OW-kelede),
-and while it does the helper refuses an attach of the session forked,
-from any view (D32 point 4); a kill of this buffer meanwhile kills the
-fork's too (`agentpane--kill-fork-sent').
-The edit's lifetime owns the draft it displaced, not Cancel alone
-\(OW-kijuju, OW-hakeno): ending the edit here hands that draft to
-`agentpane--displaced', and what a stop took out of Pi's queue waits in
-this buffer across the send.  Both are released once the edit has ended
-and SENT has cleared the sent text, so after SENT, the stopped prompts
-ahead of the draft as `agentpane-cancel-edit' leaves them, and never into
-the text the fork is prompted with (`agentpane-abort'); freeing the
-buffer releases the stopped prompts too, for a send whose edit was
-cancelled while it was in flight."
+answers, as the browser's `forkAndSubmit' holds `sending' (OW-kelede); a
+kill of this buffer meanwhile kills the fork's too
+\(`agentpane--kill-fork-sent').  Ending the edit here hands the draft it
+displaced to `agentpane--displaced', as the browser's `editing' hands
+its own on (src/client/App.svelte, OW-hakeno); it and what a stop took
+out of Pi's queue wait until SENT has cleared the sent text, and never
+join the text the fork is prompted with (`agentpane--release-queued').
+Freeing the buffer releases them too, for a send whose edit was cancelled
+while it was in flight."
   (unless agentpane--handle
     (user-error "This session is not attached; attach it to send the edit"))
   (let* ((edit agentpane--editing)
@@ -3430,7 +3338,7 @@ while it still holds HANDLE: the server's `ended' for it, ahead of the
 fork's reply, has usually let go of it already (`agentpane--let-go'), and
 a buffer attached since under another handle holds a binding the helper
 made after the fork, which a detach here would drop while the buffer
-counted itself attached.  See `agentpane-edit'."
+counted itself attached.  See `agentpane--send-edit'."
   (when (and handle
              (equal agentpane--handle handle)
              (equal (plist-get (agentpane--ref agentpane--session) :backend) "pi"))
@@ -3467,15 +3375,15 @@ is left behind.  If you quit while it starts, or it takes too long, its
 buffer is kept, and the echo area says where it is once the session is
 ready."
   (interactive (list (completing-read "Backend: " '("codex" "claude" "pi") nil t)))
-  ;; `sessions/create' starts the agent as it creates (D30) and answers once
-  ;; attached: the buffer is made first, unshown, the request names its view
-  ;; (`agentpane--made-before', D32 point 3), and the snapshot under that
-  ;; view, written before the reply, attaches it.  Synchronous, and the model
-  ;; read after it, as the browser reads it: the server answers `models/list'
-  ;; for Codex or Pi only from a live adapter, failing with "codex adapter not
-  ;; started" before one exists (measured 2026-09-22).  A refusal leaves no
-  ;; session, so its buffer goes; a quit or a timeout keeps it for the
-  ;; snapshot, which says where it is (`agentpane--ready-message').
+  ;; The buffer is made first, unshown, for the create's snapshot to attach
+  ;; (`agentpane--made-before', `sessions/create' in src/emacs/protocol.ts).
+  ;; Synchronous, and the model read after it, as the browser reads it: the
+  ;; server answers `models/list' from a live adapter of the backend, else
+  ;; from an unstarted one, which for Codex or Pi fails, with "codex adapter
+  ;; not started" before one exists (measured 2026-09-22; `listModels' in
+  ;; src/server/http/operations.ts).  A refusal leaves no session, so its
+  ;; buffer goes; a quit or a timeout keeps it for the snapshot, which says
+  ;; where it is (`agentpane--ready-message').
   (let* ((cwd (agentpane--current-cwd))
          (connection (agentpane--connection))
          (buffer (agentpane--made-before backend cwd))
@@ -3710,33 +3618,29 @@ window showed them, until a window does; see `agentpane--turn-ended'.")
 
 (defun agentpane--turn-ended (params)
   "Mark the end of the turn a `session/turnEnded' with PARAMS tells of, and
-raise the turn-done indicator for one this Emacs watched.
-The helper sends it for every live session whose streaming level falls
-from true to false, saying whether this Emacs's prompt was watching that
-turn, as the browser's favicon watch does (src/client/favicon.ts), and
-naming the view bound to its handle, if any (D32 point 6).  What windows
-show, and so what has been seen, is Emacs's alone.
+raise the turn-done indicator for one this Emacs watched.  When the
+helper sends one, and what `watched' says, is `session/turnEnded' in
+src/emacs/protocol.ts; what windows show, and so what has been seen, is
+Emacs's alone.
 
 The session's row is marked as having finished a turn unseen
 \(`agentpane--finished-turns'), watched or not, unless a window shows
 the session (`agentpane--seen-p'), as the browser's sidebar marks every
 live session it holds (`foldSessionTurns' in
-src/client/session-turns.ts); a picker open draws the mark at once, and
-one opened later draws it from the table.
+src/client/session-turns.ts); a picker open draws the mark at once.
 
 A turn watched that ended in a buffer holding the view, where no window
 shows that buffer (`agentpane--shown-p'), raises the indicator, the
 favicon badge's counterpart.  Emacs's own focus says nothing about where
 the user is looking within it, and a buffer shown is where the turn's end
-is read, its mode line's `streaming' going.  The indicator clears when a
-window shows the buffer (`agentpane--clear-seen-turns') or the buffer is
-killed, one buffer at a time, where the favicon's one badge clears at
-once on focus: here each buffer is its own place to look.  It is a red
-dot and the word agentpane in `global-mode-string', which every window's
-mode line draws by default, so it is in view wherever the user is
-working, as a tab's favicon is; its help echo names the buffers.  A
-`message' would be gone at the next keystroke, and a desktop notification
-needs a GUI, which the home server has not."
+is read, its mode line's `streaming' going.  The indicator clears one
+buffer at a time, as a window shows it (`agentpane--clear-seen-turns') or
+it is killed, where the favicon's one badge clears at once on focus: each
+buffer is its own place to look.  It is in `global-mode-string', which
+every window's mode line draws by default, so it is in view wherever the
+user is working, as a tab's favicon is; a `message' would be gone at the
+next keystroke, and a desktop notification needs a GUI, which the home
+server has not."
   (let* ((handle (plist-get params :handle))
          (summary (list :ref (plist-get params :session) :handle handle))
          (buffer (agentpane--view-buffer (plist-get params :view))))
@@ -3929,13 +3833,11 @@ the turn's end cannot be read there."
 
 (defun agentpane--note-turns (summaries)
   "Fold SUMMARIES, a fresh listing of every session, into the finished-turn
-marks `agentpane--turn-ended' makes.  A marked session takes its listed
-summary, whose ref a rename may have moved, and its mark is dropped once
-a window shows it (`agentpane--seen-p'), here at a listing and at the
-next redisplay by `agentpane--clear-seen-turns'.  Marks are kept by
-handle, which a rename never moves (D24): a Pi session can take a new id
-at its first prompt.  The streaming level is the helper's to read
-\(D32 point 6).
+marks `agentpane--turn-ended' makes.  Marks are kept by handle, which a
+rename never moves (D24), and a marked session takes its listed summary,
+whose ref a rename may have moved.  Its mark is dropped once a window
+shows it (`agentpane--seen-p'), here at a listing and at the next
+redisplay by `agentpane--clear-seen-turns'.
 Nothing moves a mark from a fork's parent to the fork, here or in the
 browser: a fork is another session, and a mark belongs to the session
 whose turn it observed.  The fork takes the parent's window
@@ -3943,20 +3845,19 @@ whose turn it observed.  The fork takes the parent's window
 the parent ends off screen and marks the parent, as the browser marks
 it when that turn ends with the fork selected; that turn did end
 unseen, in a buffer the user can still open.
-A handle SUMMARIES does not carry is dropped.  The
-listing is never filtered, as `agentpane--refetch-sessions', the one
-caller, asks for every session, and the server lists every session it
-holds under its handle (`list' in src/server/http/session-manager.ts),
-so such a handle is one the server has let go, and it never mints one
-again (`#handlePrefix' there).  So a mark outlives a helper's death,
-whose next listing carries the same handles, until its session is
-shown, and not a close or the server's restart, the owner having
-accepted that a restart drops it (ark3/agentpane#64).  Its mark is drawn
-on no row, and kept, would be re-checked by `agentpane--clear-seen-turns'
-at every window change for the life of Emacs, never to be seen: at 5
-such marks among 124 buffers a call cost about 310 microseconds, and at
-10 among 504 about 2.4 milliseconds (Emacs 31.1, byte-compiled, batch, measured
-2026-09-27)."
+A handle SUMMARIES does not carry is dropped.  The listing is never
+filtered (`agentpane--refetch-sessions'), and the server lists every
+session it holds under its handle (`list' in
+src/server/http/session-manager.ts), so such a handle is one the server
+has let go, and it never mints one again (`#handlePrefix' there).  So a
+mark outlives a helper's death, whose next listing carries the same
+handles, until its session is shown, and not a close or the server's
+restart, the owner having accepted that a restart drops it
+\(ark3/agentpane#64).  Kept, a mark drawn on no row would be re-checked
+by `agentpane--clear-seen-turns' at every window change for the life of
+Emacs, never to be seen: at 5 such marks among 124 buffers a call cost
+about 310 microseconds, and at 10 among 504 about 2.4 milliseconds
+\(Emacs 31.1, byte-compiled, batch, measured 2026-09-27)."
   (let ((listed (make-hash-table :test #'equal)))
     (dolist (summary summaries)
       (let ((handle (plist-get summary :handle)))
@@ -3975,47 +3876,40 @@ such marks among 124 buffers a call cost about 310 microseconds, and at
   "Drop the finished-turn mark of each session a window now shows, and
 redraw every picker if one was dropped; and drop from the turn-done
 indicator each buffer a window now shows (`agentpane--turn-ended').
-Every mark is checked, whether or not a picker lists its session, and
-this runs wherever a marked session may have come into view, so the mark
-goes at the redisplay that shows its session rather than lingering until
-the next listing.  It runs from one place: the default value of
-`window-state-change-functions', which redisplay runs for each frame
-where, among other changes, a window changed buffer, the frame was
-selected or deselected, or the frame's window state change flag was set.
-A window starting to show a transcript is the first.  A text terminal's
-frame raised by `C-x 5 o' or `select-frame-set-input-focus', which
-changes no window's buffer, is the second (Emacs 31.1, `emacs -nw' in a
-pty, measured 2026-09-27: the raise ran the default values of
-`window-selection-change-functions' and this hook for both frames, and not
-`window-buffer-change-functions'; a `raise-frame' that did not select the
-frame left it under the top one, and ran nothing).  A buffer on screen
-taking a handle or a ref, which can make it the marked session with no
-window changing buffer, is the third: `agentpane--binding-changed',
-watching both variables, sets the flag for each frame showing the buffer,
-whatever code wrote them.
-The hook and the watchers are added by `agentpane--track-seen' wherever
-`session/turnEnded' makes a mark or raises the turn-done indicator, and
-never removed, as both outlive what made them.  The indicator needs no
-watcher, as it names buffers, which a handle or a ref changing does not
-move.
-With no marks a call of the hook costs about half a
-microsecond, and a write to either variable costs about 0.2 microseconds
-more than with no watcher (Emacs 31.1, byte-compiled, measured
-2026-09-27).
+Every mark is checked, whether or not a picker lists its session, so the
+mark goes at the redisplay that shows its session rather than lingering
+until the next listing.
+It runs from one place, the default value of
+`window-state-change-functions' (`agentpane--track-seen'), which
+redisplay runs for each frame where, among other changes, a window
+changed buffer, the frame was selected or deselected, or the frame's
+window state change flag was set.  A window starting to show a
+transcript is the first.  A text terminal's frame raised by `C-x 5 o' or
+`select-frame-set-input-focus', which changes no window's buffer, is the
+second (Emacs 31.1, `emacs -nw' in a pty, measured 2026-09-27: the raise
+ran the default values of `window-selection-change-functions' and this
+hook for both frames, and not `window-buffer-change-functions'; a
+`raise-frame' that did not select the frame left it under the top one,
+and ran nothing).  A buffer on screen taking a handle or a ref, which can
+make it the marked session with no window changing buffer, is the third,
+through `agentpane--binding-changed'.  The indicator needs no watcher, as
+it names buffers, which a handle or a ref changing does not move.
+With no marks a call of the hook costs about half a microsecond, and a
+write to either watched variable about 0.2 microseconds more than with
+no watcher (Emacs 31.1, byte-compiled, measured 2026-09-27).
 A frame that only comes into view is left, as nothing runs for it: a
 text terminal's child frame shown again by `make-frame-visible' after
-`make-frame-invisible', and an iconified GUI frame restored, unless the
-restore also selects it.  For the child frame this was measured (Emacs
-31.1, `emacs -nw' in a pty, 2026-09-27: made visible, it ran none of the
-window change hooks for any frame, `agentpane--seen-p' then read the
-transcript it shows as seen, and the mark stayed).  For the GUI frame it
-is inferred from that, visibility alone running nothing, the home server
-having no GUI; on a text terminal, `iconify-frame' on the top frame and
-`make-frame-visible' on a root frame under it changed neither which frame
-was on top nor what `frame-visible-p' answered, and ran nothing.  Such a
-mark stays until the next listing, which the next start or end of any
-turn asks for, as does a `g' in the picker.  It is late in going, not
-wrong: the turn did end unseen."
+`make-frame-invisible' (Emacs 31.1, `emacs -nw' in a pty, measured
+2026-09-27: it ran none of the window change hooks for any frame, and
+`agentpane--seen-p' then read the transcript it shows as seen), and, by
+inference from that, the home server having no GUI, an iconified GUI
+frame restored without being selected.  On a text terminal,
+`iconify-frame' on the top frame and `make-frame-visible' on a root frame
+under it changed neither which frame was on top nor what
+`frame-visible-p' answered, and ran nothing.  Such a mark stays until the
+next listing, which the next start or end of any turn asks for, as does
+a `g' in the picker: late in going, not wrong, since the turn did end
+unseen."
   (let ((seen (and agentpane--turns-done
                    (seq-filter #'agentpane--shown-p agentpane--turns-done))))
     (when seen
@@ -4109,20 +4003,18 @@ by the exact match on each summary's cwd the browser's sidebar makes over
 its own unfiltered listing (`filteredSummaries' in src/client/App.svelte),
 so that `agentpane--note-turns', which drops the mark of a handle the
 listing lacks, keeps the marks of sessions the picker does not show, as
-the browser's cover every live session whatever its filter.  The server walks
-every session's file whatever the filter, and filters after, so what
-that costs is the size of the reply.
-That was measured and left (Emacs 31.1 with jsonrpc.el 1.0.29, bun 1.4.0,
-measured 2026-09-27; docs/MANUAL_TESTING.md, OW-wazipa): on the home
-server's 369 stored sessions the reply was 116 KB, which the helper
-relayed in 207 to 277 ms, where the server alone answered it in 205 to
-222 ms, and a filtered one in 194 to 229 ms; Emacs parsed it in about
-0.8 ms, and folding it and dropping all but one row, with no session
-held, took 0.24 ms more.
-The server's own `cwd' filter differs in one row: it also lists a live
-session under the cwd it was created with when the file its CLI wrote
-records another (`list' in src/server/http/session-manager.ts), which
-neither client asks it for."
+the browser's cover every live session whatever its filter.  The server's
+own `cwd' filter differs in one row too: it also lists a live session
+under the cwd it was created with when the file its CLI wrote records
+another (`list' in src/server/http/session-manager.ts).
+The server walks every session's file whatever the filter, so the cost
+is the reply's size, measured and left (Emacs 31.1 with jsonrpc.el
+1.0.29, bun 1.4.0, measured 2026-09-27; docs/MANUAL_TESTING.md,
+OW-wazipa): on the home server's 369 stored sessions the reply was 116
+KB, which the helper relayed in 207 to 277 ms, where the server alone
+answered it in 205 to 222 ms, and a filtered one in 194 to 229 ms; Emacs
+parsed it in about 0.8 ms, and folding it and dropping all but one row,
+with no session held, took 0.24 ms more."
   (agentpane--request 'sessions/list nil
                       (lambda (summaries)
                         (let ((summaries (append summaries nil)))
