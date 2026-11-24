@@ -5,27 +5,21 @@
  *
  * Pure, and built from the browser's own render helpers rather than beside
  * them: `buildTranscript` folds tool results into their calls exactly as
- * `Transcript.svelte` does, `toolSummary`/`prettyArgs`/`buildDiff` supply the
- * words and lines the tool cards show, and `toolState` decides running/ok/
- * error the same way. Two callers share one per-entry projection:
+ * `Transcript.svelte` does, and the tool helpers supply the words, lines and
+ * running/ok/error state the browser's tool cards show.
  *
- * - `projectTranscript` maps a whole transcript, for a snapshot or a preview.
- * - `projectUpsert` maps one `upsert` to the one node it replaces, whole. The
- *   subtlety is that an upsert is not always its own node: a tool result folds
- *   into an earlier call's node, so the function takes the transcript so far,
- *   applies the upsert to a copy, and answers with the node that changed --
- *   the call's, for a folded result; its own otherwise. It is `locateUpsert`,
- *   which finds that node without rendering it, then `projectTarget`, which
- *   renders it: the helper holds the first while it throttles (OW-jeruye) and
- *   runs the second only for what it sends.
+ * An upsert is not always its own node: a tool result folds into an earlier
+ * call's. So `locateUpsert` applies the upsert to a copy of the transcript
+ * and finds the node that changed, without rendering it, and `projectTarget`
+ * renders that node; the helper holds the first while it throttles
+ * (OW-jeruye) and runs the second only for what it sends.
  *
- * `streaming` for a tool call is the browser's rule, verbatim from
- * `Transcript.svelte`: the session's own `isStreaming` status, and the entry
- * is the last visible one. Not `stopReason === "pending"` -- Pi marks a live
- * turn that way, but the Claude reducer opens every assistant slot with
- * `"stop"`, so a rule read off the message alone says `ok` for a live Claude
- * call the browser draws as `running`. Both callers therefore take
- * `isStreaming`, the value a `snapshot` or `status` event carries.
+ * `streaming` for a tool call is the browser's rule from `Transcript.svelte`:
+ * the session's own `isStreaming`, and the entry is the last visible one.
+ * Not `stopReason === "pending"` -- Pi marks a live turn that way, but the
+ * Claude reducer opens every assistant slot with `"stop"`, so a rule read off
+ * the message alone says `ok` for a live Claude call the browser draws as
+ * `running`. So every projection takes `isStreaming`.
  */
 
 import type { ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
@@ -158,7 +152,7 @@ function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: bool
 /**
  * What `Message.svelte` draws for a system message (OW-wavini): the same
  * marker, and as plain text what its disclosure holds, in the same order.
- * The decision is `systemView`'s docblock.
+ * The decision is the head of `$client/render/system.ts`.
  */
 function systemPart(view: SystemView): SystemPart {
 	const chunks: string[] = [];
