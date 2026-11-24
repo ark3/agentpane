@@ -12,8 +12,9 @@
  * the *controller* sees a real event sequence in real time. Each command
  * writes what it causes before it answers, as the server does (D31 point 3),
  * and what a turn emits comes after its prompt's answer, in the order
- * `runTurn` gives, which a live Pi turn was observed to produce (OW-27's
- * close note).
+ * `runTurn` gives: the echo and the assistant's placeholder before
+ * `status:true`, an ordering D2 does not rule out and that live-browser
+ * testing caught (OW-27's close note).
  *
  * Deliberately narrow: one session, one turn shape, no rename, and no error
  * path beyond the banners `showBanners` snapshots in place. It has no

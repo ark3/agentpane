@@ -450,9 +450,10 @@ export class CodexAdapter implements BackendAdapter {
 
 	/**
 	 * Take a share of `connection` and start listening on it, for a fork the
-	 * parent has just minted. Synchronous and complete: the share is taken at
-	 * fork time, not at attach, so a `close()` on the parent landing between the
-	 * two cannot kill the child out from under the attach.
+	 * parent has just minted or a thread `start` re-attaches over the live
+	 * app-server holding it. Synchronous and complete: a fork's share is taken
+	 * at fork time, not at attach, so a `close()` on the parent landing between
+	 * the two cannot kill the child out from under the attach.
 	 *
 	 * The seeding order is load-bearing. `CodexReducer.handleNotification`'s
 	 * cross-thread guard short-circuits while its `threadId` is null and its
