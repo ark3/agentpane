@@ -3,152 +3,88 @@
  * a thin call through the api client, on the one socket it holds to the
  * server (D31); the server's events fed through the browser's own reducer,
  * and what the buffer needs pushed back out as notifications. The method
- * names and payloads are `protocol.ts`.
+ * names, payloads and what each request and notification promises are
+ * `protocol.ts`.
  *
  * Testable in node: `main.ts` is only the Bun binding, and everything with
  * behaviour takes its input and output as injectable streams beside
  * `openSocket`, the token and the markdown renderer. `bun run test` runs vitest under
  * node, where `Bun.stdin` is undefined, which is why the split exists.
  *
- * What the reducer decides and what this loop decides. `reduceServerEvent`
- * applies every rule the browser learned -- key a live view by its handle and
- * take a new ref from any event under it (D24), report a `seq` gap, ignore an
- * event for a view it does not hold (D2) -- and answers
- * `{ state, recover, refreshSessions }` and nothing more, so
- * the loop dispatches on the raw event's `type` beside that result. A `seq`
- * gap detaches that one session, as the browser's does (D25 point 5): its
- * view goes, and Emacs is told `session/detached` under its handle where a
- * view was bound to it, and nothing is attached on its behalf (`detachGapped` below).
+ * `reduceServerEvent` applies every rule the browser learned and answers
+ * `{ state, recover, refreshSessions }` and nothing more, so the loop
+ * dispatches on the raw event's `type` beside that result; a `seq` gap it
+ * reports detaches that one session (`detachGapped`).
  *
- * One socket, filtered. It opens as the first request for a known method is
- * read, and stays open until the helper exits; a request read before it
- * has opened goes out behind its `hello`. Not at the helper's start, so
- * that with no server listening the request Emacs had already written is
- * read and answered `unreachable` before the failed open ends the helper
- * (OW-pezelo). Replies and events arrive on it in the order the server
- * wrote them, and a command's reply follows everything it caused (D31
- * point 3): an attach's reply follows the snapshot it broadcast, and a listing's reply
- * is ordered against the `sessions-changed` around it (OW-nufafi). The
- * server sends an opening snapshot for every live session and broadcasts
- * every event to every client, so views Emacs never attached form in the
- * reducer too; notifications go out only for a handle a view of Emacs's is
- * bound to. `sessions/changed` and `session/turnEnded` are unfiltered.
+ * One socket, opened as the first request for a known method is read and
+ * open until the helper exits; a request read before it has opened goes
+ * out behind its `hello`. Not at the helper's start, so that with no server
+ * listening the request Emacs had already written is read and answered
+ * `unreachable` before the failed open ends the helper (OW-pezelo). The
+ * server sends an opening snapshot for every live session and every event
+ * to every client, so views Emacs never attached form in the reducer too;
+ * notifications go out only for a handle a view of Emacs's is bound to,
+ * but `sessions/changed` and `session/turnEnded`.
  *
- * Views (D32 points 1 and 2). Each transcript buffer is a view, named by an
- * integer agentpane-mode mints when it makes the buffer and never changes,
- * and every per-session request names its view. The helper holds each
- * view's binding, the handle it is attached under, in `views`, with at most
- * one view per handle, and sends every per-session notification under the
- * view bound to its handle, carrying `view` beside `handle` (D24,
- * OW-suyinu). It stores no ref: requests carry `session`, and a fresh
- * helper knows no views. A binding is made when the snapshot that answers
- * an attach goes out to the view that sent it, and at nothing else
- * (OW-rebawa): the reply only ends the request (`bind` below). It goes at
- * the view's `sessions/detach`, at the server's `ended` under the handle
- * (`end`), and at a `seq` gap (`detachGapped`), each of which Emacs is told
- * of but the detach; a listing drops nothing. So agentpane-mode sends no
- * handle, and the helper fills it in from the binding for every request on
- * a live session, refusing one from a view bound to nothing `not_attached`,
- * as the server refuses an ended handle (D31 point 9). A binding also
- * changes at an `ended` or a gap, which reach the helper on their own, so a
- * prompt sent while the buffer held a handle carries `live`, and is refused
- * rather than sent by ref once the binding has gone: by ref it would resume
- * the session another client closed (D30). An attach from one view that
- * lands on a handle another view holds binds nothing, and its reply names
- * the holder, for agentpane-mode to show (D32 point 2); no buffers merge.
+ * Views (D32 points 1 and 2). `views` holds each view's binding as
+ * `protocol.ts` describes it. It stores no ref: requests carry `session`,
+ * and a fresh helper knows no views. A binding is made by `bind` and at
+ * nothing else (OW-rebawa), and goes at `detach`, `end` and `detachGapped`;
+ * a listing drops nothing.
  *
  * Requests still out (D32 point 4). The helper holds each view's requests
  * still out, as the browser's controller holds its own (`Outstanding` in
  * `src/client/controller.ts`), and applies the browser's rules and no
- * others. A second send from a view, a prompt or a fork and prompt, is
- * refused `busy` (`sendsOut`), and so is one, or a second compact, while
- * a compact from the view is out (`compactsOut`), as the browser's
- * `compacting` holds Send and Compact from the click to the reply; the
- * server's status reporting the compaction covers the rest, which
- * agentpane-mode reads itself. A second attach from a view joins its first
- * attach, create or by-ref prompt still out, sending the server nothing
- * and answering as that one does (`attachesOut`). A prompt from an unbound
- * view whose attach is out waits for it and goes under the handle it
- * bound, or is refused, never sent by ref. While a fork and prompt is out,
- * an attach or a by-ref prompt of the session it forks is refused
- * `forking`, from any view (`forksOut`), since on Pi it would resume the
- * parent's old branch (D30). agentpane-mode keeps its own record of its
- * send, refusing a second before it reaches this one, as the browser keeps
- * `submit`'s guard beside its own.
+ * others, in `sendsOut`, `compactsOut`, `attachesOut` and `forksOut`.
+ * agentpane-mode keeps its own record of its send, refusing a second before
+ * it reaches this one, as the browser keeps `submit`'s guard beside its own.
  *
- * Turn ends (D32 point 6). The helper hosts the browser's turn-done watch,
- * `watchSubmit`, `watchAbandon`, `watchSessions` and `watchClose` from
- * `src/client/favicon.ts`, with no focus, keyed by handle (`turnWatch`),
- * and the level half of its row marks, `foldSessionTurns` in
+ * Turn ends (D32 point 6). The helper hosts the browser's turn-done watch
+ * from `src/client/favicon.ts`, with no focus, keyed by handle
+ * (`turnWatch`), and the level half of its row marks, `foldSessionTurns` in
  * `src/client/session-turns.ts`, as the last `isStreaming` seen under each
- * live session's handle (`levels`). The selection that function reads and
- * the marks it keeps are agentpane-mode's, which knows what windows show.
- * After every event that changes the reducer's state, a session whose level
- * falls from true to false is sent `session/turnEnded`, whether or not a
- * view of Emacs's is bound to it, `watched` where the watch on its handle
- * ended there (`foldTurns`). A send arms the watch only where none stands,
- * from the session's level as it goes, so a steer into a running turn
- * raises; a server refusal or a `handled` disposition abandons it only
- * where that send armed it, as the browser's `disarmSubmit` does, and an
- * outcome unknown, the connection lost or a throw of the helper's own,
- * never does (`arm`). A prompt from a bound view arms at receipt; one by
- * ref, or one that waited on its view's attach, arms under the handle the
- * attach landed on, which may be another view's (D32 point 2); one the
- * helper refuses itself arms nothing. A fork and prompt arms the fork's
- * handle at its reply, unless handled, and with `stops` abandons the
- * parent's as it goes out, as the browser reads `stopsBeforeFork`.
- * A view's detach, a gap and a close's reply abandon the watch on the
- * handle, raising nothing (D25 point 5); the server's `ended` raises a
- * watch that has seen streaming, which the browser leaves waiting, a
- * difference D32 point 6 records. At a socket close each watch that has
- * seen streaming is raised before the helper exits (D31 point 6); at the
- * input's end, as at `agentpane-shutdown`, nothing is (D25 point 4).
+ * live session's handle (`levels`), both folded after every event that
+ * changes the reducer's state (`foldTurns`). The selection that function
+ * reads and the marks it keeps are agentpane-mode's, which knows what
+ * windows show. A send's watch is taken down only for a refusal, which says
+ * the request reached no backend, or a `handled` disposition, and only where
+ * that send armed it (`arm`); an outcome unknown, the connection lost or a
+ * throw of the helper's own, leaves it, the prompt perhaps admitted
+ * (OW-zedawo).
  *
- * Fork points (D33 point 4). The helper holds what the browser's
- * `refreshForkPoints` (`src/client/controller.ts`) holds for the session
- * on screen, for every bound view: it fetches the view's fork points
- * through `sessions/forkPoints` at each snapshot it sends the view and at
- * each edge of its level, in both directions, the moments the set can
- * move, and sends them as `session/forkPoints` (`refreshForkPoints`
- * below). At most one fetch is out per handle (`forkPointsOut`), as the
- * browser's `forkPointsInFlight`. A failure is quiet and leaves the last
- * set standing, since nobody asked for it. An unbound view, a preview
- * among them, gets none: `sessions/forkPoints` serves only an attached
- * session (OW-sirofi).
+ * Fork points (D33 point 4). `refreshForkPoints` holds, for every bound
+ * view, what the browser's of that name in `src/client/controller.ts` holds
+ * for the session on screen. An unbound view, a preview among them, gets
+ * none: `sessions/forkPoints` serves only an attached session (OW-sirofi).
  *
  * The helper does not reconnect: when the socket closes, or fails to open,
- * the helper exits (D25 point 4, D31 point 6). Agentpane is local-only, so a close means the
- * server went away, and there is nothing to reconnect to. agentpane-mode takes the exit to mean every
- * buffer the helper served is detached, and the next command that needs a
- * helper starts a new one (`agentpane--helper-gone` and
- * `agentpane--connection` in emacs/agentpane.el).
+ * the helper exits (D25 point 4, D31 point 6). Agentpane is local-only, so a
+ * close means the server went away, and there is nothing to reconnect to.
+ * agentpane-mode takes the exit to mean every buffer the helper served is
+ * detached (`agentpane--helper-gone` in emacs/agentpane.el).
  *
  * Nodes are throttled (OW-jeruye). The server sends every streamed token as
  * an `upsert` carrying the whole message so far, about 34 a second on Haiku,
  * and rendering each one's node and Emacs redrawing it made agentpane-mode
- * lag. So an upsert is not rendered as it arrives but held, keyed by the
- * node it replaces -- for a tool result, its call's (`locateUpsert`) -- and
- * a later one for that node takes its place. What is held is rendered and
- * sent `NODE_INTERVAL_MS` after the first of it was held, and before
- * anything else the helper writes, any notification or reply for any
- * session. Each held node goes out in its last state but in the place of its
- * first upsert since the last send, so a new node is never drawn ahead of
- * one that came before it, which Emacs appends in arrival order. Emacs
- * relies on that order too: the status that ends streaming redraws the tail
- * from the node it holds, and a newly appended node redraws the one before
- * it. Every upsert waits, the first after a quiet spell too, which leaves
- * one timer and no second state to keep; a node goes out sooner only when a
- * write forces it. A held node is rendered from the transcript as it stood
- * at its upsert, not from the current state, which a later snapshot may have
- * rewound past it, so it is exactly the node the unthrottled stream would
- * have sent. A detach, an `ended` or a gap drops what is held under its handle, and the
- * end of the input drops everything held, so no timer keeps the process up
- * past it (OW-kofuda). A held node whose rendering throws is skipped and the
- * rest still go out (OW-vejeka): the send runs from the timer, where a throw
- * ends the process (measured on Bun 1.4.0), and from every other write,
- * where it would answer a request that succeeded with an error, or throw
- * out of the socket's handler from `onEvent`; and either way the nodes held
- * behind it would be lost.
+ * lag. So an upsert is held, keyed by the node it replaces -- for a tool
+ * result, its call's (`locateUpsert`) -- and a later one for that node takes
+ * its place. What is held is rendered and sent `NODE_INTERVAL_MS` after the
+ * first of it was held, and before anything else the helper writes. Each
+ * held node goes out in its last state but in the place of its first upsert
+ * since the last send, so a new node is never drawn ahead of one that came
+ * before it, which Emacs appends in arrival order and relies on: the status
+ * that ends streaming redraws the tail from the node it holds, and a newly
+ * appended node redraws the one before it. Every upsert waits, the first
+ * after a quiet spell too, which leaves one timer and no second state. A
+ * held node is rendered from the transcript as it stood at its upsert, since
+ * a later snapshot may have rewound past it. A detach, an `ended` or a gap
+ * drops what is held under its handle, and the end of the input drops
+ * everything held, so no timer keeps the process up past it (OW-kofuda). A
+ * held node whose rendering throws is skipped and the rest still go out
+ * (OW-vejeka): the send runs from the timer, where a throw ends the process
+ * (measured on Bun 1.4.0), and from every other write, where it would answer
+ * a request that succeeded with an error, or throw out of the socket's
+ * handler from `onEvent`, losing the nodes held behind it either way.
  */
 
 import { ApiClientError, ConnectionLostError, createAgentpaneApi, type ApiOptions, type EventHandlers } from "$client/api.ts";
@@ -248,30 +184,16 @@ interface HeldNode {
 
 /**
  * Runs until `input` ends, or the socket closes or fails to open (D25 point
- * 4); then closes the socket and resolves. At a socket close, and not at
- * the input's end, each turn-done watch that has seen streaming is raised
- * first (D31 point 6; see the head of this file).
+ * 4); then closes the socket and resolves, once every request read has been
+ * answered (D32 point 7). At a socket close, and not at the input's end,
+ * each turn-done watch that has seen streaming is raised first (D31 point 6).
  *
- * A request still out when the socket closes is answered before the
- * helper resolves, whichever end closed it, the server going away or this
- * helper closing it as `input` ended (D32 point 7): the api client settles
- * it as the connection lost, which says nothing of whether it reached the
- * backend (D31 point 6), so the answer is an error with the helper's own
- * code `LOST` and no `data`, which agentpane-mode reads as an outcome
- * unknown. At a socket close it goes after the turn-done raises, which
- * `onDisconnect` writes first. Nor does it abandon a turn-done watch its
- * prompt armed: only a refusal carrying the server's `error` code says a
- * request reached no backend (OW-zedawo), and the helper's own -32603 is
- * an outcome unknown too.
- *
- * A request that was never written is refused with a code of the api
- * client's own: `unreachable` for one read before a first open that failed,
- * or after the socket had closed; `frame_too_large` for one over the
- * server's limit; and at a close for a refused token, `unauthorized` for
- * each, with the token file named (`token.ts`), since the server ran
- * nothing. Those replies are chains of microtasks from the rejections, which
- * the api client settles before it reports the close, and are written
- * whenever they land, as the connection lost's are.
+ * A request still out when the socket closes, whichever end closed it, the
+ * api client settles as the connection lost, which says nothing of whether
+ * it reached the backend (D31 point 6); it is answered `LOST`. One never
+ * written is refused with the api client's own code, `unauthorized` naming
+ * the token file (`token.ts`). The wire side of both is `protocol.ts`'s
+ * "Errors".
  */
 export async function runHelper(options: HelperOptions): Promise<void> {
 	const { render } = options;
