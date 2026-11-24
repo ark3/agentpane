@@ -27,6 +27,7 @@ import {
 	UnknownSessionError,
 	idleTimeoutMs,
 	maxSessions,
+	reapFloor,
 	startTimeoutMs,
 } from "./session-manager.ts";
 import type { SessionIndex } from "./deps.ts";
@@ -3214,11 +3215,37 @@ describe("a session's mutations run one at a time (D24, OW-sewewe)", () => {
 });
 
 describe("the idle reaper (D12)", () => {
+	/** Enough sessions, with `REF`, to bring the count to `reapFloor`. */
+	const FILLERS: SessionRef[] = Array.from({ length: reapFloor - 1 }, (_, i) => ({
+		backend: "pi",
+		id: `/home/u/.pi/agent/sessions/filler-${i}.jsonl`,
+	}));
 	let timers: FakeTimers;
 
-	beforeEach(() => {
+	// The fillers stream, so the reaper never closes them and their own clocks
+	// stop at the run out here, leaving each test the clocks it starts.
+	beforeEach(async () => {
 		timers = new FakeTimers();
+		index = new FakeSessionIndex([REF, ...FILLERS].map((ref) => storedSession(ref, WORKSPACE)));
 		sessions = new SessionManager({ index, adapters: { pi }, newId: () => "created", setTimer: timers.set }, broadcaster);
+		for (const ref of FILLERS) (await attachAdapter(ref)).setStreaming(true);
+		timers.runOut();
+		await settle();
+	});
+
+	it("closes nothing below the floor, and checks again an interval later", async () => {
+		await sessions.attach(REF);
+		await closeLive(FILLERS[0] as SessionRef);
+
+		timers.runOut();
+		await settle();
+		expect(sessions.isAttached(REF)).toBe(true);
+		expect(timers.pending).toEqual([idleTimeoutMs]);
+
+		(await attachAdapter(FILLERS[0] as SessionRef)).setStreaming(true);
+		timers.runOut();
+		await settle();
+		expect(sessions.isAttached(REF)).toBe(false);
 	});
 
 	it("closes an idle session, as a close does: ended, then sessions-changed", async () => {
@@ -3317,12 +3344,12 @@ describe("the idle reaper (D12)", () => {
 
 		const attaches = Promise.all([sessions.attach(REF), sessions.attach(REF)]);
 		await settle();
-		expect(pi.created).toHaveLength(1);
+		expect(pi.created).toHaveLength(FILLERS.length + 1);
 
 		release();
 		const [a, b] = await attaches;
 		expect(a.handle).toBe(b.handle);
-		expect(pi.created).toHaveLength(2);
+		expect(pi.created).toHaveLength(FILLERS.length + 2);
 		expect(reaped.disposals).toBe(1);
 		expect(sessions.isAttached(REF)).toBe(true);
 	});

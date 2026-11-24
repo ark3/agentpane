@@ -64,7 +64,7 @@ A subprocess's lifetime is decoupled from any connection: the server, not the cl
 Because the server owns the transcript (D3), reconnect is a *repaint*, not a lifecycle event — the client re-subscribes and receives a fresh snapshot.
 
 The subprocess is *not*, however, meant to be tied to the server's whole lifetime: D12 bounds it by idleness and by a count cap, reclaimed automatically, and supersedes the original "lives as long as the server" rule.
-Since ark3/agentpane#31 a session idle for 15 minutes is closed, and a start past 16 live sessions closes the least recently attached one or is refused `at_capacity`, each a visible close as Detach is (D25).
+Since ark3/agentpane#31 a session idle for 15 minutes is closed while at least 8 agents are running, and a start past 16 live sessions closes the least recently attached one or is refused `at_capacity`, each a visible close as Detach is (D25).
 
 ### Code map
 

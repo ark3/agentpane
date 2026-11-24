@@ -47,8 +47,14 @@ import type { AppDeps, SessionIndex } from "./deps.ts";
  * session the exemption predicate allows, or is refused (`#makeRoom`).
  */
 export const maxSessions = 16;
-/** D12's idle timeout: a session with no attach, prompt, turn end or compaction end for this long is closed (`#active`). */
+/**
+ * D12's idle timeout: a session with no attach, prompt, turn end or compaction
+ * end for this long is closed, but only with at least `reapFloor` agents
+ * running (`#active`).
+ */
 export const idleTimeoutMs = 15 * 60 * 1000;
+/** Half the cap: below it the reaper closes nothing, since there is ample room. */
+export const reapFloor = maxSessions / 2;
 /**
  * D35's deadline on a start: an adapter whose `start()` has not settled this
  * long after it was called is reaped and its start refused with
@@ -604,15 +610,19 @@ export class SessionManager {
 	 * it then (`#evictable`); a spared session's clock starts again at what
 	 * ends its exemption, its turn's end, its compaction's end or its first
 	 * prompt. A compaction's start does not restart it: the session is exempt
-	 * until the end, which does. Only for a container in the table, which the
-	 * timer checks again when it fires.
+	 * until the end, which does. With fewer than `reapFloor` agents running,
+	 * the clock just starts again, so the session is checked an interval later.
+	 * Only for a container in the table, which the timer checks again when it
+	 * fires.
 	 */
 	#active(session: ManagedSession): void {
 		if (this.#sessions.get(session.handle) !== session) return;
 		session.idle?.();
 		session.idle = this.#setTimer(() => {
 			session.idle = undefined;
-			if (this.#sessions.get(session.handle) === session && this.#evictable(session)) void this.#close(session);
+			if (this.#sessions.get(session.handle) !== session || !this.#evictable(session)) return;
+			if (this.#running() < reapFloor) this.#active(session);
+			else void this.#close(session);
 		}, idleTimeoutMs);
 	}
 
@@ -627,6 +637,13 @@ export class SessionManager {
 		return !state.isStreaming && state.compaction === null;
 	}
 
+	/** The agents D12's cap counts: those live, and the startups already holding an adapter. */
+	#running(): number {
+		const live = [...this.#sessions.values()].filter((session) => session.adapter);
+		const starting = [...this.#startups].filter((pending) => pending.adapter);
+		return live.length + starting.length;
+	}
+
 	/**
 	 * D12's cap, checked by a startup about to spawn, whatever asked for it:
 	 * an attach, a create, a prompt naming a ref, or the attach of a fork
@@ -639,9 +656,8 @@ export class SessionManager {
 	 */
 	#makeRoom(): void {
 		for (;;) {
+			if (this.#running() < maxSessions) return;
 			const live = [...this.#sessions.values()].filter((session) => session.adapter);
-			const starting = [...this.#startups].filter((pending) => pending.adapter);
-			if (live.length + starting.length < maxSessions) return;
 			const [coldest] = live.filter((session) => this.#evictable(session)).sort((a, b) => a.attachedAt - b.attachedAt);
 			if (!coldest) throw new AtCapacityError();
 			void this.#close(coldest);
