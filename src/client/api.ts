@@ -1,29 +1,23 @@
 /**
- * The client's one connection to the server: a WebSocket that carries every
- * command and query in, and their replies and every event out, in the order
- * the server wrote them (D31). The browser and the Emacs helper both talk to
- * the server through the `AgentpaneApi` this builds, each adding only its own
- * edge: the browser its reconnect and its token prompt, the helper its exit.
+ * The client's one connection to the server: a WebSocket carrying every
+ * command in, and replies and events out in the order the server wrote them
+ * (D31). The browser and the Emacs helper both use the `AgentpaneApi` this
+ * builds, each adding its own edge: the browser its reconnect and token
+ * prompt, the helper its exit.
  *
- * One function handles what arrives, an event or a reply, in arrival order,
- * and does a frame's work before it returns (D31 point 4): an event reaches
- * `onEvent` there, and the `hello`'s reply `onOpen`. Settling a request's
- * promise is the one thing it defers, and needs nothing more: a reply's
- * handler writes no session state (D28), and may take the state it reads to
- * be at least as new as the reply (D31 point 3), which a later event handled
- * before the continuation only makes truer.
+ * Each arriving frame's work is done before the handler returns (D31 point
+ * 4): an event reaches `onEvent` there, the `hello`'s reply `onOpen`. Only a
+ * request's settling is deferred, which is safe because a reply's handler
+ * writes no session state (D28) and may take the state it reads to be at
+ * least as new as the reply (D31 point 3).
  *
- * How a request ends, beside its reply:
- *
- * - Never written, so it ran nothing: one made with no socket up, or still
- *   waiting for the socket to open when it closed, rejects with
- *   `ApiClientError` code `unreachable`; one whose frame is over the server's
- *   limit, which would have cost the whole socket (D31 point 8), with
- *   `frame_too_large`.
- * - Written and unanswered when the socket closed: `ConnectionLostError`,
- *   its outcome unknown (D31 point 6). At a close for a refused token the
- *   server ran nothing (D31 point 5), so each rejects with `unauthorized`
- *   instead.
+ * Beside its reply, a request ends one of two ways. Never written, so it ran
+ * nothing: `ApiClientError` `unreachable`, with no socket up or still queued
+ * when the socket closed, or `frame_too_large`, over the server's limit,
+ * which would have cost the whole socket (D31 point 8). Written and
+ * unanswered at a close: `ConnectionLostError`, its outcome unknown (D31
+ * point 6). At a close for a refused token every request out rejects
+ * `unauthorized` instead, the server having run nothing (D31 point 5).
  */
 
 import {
